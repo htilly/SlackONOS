@@ -1080,11 +1080,14 @@ function _play(input, channel, userName, state) {
 function _playInt(input, channel) {
   sonos.selectQueue()
   sonos.play().then(result => {
-    logger.info('playInt started playing' + result)
+    _status(channel, state)
+    logger.info('Started playing - ' + result)
   }).catch(err => {
-    logger.error('Error occurred: ' + err)
+    logger.info('Error occurred: ' + err)
   })
 }
+
+
 
 function _stop(input, channel, userName, state) {
   _logUserAction(userName, 'stop');
@@ -1705,53 +1708,76 @@ async function _addplaylist(input, channel, userName) {
 }
 
 
-function _bestof(input, channel, userName) {
+async function _bestof(input, channel, userName) {
   _logUserAction(userName, 'bestof');
-  var [data, message] = spotify.searchSpotifyArtist(input, channel, userName, 1)
-  if (message) {
-    _slackMessage(message, channel)
-  }
-  if (!data) {
-    return
-  }
-  logger.debug('Result in _bestof: ' + JSON.stringify(data, null, 2))
-  var trackNames = []
-  for (var i = 1; i <= data.artists.items.length; i++) {
-    var spid = data.artists.items[0].id
-    var trackName = data.artists.items[i - 1].name
-    trackNames.push(trackName)
-  }
-  logger.info('_bestof spid:' + spid)
-  logger.info('_bestof trackName:' + trackName)
 
-  sonos.getCurrentState().then(state => {
-    logger.info('Got current state: ' + state)
-
-    if (state === 'stopped') {
-      _flushInt(input, channel)
-      _addToSpotifyArtist(userName, trackName, spid, channel)
-      logger.info('Adding artist:' + trackName)
-      setTimeout(() => _playInt('play', channel), 1000)
-    } else if (state === 'playing') {
-      // Add the track to playlist...
-      _addToSpotifyArtist(userName, trackName, spid, channel)
-    } else if (state === 'paused') {
-      _addToSpotifyArtist(userName, trackName, spid, channel, function () {
-        if (channel === global.adminChannel) {
-          _slackMessage('Sonos is currently PAUSED. Type `resume` to start playing...', channel)
-        }
-      })
-    } else if (state === 'transitioning') {
-      _slackMessage("Sonos says it is 'transitioning'. We've got no idea what that means either...", channel)
-    } else if (state === 'no_media') {
-      _slackMessage("Sonos reports 'no media'. Any idea what that means?", channel)
-    } else {
-      _slackMessage("Sonos reports its state as '" + state + "'. Any idea what that means? I've got nothing.", channel)
+  try {
+    const [data, message] = await spotify.searchSpotifyArtist(input, channel, userName, 1);
+    if (message) {
+      _slackMessage(message, channel);
+      return;
     }
-  }).catch(err => {
-    logger.error('Error occurred ' + err)
-  })
+    if (!data) {
+      logger.warn('No data returned from Spotify search.');
+      return;
+    }
+
+    logger.debug('Result in _bestof: ' + JSON.stringify(data, null, 2));
+
+    if (!data.artists || !data.artists.items || data.artists.items.length === 0) {
+      _slackMessage('No artists found matching the input.', channel);
+      return;
+    }
+
+    const spid = data.artists.items[0].id;
+    const trackName = data.artists.items[0].name;
+
+    logger.info('_bestof spid: ' + spid);
+    logger.info('_bestof trackName: ' + trackName);
+
+    const state = await sonos.getCurrentState();
+    logger.info('Got current Sonos state: ' + state);
+
+    switch (state) {
+      case 'stopped':
+        logger.info('Sonos is stopped. Flushing queue and adding new artist.');
+        await _flushInt(input, channel);
+        logger.info('Queue flushed successfully.');
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for 2 seconds
+        await _addToSpotifyArtist(userName, trackName, spid, channel);
+        logger.info('Artist added successfully. Starting playback...');
+        setTimeout(() => _playInt('play', channel), 2000); // Slight delay to ensure queue updates
+        break;
+      case 'playing':
+        logger.info('Sonos is playing. Adding artist to the current queue.');
+        await _addToSpotifyArtist(userName, trackName, spid, channel);
+        break;
+      case 'paused':
+        logger.info('Sonos is paused. Adding artist to queue.');
+        await _addToSpotifyArtist(userName, trackName, spid, channel);
+        if (channel === global.adminChannel) {
+          _slackMessage('Sonos is currently paused. Type `resume` to start playing.', channel);
+        }
+        break;
+      default:
+        logger.warn(`Sonos state '${state}' is unknown or unsupported.`);
+        _slackMessage(`Sonos state '${state}' is not supported. Unable to process the request.`, channel);
+        break;
+    }
+  } catch (err) {
+    if (err.message.includes('upnp: statusCode 500')) {
+      logger.error('UPnP Error in _bestof function: ' + err.message);
+      _slackMessage('Failed to process the request due to a UPnP error. Please try again later.', channel);
+    } else {
+      logger.error('Error in _bestof function: ' + err.message);
+      _slackMessage('Failed to process the request. Please try again later.', channel);
+    }
+  }
 }
+
+
+
+
 
 function _status(channel, state) {
   sonos.getCurrentState().then(state => {
