@@ -498,39 +498,40 @@ async function _checkUser(userId) {
 
 function _getVolume(channel) {
   sonos.getVolume().then(vol => {
-    logger.info('The volume is: ' + vol)
-    _slackMessage('Currently blasting at ' + vol + ' dB _(ddB)_', channel)
+    logger.info('The volume is: ' + vol);
+    _slackMessage('Currently blasting at ' + vol + ' dB _(ddB)_', channel);
   }).catch(err => {
-    logger.error('Error occurred: ' + err)
+    logger.error('Error occurred: ' + err);
   });
 }
 
 function _setVolume(input, channel, userName) {
   _logUserAction(userName, 'setVolume');
   if (channel !== global.adminChannel) {
-    return
+    return;
   }
 
-  var vol = input[1]
+  const vol = Number(input[1]);
 
   if (isNaN(vol)) {
-    _slackMessage('Nope.', channel)
-  } else {
-    vol = Number(vol)
-    logger.info('Volume is: ' + vol)
-    if (vol > maxVolume) {
-      _slackMessage("That's a bit extreme, " + userName + '... lower please.', channel)
-    } else {
-      setTimeout(() => {
-        sonos.setVolume(vol).then(vol => {
-          logger.info('The volume is: ' + vol)
-          _getVolume(channel) // Add this line
-        }).catch(err => {
-          logger.error('Error occurred: ' + err)
-        })
-      }, 1000); // Add this line
-    }
+    _slackMessage('Nope.', channel);
+    return;
   }
+
+  logger.info('Volume is: ' + vol);
+  if (vol > maxVolume) {
+    _slackMessage("That's a bit extreme, " + userName + '... lower please.', channel);
+    return;
+  }
+
+  setTimeout(() => {
+    sonos.setVolume(vol).then(() => {
+      logger.info('The volume is set to: ' + vol);
+      _getVolume(channel);
+    }).catch(err => {
+      logger.error('Error occurred while setting volume: ' + err);
+    });
+  }, 1000);
 }
 
 
