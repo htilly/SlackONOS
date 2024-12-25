@@ -16,5 +16,5 @@
 `blacklist` : show users on blacklist
 `blacklist add @username` : add `@username` to the blacklist
 `blacklist del @username` : remove `@username` from the blacklist
-`stats` : show statisics for users and commands
+`stats` : show statisics for users and commands. Add username as input for specific users stats.
  ===  ===  === SlackONOS@GitHub ===  ===  ===
