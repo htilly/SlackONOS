@@ -444,7 +444,7 @@ function processInput(text, channel, userName) {
         _moveTrackAdmin(input, channel, userName)
         break
       case 'stats':
-        _stats(channel, userName)
+        _stats(input, channel, userName)
         break
       default:
     }
@@ -2302,12 +2302,15 @@ function _purgeHalfQueue(input, channel) {
   })
 }
 
-//Show stats
-async function _stats(channel) {
+async function _stats(input, channel, userName) {
   let userActions = {};
+
+  logger.info('Starting _stats function');
+  logger.info(`Input received: ${JSON.stringify(input)}, Channel: ${channel}, UserName: ${userName}`);
 
   // Ensure the file exists
   if (!fs.existsSync(userActionsFile)) {
+    logger.warn('userActionsFile does not exist.');
     _slackMessage('No statistics available.', channel);
     return;
   }
@@ -2315,14 +2318,19 @@ async function _stats(channel) {
   // Read existing user actions from the file
   try {
     const data = fs.readFileSync(userActionsFile, 'utf8');
+    logger.info('Successfully read userActionsFile.');
     userActions = JSON.parse(data);
+    logger.info(`Loaded userActions: ${JSON.stringify(userActions, null, 2)}`);
   } catch (err) {
     logger.error('Error reading or parsing userActions.json: ' + err);
     _slackMessage('Error reading statistics.', channel);
     return;
   }
 
-  // Format the data into Slack's block kit format
+  const userId = input[1] ? input[1].replace(/[<@>]/g, '') : null;
+  const userKey = input[1]; // Use the full "<@U03JJ5LN4>" format from the input
+  logger.info(`Extracted userId: ${userId}, userKey: ${userKey}`);
+
   const blocks = [
     {
       type: 'section',
@@ -2336,46 +2344,86 @@ async function _stats(channel) {
     }
   ];
 
-  for (const userName in userActions) {
-    const userStats = userActions[userName];
-    const fields = [];
-
-    for (const action in userStats) {
-      fields.push({
-        type: 'mrkdwn',
-        text: `*${action}*: ${userStats[action]}`
-      });
+  if (userKey) {
+    // Show stats for the specific user
+    const userStats = userActions[userKey]; // Use userKey which matches the stored key format
+    logger.info(`Found stats for userKey: ${userKey}: ${JSON.stringify(userStats)}`);
+    if (!userStats) {
+      _slackMessage(`No statistics available for user: ${userKey}`, channel);
+      return;
     }
+
+    const fields = Object.entries(userStats)
+      .slice(0, 10) // Limit to the first 10 entries
+      .map(([action, count]) => ({
+        type: 'mrkdwn',
+        text: `*${action}*: ${count}`
+      }));
 
     blocks.push({
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*${userName}*`
+        text: `*${userKey}*`
       },
       fields: fields
     });
+  } else {
+    // Show stats for the top 10 users
+    logger.info('Fetching stats for the top 10 users.');
+    const topUsers = Object.entries(userActions)
+      .sort(([, a], [, b]) => Object.values(b).reduce((sum, count) => sum + count, 0) - Object.values(a).reduce((sum, count) => sum + count, 0))
+      .slice(0, 10);
 
-    blocks.push({
-      type: 'divider'
+    logger.info(`Top 10 users: ${JSON.stringify(topUsers)}`);
+
+    topUsers.forEach(([userKey, userStats]) => {
+      const fields = Object.entries(userStats)
+        .slice(0, 10) // Limit to the first 10 entries
+        .map(([action, count]) => ({
+          type: 'mrkdwn',
+          text: `*${action}*: ${count}`
+        }));
+
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*${userKey}*`
+        },
+        fields: fields
+      });
+      blocks.push({
+        type: 'divider'
+      });
     });
+  }
+
+  // Validate the channel ID
+  if (!channel || typeof channel !== 'string') {
+    logger.error('Invalid channel ID');
+    _slackMessage('Error: Invalid channel ID.', channel);
+    return;
   }
 
   // Send the formatted message to the specified Slack channel
   const message = {
     channel: channel,
+    text: 'User Statistics', // Add text argument
     blocks: blocks
   };
 
   try {
     await web.chat.postMessage(message);
+    logger.info('Successfully sent statistics message.');
   } catch (err) {
     logger.error('Error sending statistics message: ' + err);
     _slackMessage('Error sending statistics message.', channel);
   }
 }
 
-// Function to log user actions
+
+
 function _logUserAction(userName, action) {
   let userActions = {};
 
@@ -2415,7 +2463,6 @@ function _logUserAction(userName, action) {
 
   logger.info(`Logged action: ${action} for user: ${userName}`);
 }
-
 
 
 
