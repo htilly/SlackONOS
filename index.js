@@ -1057,10 +1057,22 @@ function _help(input, channel) {
   const adminMessage = fs.readFileSync(helpTextPathAdmin, 'utf8');
   let message = fs.readFileSync(helpTextPath, 'utf8');
 
+  // Read configuration values
+  const gongLimit = config.get('gongLimit');
+  const voteLimit = config.get('voteLimit');
+  const flushVoteLimit = config.get('flushVoteLimit');
+  const maxVolume = config.get('maxVolume');
+
+  // Replace placeholders in help text
+  message = message.replace(/{{gongLimit}}/g, gongLimit);
+  message = message.replace(/{{voteLimit}}/g, voteLimit);
+  message = message.replace(/{{flushVoteLimit}}/g, flushVoteLimit);
+  message = message.replace(/{{maxVolume}}/g, maxVolume);
+
   if (channel === global.adminChannel) {
     message += '\n' + adminMessage;
   }
-  _slackMessage(message, channel)
+  _slackMessage(message, channel);
 }
 
 function _play(input, channel, userName, state) {
@@ -1788,49 +1800,19 @@ function _status(channel, state) {
   })
 }
 
-// Ensure the _debug function is defined
+
+
 async function _debug(channel, userName) {
   _logUserAction(userName, 'debug');
   var url = 'http://' + sonosIp + ':1400/xml/device_description.xml';
 
-  // Function to get the IP address of the machine (Docker container if inside Docker)
-  function getIPAddress() {
-    const interfaces = os.networkInterfaces();
-    for (const name of Object.keys(interfaces)) {
-      for (const iface of interfaces[name]) {
-        if (iface.family === 'IPv4' && !iface.internal) {
-          return iface.address;
-        }
-      }
+  function maskSensitiveInfo(value) {
+    if (typeof value === 'string' && value.length > 6) {
+      return value.slice(0, 3) + '--xxx-MASKED-xxx--' + value.slice(-3);
     }
-    return 'IP address not found';
+    return value;
   }
 
-  // Improved function to check if running inside Docker
-  function isRunningInDocker() {
-    try {
-      // Check if running in Docker by inspecting /proc/1/cgroup and the presence of .dockerenv
-      const cgroup = fs.readFileSync('/proc/1/cgroup', 'utf8');
-      if (cgroup.includes('docker')) {
-        return true;
-      }
-    } catch (err) {
-      // Ignore errors, continue to next check
-    }
-
-    try {
-      // Check if .dockerenv file exists (another indication of being inside Docker)
-      if (fs.existsSync('/.dockerenv')) {
-        return true;
-      }
-    } catch (err) {
-      // Ignore errors
-    }
-
-    return false; // Default to not inside Docker if all checks fail
-  }
-
-  // Function to get the host's IP address if running inside Docker
   function getHostIPAddress() {
     try {
       const result = fs.readFileSync('/proc/net/route', 'utf8');
@@ -1853,7 +1835,6 @@ async function _debug(channel, userName) {
     }
   }
 
-  // Helper function to convert hex IP from /proc/net/route to a readable IP address
   function hexToIp(hex) {
     return [
       parseInt(hex.slice(6, 8), 16),
@@ -1863,25 +1844,36 @@ async function _debug(channel, userName) {
     ].join('.');
   }
 
-  const isDocker = isRunningInDocker();  // Improved check for Docker environment
+  const isRunningInDocker = () => {
+    try {
+      const cgroup = fs.readFileSync('/proc/1/cgroup', 'utf8');
+      if (cgroup.includes('docker')) {
+        return true;
+      }
+    } catch (err) {}
+
+    try {
+      if (fs.existsSync('/.dockerenv')) {
+        return true;
+      }
+    } catch (err) {}
+
+    return false;
+  };
+
+  const isDocker = isRunningInDocker();
 
   if (isDocker) {
-    // Check if IP is defined in the environment
-    // Get the IP address from the configuration
-    console.log('IP Address from config:', ipAddress);
     if (!ipAddress) {
-      // Log error and set a default value for IP
       const warningMessage = 'Make sure you have configured IP in the config.json';
       logger.error(warningMessage);
-      ipAddress = warningMessage; // Set the value of IP to the warning message
+      ipAddress = warningMessage;
     }
   } else {
-    ipAddress = getIPAddress();  // IP of the machine if not in Docker
+    ipAddress = getIPAddress();
   }
 
-  const dockerIPAddress = isDocker ? getHostIPAddress() : null;  // Host IP if running inside Docker
-
-  // Define nodeVersion outside the if block
+  const dockerIPAddress = isDocker ? getHostIPAddress() : null;
   const nodeVersion = JSON.stringify(process.versions);
 
   xmlToJson(url, async function (err, data) {
@@ -1890,86 +1882,35 @@ async function _debug(channel, userName) {
       logger.error('Error occurred ' + err);
       sonosInfo = 'SONOS device is offline or not responding.';
     } else {
-      logger.info('BuildNumber of SlackONOS: ', buildNumber);
-      logger.info('Platform: ', process.platform);
-      logger.info('Node version: ', process.version);
-      logger.info('Node dependencies: ', process.versions);
-
-      // Log Sonos information
-      logger.info(data.root.device[0].modelDescription);
-      logger.info(data.root.device[0].softwareVersion);
-      logger.info(data.root.device[0].displayName);
-      logger.info(data.root.device[0].hardwareVersion);
-      logger.info(data.root.device[0].apiVersion);
-      logger.info(data.root.device[0].roomName);
-      logger.info(data.root.device[0].friendlyName);
-      logger.info(data.root.device[0].modelNumber);
-      logger.info(data.root.device[0].serialNum);
-      logger.info(data.root.device[0].MACAddress);
-
       sonosInfo =
         '\n*Sonos Info*' +
-        '\nFriendly Name:  ' + (data.root.device[0].friendlyName) +
-        '\nRoom Name:  ' + (data.root.device[0].roomName) +
-        '\nDisplay Name:  ' + (data.root.device[0].displayName) +
-        '\nModel Description:  ' + (data.root.device[0].modelDescription) +
-        '\nModelNumber:  ' + (data.root.device[0].modelNumber) +
-        '\nSerial Number:  ' + (data.root.device[0].serialNum) +
-        '\nMAC Address:  ' + (data.root.device[0].MACAddress) +
-        '\nSW Version:  ' + (data.root.device[0].softwareVersion) +
-        '\nHW Version:  ' + (data.root.device[0].hardwareVersion) +
-        '\nAPI Version:  ' + (data.root.device[0].apiVersion);
+        '\nFriendly Name:  ' + data.root.device[0].friendlyName;
     }
 
-    // Get memory usage
     const memoryUsage = process.memoryUsage();
-    const formattedMemoryUsage = `
-*Memory Usage*:
-  RSS: ${Math.round(memoryUsage.rss / 1024 / 1024)} MB
-  Heap Total: ${Math.round(memoryUsage.heapTotal / 1024 / 1024)} MB
-  Heap Used: ${Math.round(memoryUsage.heapUsed / 1024 / 1024)} MB
-  External: ${Math.round(memoryUsage.external / 1024 / 1024)} MB
-  Array Buffers: ${Math.round(memoryUsage.arrayBuffers / 1024 / 1024)} MB
-`;
+    const formattedMemoryUsage = `\n*Memory Usage*:\n  RSS: ${Math.round(memoryUsage.rss / 1024 / 1024)} MB`;
 
-    // Get uptime
-    const uptime = process.uptime();
-    const formattedUptime = `
-*Uptime*: ${Math.floor(uptime / 60)} minutes ${Math.floor(uptime % 60)} seconds
-`;
+    const envVars = `\n*Environment Variables*:\n  NODE_VERSION: ${process.env.NODE_VERSION || 'not set'}\n  HOSTNAME: ${process.env.HOSTNAME || 'not set'}\n  YARN_VERSION: ${process.env.YARN_VERSION || 'not set'}`;
 
-    // Get network interfaces
-    const networkInterfaces = os.networkInterfaces();
-    const formattedNetworkInterfaces = Object.entries(networkInterfaces).map(([name, addresses]) => {
-      return addresses.map(addr => `${name}: ${addr.address}`).join('\n');
-    }).join('\n');
+    const sensitiveKeys = ['token', 'spotifyClientId', 'spotifyClientSecret', 'openaiApiKey'];
+    const configKeys = Object.keys(config.stores.file.store);
+    const configValues = configKeys
+      .map(key => {
+        const value = config.get(key);
+        return sensitiveKeys.includes(key) ? `${key}: ${maskSensitiveInfo(value)}` : `${key}: ${value}`;
+      })
+      .join('\n');
 
-    // Get disk usage (example for Unix-like systems)
-    const diskUsage = execSync('df -h /').toString();
-    const formattedDiskUsage = `
-*Disk Usage*:
-${diskUsage}
-`;
-
-
-
-    // Read configuration values only from config.json
-    const configKeys = Object.keys(config.stores.file.store); // Access only the file-based store
-    const configValues = configKeys.map(key => `${key}: ${config.get(key)}`).join('\n');
-
-    // Debug log for verification
-    logger.info('DEBUG -- Config values from config.json: ' + configValues);
-
-    // Ensure environment variables are handled separately
-    const envVars = `
-*Environment Variables*:
-  NODE_VERSION: ${process.env.NODE_VERSION || 'not set'}
-  HOSTNAME: ${process.env.HOSTNAME || 'not set'}
-  YARN_VERSION: ${process.env.YARN_VERSION || 'not set'}
-  HOME: ${process.env.HOME || 'not set'}
-  PATH: ${process.env.PATH}
-  PWD: ${process.env.PWD}
-`;
+    // Identify missing configuration values
+    const defaultConfig = config.stores.defaults.store;
+    const missingConfigValues = Object.keys(defaultConfig)
+    .filter(key => !configKeys.includes(key))
+    .map(key => {
+      const value = defaultConfig[key].value || defaultConfig[key];
+      return value === 'literal' ? null : `${key}: ${value}`;
+    })
+    .filter(line => line !== null) // Remove excluded entries
+    .join('\n');
 
     const blocks = [
       {
@@ -2016,37 +1957,7 @@ ${diskUsage}
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: formattedUptime
-        }
-      },
-      {
-        type: 'divider'
-      },
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
           text: envVars
-        }
-      },
-      {
-        type: 'divider'
-      },
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: '*Network Interfaces*\n' + formattedNetworkInterfaces
-        }
-      },
-      {
-        type: 'divider'
-      },
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: formattedDiskUsage
         }
       },
       {
@@ -2058,18 +1969,23 @@ ${diskUsage}
           type: 'mrkdwn',
           text: '*Configuration Values*\n' + configValues
         }
-      },
-      {
-        type: 'divider'
-      },
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: envVars
-        }
       }
     ];
+
+    if (missingConfigValues) {
+      blocks.push(
+        {
+          type: 'divider'
+        },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: '*Missing Configuration Values*\n' + missingConfigValues
+          }
+        }
+      );
+    }
 
     const message = {
       channel: channel,
@@ -2084,6 +2000,7 @@ ${diskUsage}
     }
   });
 }
+
 
 
 

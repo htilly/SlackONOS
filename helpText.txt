@@ -2,7 +2,7 @@ Current commands!
  ===  ===  ===  ===  ===  ===  === 
 `add` *text* : add song to the queue and start playing if idle. Will start with a fresh queue.
 `addalbum` *text* : add an album to the queue and start playing if idle. Will start with a fresh queue.
-`bestof` : *text* : add topp 10 tracks by the artist
+`bestof` : *text* : add top 10 tracks by the artist
 `status` : show current status of Sonos
 `current` : list current track
 `search` *text* : search for a track, does NOT add it to the queue
@@ -12,10 +12,10 @@ Current commands!
 `append` *text* : append a song to the previous playlist and start playing the same list again.
 `vote` *number* : vote for a track to be played next!!! :rocket: 
 `votecheck` : how many votes there are currently, as well as who has voted.
-`gong` : current track is bad! *5* gongs will skip the track
+`gong` : current track is bad! *{{gongLimit}}* gongs will skip the track
 `gongcheck` : how many gong votes there are currently, as well as who has gonged.
-`voteimmune` *number* : vote to make the current track immune to gong. *3* votes will make it immune
-`flushvote` : vote to flush the queue. *4* votes will flush the queue :toilet: 
+`voteimmune` *number* : vote to make the current track immune to gong. *{{voteLimit}}* votes will make it immune
+`flushvote` : vote to flush the queue. *{{flushVoteLimit}}* votes will flush the queue :toilet: 
 `upnext` : show the next track to be played
 `volume` : view current volume
 `list` : list current queue
