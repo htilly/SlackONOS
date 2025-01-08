@@ -1800,6 +1800,23 @@ function _status(channel, state) {
   })
 }
 
+function getIPAddress() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return 'IP address not found';
+}
+
+
+
+
+
+
 
 
 async function _debug(channel, userName) {
@@ -1811,28 +1828,6 @@ async function _debug(channel, userName) {
       return value.slice(0, 3) + '--xxx-MASKED-xxx--' + value.slice(-3);
     }
     return value;
-  }
-
-  function getHostIPAddress() {
-    try {
-      const result = fs.readFileSync('/proc/net/route', 'utf8');
-      const lines = result.split('\n');
-
-      for (const line of lines) {
-        const columns = line.trim().split(/\s+/);
-
-        // Look for the default route (Destination is 00000000)
-        if (columns[1] === '00000000') {
-          const hexIp = columns[2];  // Gateway IP is in the third column
-          const gatewayIp = hexToIp(hexIp);
-          return gatewayIp;
-        }
-      }
-
-      return 'Host IP address not found';
-    } catch (err) {
-      return 'Host IP address not found';
-    }
   }
 
   function hexToIp(hex) {
@@ -1862,30 +1857,37 @@ async function _debug(channel, userName) {
   };
 
   const isDocker = isRunningInDocker();
+  const dockerStatus = isDocker ? 'Running in Docker' : 'Not running in Docker';
 
-  if (isDocker) {
-    if (!ipAddress) {
-      const warningMessage = 'Make sure you have configured IP in the config.json';
-      logger.error(warningMessage);
-      ipAddress = warningMessage;
-    }
-  } else {
-    ipAddress = getIPAddress();
-  }
+  let ipAddress = 'IP address not found';
 
-  const dockerIPAddress = isDocker ? getHostIPAddress() : null;
+  ipAddress = getIPAddress();
+
   const nodeVersion = JSON.stringify(process.versions);
 
   xmlToJson(url, async function (err, data) {
-    let sonosInfo = '';
     if (err) {
       logger.error('Error occurred ' + err);
-      sonosInfo = 'SONOS device is offline or not responding.';
-    } else {
-      sonosInfo =
-        '\n*Sonos Info*' +
-        '\nFriendly Name:  ' + data.root.device[0].friendlyName;
+      _slackMessage('SONOS device is offline or not responding.', channel);
+      return;
     }
+
+    // Log the full XML response for debugging
+   // logger.info('Full XML response: ' + JSON.stringify(data, null, 2));
+
+    const device = data.root.device[0];
+    const sonosInfo =
+      '\n*Sonos Info*' +
+      `\nFriendly Name:  ${device.friendlyName[0]}` +
+      `\nRoom Name:  ${device.roomName[0]}` +
+      `\nDisplay Name:  ${device.displayName[0]}` +
+      `\nModel Description:  ${device.modelDescription[0]}` +
+      `\nModelNumber:  ${device.modelNumber[0]}` +
+      `\nSerial Number:  ${device.serialNum[0]}` +
+      `\nMAC Address:  ${device.MACAddress[0] || 'undefined'}` +
+      `\nSW Version:  ${device.softwareVersion[0] || 'undefined'}` +
+      `\nHW Version:  ${device.hardwareVersion[0] || 'undefined'}` +
+      `\nAPI Version:  ${device.apiVersion[0] || 'undefined'}`;
 
     const memoryUsage = process.memoryUsage();
     const formattedMemoryUsage = `\n*Memory Usage*:\n  RSS: ${Math.round(memoryUsage.rss / 1024 / 1024)} MB`;
@@ -1969,6 +1971,26 @@ async function _debug(channel, userName) {
           type: 'mrkdwn',
           text: '*Configuration Values*\n' + configValues
         }
+      },
+      {
+        type: 'divider'
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*Docker Status*\n${dockerStatus}`
+        }
+      },
+      {
+        type: 'divider'
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*IP Address*\n${ipAddress}`
+        }
       }
     ];
 
@@ -2000,6 +2022,9 @@ async function _debug(channel, userName) {
     }
   });
 }
+
+
+
 
 
 
