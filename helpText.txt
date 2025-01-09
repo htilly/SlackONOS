@@ -10,7 +10,7 @@ Current commands!
 `searchplaylist` *text* : search for a playlist, does NOT add it to the queue
 `addplaylist` *text* : add a playlist to the queue and start playing if idle. Will start with a fresh queue.
 `append` *text* : append a song to the previous playlist and start playing the same list again.
-`vote` *number* : vote for a track to be played next!!! :rocket: 
+`vote` *number* : vote for a track to be played next!!! Votes neeed *{{voteLimit}}* :rocket: 
 `votecheck` : how many votes there are currently, as well as who has voted.
 `gong` : current track is bad! *{{gongLimit}}* gongs will skip the track
 `gongcheck` : how many gong votes there are currently, as well as who has gonged.
