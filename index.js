@@ -106,20 +106,30 @@ const spotify = Spotify({
   logger: logger
 })
 
-let gongCounter = 0
-let gongScore = {}
-const gongLimitPerUser = 1
+let gongCounter = 0;
+let gongScore = {};
+const gongLimitPerUser = 1;
 
-let voteImmuneCounter = 0
-const voteImmuneLimitPerUser = 1
-let voteImmuneScore = {}
-let gongBanned = false
-let gongTrack = '' // What track was a GONG called on
-let voteCounter = 0
-const voteLimitPerUser = 4
-const flushVoteLimitPerUser = 1
-let voteScore = {}
-let flushVoteScore = {}
+let voteImmuneCounter = 0;
+const voteImmuneLimitPerUser = 1;
+let voteImmuneUsers = {}; // Track users who have voted for each track for vote immune
+
+
+let voteImmuneScore = {};
+let gongBanned = false;
+let gongTrack = ''; // What track was a GONG called on
+
+let voteCounter = 0;
+const voteLimitPerUser = 4;
+let voteScore = {};
+
+let flushVoteCounter = 0;
+const flushVoteLimitPerUser = 1;
+let flushVoteScore = {};
+
+let trackVoteCount = {}; // Initialize vote count object
+let trackVoteUsers = {}; // Track users who have voted for each track
+
 
 if (!token) {
   throw new Error('SLACK_API_TOKEN is not set');
@@ -651,12 +661,12 @@ function _upNext(channel) {
 }
 
 
+
+
+// Vote section. All function related to voting.
+
 let voteTimer = null;
 const voteTimeLimit = voteTimeLimitMinutes * 60 * 1000; // Convert minutes to milliseconds
-
-
-
-
 
 function _flushvote(channel, userName) {
   _logUserAction(userName, 'flushvote');
@@ -669,27 +679,25 @@ function _flushvote(channel, userName) {
   if (flushVoteScore[userName] >= flushVoteLimitPerUser) {
     _slackMessage('Are you trying to cheat, ' + userName + '? DENIED!', channel);
   } else {
-    flushVoteScore[userName] = flushVoteScore[userName] + 1;
-    voteCounter++;
-    logger.info('1voteCounter: ' + voteCounter);
-    logger.info('1voteTimer: ' + voteTimer);
-    if (voteCounter === 1) {
+    flushVoteScore[userName] += 1;
+    flushVoteCounter++;
+    logger.info('flushVoteCounter: ' + flushVoteCounter);
+
+    if (flushVoteCounter === 1) {
       // Start the timer on the first vote
       voteTimer = setTimeout(() => {
-        voteCounter = 0;
+        flushVoteCounter = 0;
         flushVoteScore = {};
         _slackMessage('Voting period ended.', channel);
         logger.info('Voting period ended... Guess the playlist isn´t that bad after all!!');
       }, voteTimeLimit);
       _slackMessage("Voting period started for a flush of the queue... You have " + voteTimeLimitMinutes + " minutes to gather " + flushVoteLimit + " votes !!", channel);
       logger.info('Voting period started!!');
-      logger.info('3voteCounter: ' + voteCounter);
-      logger.info('3voteTimer: ' + voteTimer);
     }
 
-    _slackMessage('This is VOTE ' + "*" + voteCounter + "*" + '/' + flushVoteLimit + ' for a full flush of the playlist!!', channel);
+    _slackMessage('This is VOTE ' + "*" + flushVoteCounter + "*" + '/' + flushVoteLimit + ' for a full flush of the playlist!!', channel);
 
-    if (voteCounter >= flushVoteLimit) {
+    if (flushVoteCounter >= flushVoteLimit) {
       clearTimeout(voteTimer); // Clear the timer if the vote limit is reached
       _slackMessage('The votes have spoken! Flushing the queue...:toilet:', channel);
       try {
@@ -697,12 +705,11 @@ function _flushvote(channel, userName) {
       } catch (error) {
         logger.error('Error flushing the queue: ' + error);
       }
-      voteCounter = 0;
+      flushVoteCounter = 0;
       flushVoteScore = {};
     }
   }
 }
-
 
 function _gong(channel, userName) {
   _logUserAction(userName, 'gong');
@@ -713,21 +720,15 @@ function _gong(channel, userName) {
     }
     logger.info('_gong > track: ' + track)
 
-    // NOTE: The gongTrack is checked in _currentTrackTitle() so we
-    // need to let that go through before checking if gong is banned.
     if (_isTrackGongBanned(track)) {
       logger.info('Track is gongBanned: ' + track);
       _slackMessage('Sorry ' + userName + ', the people have voted and this track cannot be gonged...', channel)
       return
     }
 
-    // Get message
-    logger.info('gongMessage.length: ' + gongMessage.length)
-    var ran = Math.floor(Math.random() * gongMessage.length)
-    var randomMessage = gongMessage[ran]
+    var randomMessage = gongMessage[Math.floor(Math.random() * gongMessage.length)];
     logger.info('gongMessage: ' + randomMessage)
 
-    // Need a delay before calling the rest
     if (!(userName in gongScore)) {
       gongScore[userName] = 0
     }
@@ -739,7 +740,7 @@ function _gong(channel, userName) {
         _slackMessage('Having regrets, ' + userName + "? We're glad you came to your senses...", channel)
       }
 
-      gongScore[userName] = gongScore[userName] + 1
+      gongScore[userName] += 1
       gongCounter++
       _slackMessage(randomMessage + ' This is GONG ' + gongCounter + '/' + gongLimit + ' for ' + "*" + track + "*", channel)
       if (gongCounter >= gongLimit) {
@@ -753,30 +754,19 @@ function _gong(channel, userName) {
 }
 
 
-
-
-
 function _voteImmune(input, channel, userName) {
-  var voteNb = input[1];
-  voteNb = Number(voteNb) + 1; // Add 1 to match the queue index
-  voteNb = String(voteNb);
+  var voteNb = Number(input[1]); // Use the input number directly
   logger.info('voteNb: ' + voteNb);
 
   sonos.getQueue().then(result => {
     logger.info('Current queue: ' + JSON.stringify(result, null, 2));
-    logger.info('Finding track:' + voteNb);
     let trackFound = false;
-    let voteTrackId = null;
     let voteTrackName = null;
 
     for (var i in result.items) {
-      var queueTrack = result.items[i].id;
-      queueTrack = queueTrack.split('/')[1];
-      logger.info('queueTrack: ' + queueTrack);
+      var queueTrack = parseInt(result.items[i].id.split('/')[1]) - 1; // Adjust for 0-based index
       if (voteNb === queueTrack) {
-        voteTrackId = result.items[i].id.split('/')[1];
         voteTrackName = result.items[i].title;
-        logger.info('voteTrackName: ' + voteTrackName);
         trackFound = true;
         break;
       }
@@ -790,26 +780,36 @@ function _voteImmune(input, channel, userName) {
       if (voteImmuneScore[userName] >= voteImmuneLimitPerUser) {
         _slackMessage('Are you trying to cheat, ' + userName + '? DENIED!', channel);
       } else {
-        if (userName in gongScore) {
-          _slackMessage('Changed your mind, ' + userName + '? Well, ok then...', channel);
+        if (!(voteNb in voteImmuneUsers)) {
+          voteImmuneUsers[voteNb] = new Set();
         }
 
-        voteImmuneScore[userName] = voteImmuneScore[userName] + 1;
-        voteImmuneCounter++;
+        if (voteImmuneUsers[voteNb].has(userName)) {
+          _slackMessage('You have already voted for this track, ' + userName + '.', channel);
+        } else {
+          voteImmuneScore[userName] += 1;
+          voteImmuneCounter++;
+          voteImmuneUsers[voteNb].add(userName);
 
-        _slackMessage('This is VOTE ' + voteImmuneCounter + '/' + voteImmuneLimit + ' for ' + "*" + voteTrackName + "*", channel);
-        if (voteImmuneCounter >= voteImmuneLimit) {
-          _slackMessage('This track is now immune to GONG! (just this once)', channel);
-          voteImmuneCounter = 0;
-          voteImmuneScore = {};
-          gongBannedTracks[voteTrackName] = true; // Mark the track as gongBanned
+          _slackMessage('This is VOTE ' + voteImmuneCounter + '/' + voteImmuneLimit + ' for ' + "*" + voteTrackName + "*", channel);
+          if (voteImmuneCounter >= voteImmuneLimit) {
+            _slackMessage('This track is now immune to GONG! (just this once)', channel);
+            voteImmuneCounter = 0;
+            voteImmuneScore = {};
+            voteImmuneUsers[voteNb].clear(); // Clear the users who voted for this track
+            gongBannedTracks[voteTrackName] = true; // Mark the track as gongBanned
+          }
         }
       }
+    } else {
+      _slackMessage('Track not found in the queue.', channel);
     }
+  }).catch(err => {
+    logger.error('Error occurred while fetching the queue: ' + err);
   });
 }
 
-// Function to check if a track is gongBanned
+
 function _isTrackGongBanned(trackName) {
   return gongBannedTracks[trackName] === true;
 }
@@ -826,40 +826,30 @@ function _listImmune(channel) {
 
 
 
-// Initialize vote count object
-let trackVoteCount = {};
-
 function _vote(input, channel, userName) {
   _logUserAction(userName, 'vote');
 
-  // Get message
-  logger.info('voteMessage.length: ' + voteMessage.length)
-  var ran = Math.floor(Math.random() * voteMessage.length)
-  var randomMessage = voteMessage[ran]
-  logger.info('voteMessage: ' + randomMessage)
+  var randomMessage = voteMessage[Math.floor(Math.random() * voteMessage.length)];
+  logger.info('voteMessage: ' + randomMessage);
 
-  var voteNb = input[1];
-  voteNb = Number(voteNb) + 1; // Add 1 to match the queue index
-  voteNb = String(voteNb);
+  var voteNb = Number(input[1]); // Use the input number directly
   logger.info('voteNb: ' + voteNb);
 
   sonos.getQueue().then(result => {
-    logger.info('Current queue: ' + JSON.stringify(result, null, 2))
-    logger.info('Finding track:' + voteNb);
+    logger.info('Current queue: ' + JSON.stringify(result, null, 2));
     let trackFound = false;
+    let voteTrackName = null;
+
     for (var i in result.items) {
-      var queueTrack = result.items[i].id;
-      queueTrack = queueTrack.split('/')[1];
-      logger.info('queueTrack: ' + queueTrack)
+      var queueTrack = parseInt(result.items[i].id.split('/')[1]) - 1; // Adjust for 0-based index
       if (voteNb === queueTrack) {
-        var voteTrackName = result.items[i].title;
-        logger.info('voteTrackName: ' + voteTrackName);
+        voteTrackName = result.items[i].title;
         trackFound = true;
         break;
       }
     }
-    if (trackFound) {
 
+    if (trackFound) {
       if (!(userName in voteScore)) {
         voteScore[userName] = 0;
       }
@@ -867,64 +857,145 @@ function _vote(input, channel, userName) {
       if (voteScore[userName] >= voteLimitPerUser) {
         _slackMessage('Are you trying to cheat, ' + userName + '? DENIED!', channel);
       } else {
-        if (userName in gongScore) {
-          _slackMessage('Changed your mind, ' + userName + '? Well, ok then...', channel);
+        if (!(voteNb in trackVoteUsers)) {
+          trackVoteUsers[voteNb] = new Set();
         }
 
-        voteScore[userName] = voteScore[userName] + 1;
-        voteCounter++;
+        if (trackVoteUsers[voteNb].has(userName)) {
+          _slackMessage('You have already voted for this track, ' + userName + '.', channel);
+        } else {
+          voteScore[userName] += 1;
+          voteCounter++;
+          trackVoteUsers[voteNb].add(userName);
 
-        // Update the vote count for the track
-        if (!(voteNb in trackVoteCount)) {
-          trackVoteCount[voteNb] = 0;
-        }
-        trackVoteCount[voteNb] += 1;
+          if (!(voteNb in trackVoteCount)) {
+            trackVoteCount[voteNb] = 0;
+          }
+          trackVoteCount[voteNb] += 1;
 
-        // Log the vote count for the track
-        logger.info('Track ' + voteTrackName + ' has received ' + trackVoteCount[voteNb] + ' votes.');
+          logger.info('Track ' + voteTrackName + ' has received ' + trackVoteCount[voteNb] + ' votes.');
 
-        _slackMessage('This is VOTE ' + trackVoteCount[voteNb] + '/' + voteLimit + ' for ' + "*" + voteTrackName + "*", channel);
-        if (trackVoteCount[voteNb] >= voteLimit) {
-          logger.info('Track ' + voteTrackName + ' has reached the vote limit.');
-          _slackMessage(randomMessage, channel);
+          _slackMessage('This is VOTE ' + trackVoteCount[voteNb] + '/' + voteLimit + ' for ' + "*" + voteTrackName + "*", channel);
+          if (trackVoteCount[voteNb] >= voteLimit) {
+            logger.info('Track ' + voteTrackName + ' has reached the vote limit.');
+            _slackMessage(randomMessage, channel);
 
-          // Reset the vote count for the track
-          voteImmuneCounter = 0;
-          voteImmuneScore = {};
+            voteCounter = 0;
+            voteScore = {};
+            trackVoteUsers[voteNb].clear(); // Clear the users who voted for this track
 
-          //Now, lets move the track so it plays next
+            sonos.currentTrack().then(track => {
+              var currentTrackPosition = track.queuePosition;
+              var trackPosition = voteNb;
 
-          // Get the current track position
-          sonos.currentTrack().then(track => {
-            logger.info('Got current track: ' + track)
-            var currentTrackPosition = track.queuePosition;
-            logger.info('Current track position: ' + currentTrackPosition);
+              const startingIndex = trackPosition; // No need to adjust for 0-based index here
+              const numberOfTracks = 1;
+              const insertBefore = currentTrackPosition + 1;
+              const updateId = 0;
 
-            // Get the track position in the queue
-            var trackPosition = parseInt(voteNb);
-            logger.info('Track position: ' + trackPosition);
-
-            // Define the parameters
-            const startingIndex = trackPosition; // Assuming trackPosition is the starting index
-            const numberOfTracks = 1; // Assuming we are moving one track
-            const insertBefore = currentTrackPosition + 1; // Assuming desiredPosition is where the track should be moved to
-            const updateId = 0; // Leave updateId as 0
-
-            // Move to the track position using reorderTracksInQueue
-            sonos.reorderTracksInQueue(startingIndex, numberOfTracks, insertBefore, updateId).then(success => {
-              logger.info('Moved track to position: ' + insertBefore);
+              sonos.reorderTracksInQueue(startingIndex, numberOfTracks, insertBefore, updateId).then(success => {
+                logger.info('Moved track to position: ' + insertBefore);
+              }).catch(err => {
+                logger.error('Error occurred: ' + err);
+              });
             }).catch(err => {
               logger.error('Error occurred: ' + err);
             });
-          }).catch(err => {
-            logger.error('Error occurred: ' + err);
-          });
-
+          }
         }
       }
+    } else {
+      _slackMessage('Track not found in the queue.', channel);
     }
+  }).catch(err => {
+    logger.error('Error occurred while fetching the queue: ' + err);
   });
 }
+
+
+
+
+
+function _votecheck(channel) {
+  logger.info('Checking vote status for all tracks:');
+  sonos.getQueue().then(result => {
+    const trackNames = {};
+    for (var i in result.items) {
+      var queueTrack = result.items[i].id.split('/')[1];
+      var trackName = result.items[i].title;
+      trackNames[queueTrack] = trackName;
+    }
+
+    for (const trackId in trackVoteCount) {
+      if (trackVoteCount.hasOwnProperty(trackId)) {
+        const voteCount = trackVoteCount[trackId];
+        const trackName = trackNames[trackId] || 'Unknown Track';
+        const voters = Object.keys(voteScore).filter(user => voteScore[user] > 0 && voteScore[user] < voteLimitPerUser);
+        const votedBy = voters.map(user => `${user}`).join(', ');
+        _slackMessage("*" + trackName + "*" + ' has received ' + voteCount + ' votes. Voted by: ' + votedBy, channel);
+      }
+    }
+  }).catch(err => {
+    logger.error('Error occurred while fetching the queue: ' + err);
+  });
+}
+
+function _voteImmunecheck(channel, userName) {
+  logger.info('_voteImmunecheck...')
+
+  _currentTrackTitle(channel, function (err, track) {
+    logger.info('_voteImmunecheck > track: ' + track)
+
+    _slackMessage('VOTE is currently ' + voteImmuneCounter + '/' + voteImmuneLimit + ' for ' + track, channel)
+    var voters = Object.keys(voteImmuneScore)
+    if (voters.length > 0) {
+      _slackMessage('Voted by ' + voters.join(','), channel)
+    }
+    if (err) {
+      logger.error(err)
+    }
+  })
+}
+
+function _gongcheck(channel, userName) {
+  logger.info('_gongcheck...')
+
+  _currentTrackTitle(channel, function (err, track) {
+    if (err) {
+      logger.error(err)
+    }
+    logger.info('_gongcheck > track: ' + track)
+
+    _slackMessage('GONG is currently ' + gongCounter + '/' + gongLimit + ' for ' + track, channel)
+    var gongers = Object.keys(gongScore)
+    if (gongers.length > 0) {
+      _slackMessage('Gonged by ' + gongers.join(','), channel)
+    }
+  })
+}
+
+function _voteImmunecheck(channel, userName) {
+  logger.info('_voteImmunecheck...')
+
+  _currentTrackTitle(channel, function (err, track) {
+    logger.info('_voteImmunecheck > track: ' + track)
+
+    _slackMessage('VOTE is currently ' + voteImmuneCounter + '/' + voteImmuneLimit + ' for ' + track, channel)
+    var voters = Object.keys(voteImmuneScore)
+    if (voters.length > 0) {
+      _slackMessage('Voted by ' + voters.join(','), channel)
+    }
+    if (err) {
+      logger.error(err)
+    }
+  })
+}
+
+
+//End of vote section
+
+
+
 
 async function _moveTrackAdmin(input, channel, userName) {
   if (channel !== global.adminChannel) {
@@ -976,70 +1047,7 @@ async function _moveTrackAdmin(input, channel, userName) {
 }
 
 
-/**
- * Checks the vote status for all tracks and sends a Slack message with the results.
- * 
- * @param {string} channel - The channel to send the message to.
- */
-function _votecheck(channel) {
-  logger.info('Checking vote status for all tracks:');
-  sonos.getQueue().then(result => {
-    const trackNames = {};
-    for (var i in result.items) {
-      var queueTrack = result.items[i].id.split('/')[1];
-      var trackName = result.items[i].title;
-      trackNames[queueTrack] = trackName;
-    }
 
-    for (const trackId in trackVoteCount) {
-      if (trackVoteCount.hasOwnProperty(trackId)) {
-        const voteCount = trackVoteCount[trackId];
-        const trackName = trackNames[trackId] || 'Unknown Track';
-        const voters = Object.keys(voteScore).filter(user => voteScore[user] > 0 && voteScore[user] < voteLimitPerUser);
-        const votedBy = voters.map(user => `${user}`).join(', ');
-        _slackMessage("*" + trackName + "*" + ' has received ' + voteCount + ' votes. Voted by: ' + votedBy, channel);
-      }
-    }
-  }).catch(err => {
-    logger.error('Error occurred while fetching the queue: ' + err);
-  });
-}
-
-
-
-function _voteImmunecheck(channel, userName) {
-  logger.info('_voteImmunecheck...')
-
-  _currentTrackTitle(channel, function (err, track) {
-    logger.info('_voteImmunecheck > track: ' + track)
-
-    _slackMessage('VOTE is currently ' + voteImmuneCounter + '/' + voteImmuneLimit + ' for ' + track, channel)
-    var voters = Object.keys(voteImmuneScore)
-    if (voters.length > 0) {
-      _slackMessage('Voted by ' + voters.join(','), channel)
-    }
-    if (err) {
-      logger.error(err)
-    }
-  })
-}
-
-function _gongcheck(channel, userName) {
-  logger.info('_gongcheck...')
-
-  _currentTrackTitle(channel, function (err, track) {
-    if (err) {
-      logger.error(err)
-    }
-    logger.info('_gongcheck > track: ' + track)
-
-    _slackMessage('GONG is currently ' + gongCounter + '/' + gongLimit + ' for ' + track, channel)
-    var gongers = Object.keys(gongScore)
-    if (gongers.length > 0) {
-      _slackMessage('Gonged by ' + gongers.join(','), channel)
-    }
-  })
-}
 
 function _previous(input, channel, userName) {
   _logUserAction(userName, 'previous');
@@ -1665,7 +1673,7 @@ function _addToSpotifyArtist(userName, trackName, spid, channel) {
 }
 
 async function _addplaylist(input, channel, userName) {
-  _logUserAction(userName, '_addplaylist');
+  _logUserAction(userName, 'addplaylist');
   logger.info('_addplaylist ' + input);
   const [data, message] = await spotify.searchSpotifyPlaylist(input, channel, userName, searchLimit);
 
