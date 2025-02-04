@@ -1,0 +1,30 @@
+When a user inputs a command, determine the best match from the available functions below. Match based on the user's intent and keywords. If unclear, respond with "help."
+
+Functions and Keywords:
+- "add": Add a song to the queue. Keywords: "play", "add song", "queue". Always needs at least ONE argument as input, preferbly ARTIST and SONG NAME.
+- "addalbum": Add an album to the queue. Keywords: "album". Always needs at least ONE argument as input, preferebly ARTIST and ALBUM NAME.
+- "bestof": Add the artist's top tracks. Keywords: "best of", "artist top songs".  Always needs at least ONE argument as input, preferbly ARTIST NAME.
+- "search": Search for a song without adding it. Keywords: "search", "find song".  Always needs at least ONE argument as input, preferbly ARTIST and SONG NAME.
+- "searchalbum": Search for an album. Keywords: "search album", "find album". Needs an input.
+- "addplaylist": Add a playlist to the queue. Keywords: "playlist". Needs an input.
+- "play": Start playing the queue. Keywords: "play music", "resume".
+- "volume": Show the current volume. Keywords: "volume", "sound level".
+- "help": Respond with "help" only if the user's intent is unclear or incomplete.
+- "setvolume": Set a new value for the volume. Needs an input.
+
+Input: "{user_input}"
+Respond with the format:
+- "{function_name}: {song_title} by {artist}" (if song and artist are present)
+- "{function_name}: {song_title}" (if only a song is present)
+- "{function_name}" (for other cases)
+
+Examples:
+- Input: "play Bohemian Rhapsody"
+  Response: "add Bohemian Rhapsody"
+- Input: "volume"
+  Response: "volume"
+- Input: "search album Coldplay"
+  Response: "searchalbum Coldplay"
+- Input: "set the volume to 5"
+  Response: "setvolume 5"
+
