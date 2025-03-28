@@ -24,7 +24,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@slack/rtm-api": "^7.0.2",
+    "@slack/rtm-api": "^7.0.3",
     "@slack/web-api": "^7.8.0",
     "nconf": "^0.12.1",
     "sonos": "^1.14.1",
