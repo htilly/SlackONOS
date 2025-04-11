@@ -18,6 +18,7 @@ const { execSync } = require('child_process');
 const gongBannedTracks = {};
 const SLACK_API_URL_LIST = 'https://slack.com/api/conversations.list';
 const userActionsFile = path.join(__dirname, 'config/userActions.json');
+const WinstonWrapper = require('./logger');
 
 
 
@@ -68,7 +69,7 @@ if (!Array.isArray(blacklist)) {
 }
 
 /* Initialize Logger */
-const logger = winston.createLogger({
+const logger = new WinstonWrapper({
   level: logLevel,
   format: winston.format.combine(
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // Add timestamp
@@ -160,15 +161,91 @@ if (!legacySlackBotToken) {
   throw new Error('SLACK_API_TOKEN is not set');
 }
 
-const { RTMClient } = require('@slack/rtm-api');
+
+
+// const { RTMClient } = require('@slack/rtm-api');
 const { WebClient } = require('@slack/web-api');
-const rtm = new RTMClient(legacySlackBotToken, {
-  logLevel: 'info',
-  dataStore: false,
-  autoReconnect: true,
-  autoMark: true
-});
+const { SocketModeClient } = require('@slack/socket-mode');
+
+// const rtm = new RTMClient(legacySlackBotToken, {
+//   logLevel: 'info',
+//   dataStore: false,
+//   autoReconnect: true,
+//   autoMark: true
+// });
+
 const web = new WebClient(legacySlackBotToken);
+
+// Initialize Socket Mode client
+const socketModeClient = new SocketModeClient({
+  appToken: config.get('appToken'), // This should be an app-level token (xapp-)
+  logger: logger,
+  logLevel: 'info'
+});
+
+// Handle incoming events
+socketModeClient.on('message', async ({ event, ack }) => {
+  try {
+    // Acknowledge the event
+    await ack();
+
+    // Ignore messages from the bot itself
+    if (event.user === botUserId) {
+      return;
+    }
+
+    const { type, ts, text, channel, user } = event;
+
+    logger.info(`Received: ${type} ${channel} <@${user}> ${ts} "${text}"`);
+
+    if (type !== 'message' || !text || !channel) {
+      const errors = [
+        type !== 'message' ? `unexpected type ${type}.` : null,
+        !text ? 'text was undefined.' : null,
+        !channel ? 'channel was undefined.' : null
+      ].filter(Boolean).join(' ');
+
+      logger.error(`Could not respond. ${errors}`);
+      return false;
+    }
+
+    processInput(text, channel, `<@${user}>`);
+  } catch (error) {
+    logger.error(`Error handling message: ${error}`);
+  }
+});
+
+socketModeClient.on('message.im', async ({ event, ack }) => {
+  try {
+    await ack();
+    logger.info(`Received IM message: ${event.text}`);
+  } catch (error) {
+    logger.error(`Error handling IM message: ${error}`);
+  }
+});
+
+socketModeClient.on('app_mentions:read', async ({ event, ack }) => {
+  try {
+    await ack();
+    logger.info(`Received app mentions: ${event.text}`);
+  } catch (error) {
+    logger.error(`Error handling app mentions: ${error}`);
+  }
+});
+// Handle connection errors
+socketModeClient.on('error', (error) => {
+  logger.error(`Socket Mode error: ${error}`);
+});
+
+// Start the Socket Mode client
+(async () => {
+  try {
+    await socketModeClient.start();
+    logger.info('Socket Mode client started successfully');
+  } catch (error) {
+    logger.error(`Error starting Socket Mode client: ${error}`);
+  }
+})();
 
 let botUserId;
 
@@ -178,43 +255,43 @@ let botUserId;
     const authResponse = await web.auth.test();
     botUserId = authResponse.user_id;
 
-    await rtm.start();
+    // await rtm.start();
   } catch (error) {
     logger.error(`Error starting RTMClient: ${error}`);
   }
 })();
 
-rtm.on('message', (event) => {
-  // Ignore messages from the bot itself
-  if (event.user === botUserId) {
-    return;
-  }
+// rtm.on('message', (event) => {
+//   // Ignore messages from the bot itself
+//   if (event.user === botUserId) {
+//     return;
+//   }
 
-  const { type, ts, text, channel, user } = event;
+//   const { type, ts, text, channel, user } = event;
 
-  logger.info(event.text);
-  logger.info(event.channel);
-  logger.info(event.user);
+//   logger.info(event.text);
+//   logger.info(event.channel);
+//   logger.info(event.user);
 
-  logger.info(`Received: ${type} ${channel} <@${user}> ${ts} "${text}"`);
+//   logger.info(`Received: ${type} ${channel} <@${user}> ${ts} "${text}"`);
 
-  if (type !== 'message' || !text || !channel) {
-    const errors = [
-      type !== 'message' ? `unexpected type ${type}.` : null,
-      !text ? 'text was undefined.' : null,
-      !channel ? 'channel was undefined.' : null
-    ].filter(Boolean).join(' ');
+//   if (type !== 'message' || !text || !channel) {
+//     const errors = [
+//       type !== 'message' ? `unexpected type ${type}.` : null,
+//       !text ? 'text was undefined.' : null,
+//       !channel ? 'channel was undefined.' : null
+//     ].filter(Boolean).join(' ');
 
-    logger.error(`Could not respond. ${errors}`);
-    return false;
-  }
+//     logger.error(`Could not respond. ${errors}`);
+//     return false;
+//   }
 
-  processInput(text, channel, `<@${user}>`);
-});
+//   processInput(text, channel, `<@${user}>`);
+// });
 
-rtm.on('error', (error) => {
-  logger.error(`RTMClient error: ${error}`);
-});
+// rtm.on('error', (error) => {
+//   logger.error(`RTMClient error: ${error}`);
+// });
 
 
 function delay(ms) {
@@ -485,13 +562,13 @@ function processInput(text, channel, userName) {
 
 
 
-function _slackMessage(message, id) {
-  if (rtm.connected) {
-    rtm.sendMessage(message, id)
-  } else {
-    logger.info(message)
-  }
-}
+// function _slackMessage(message, id) {
+//   if (rtm.connected) {
+//     rtm.sendMessage(message, id)
+//   } else {
+//     logger.info(message)
+//   }
+// }
 
 const userCache = {};
 
