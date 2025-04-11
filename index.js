@@ -46,7 +46,7 @@ const gongLimit = config.get('gongLimit')
 const voteImmuneLimit = config.get('voteImmuneLimit')
 const voteLimit = config.get('voteLimit')
 const flushVoteLimit = config.get('flushVoteLimit')
-const token = config.get('token')
+const legacySlackBotToken = config.get('legacySlackBotToken')
 const maxVolume = config.get('maxVolume')
 const market = config.get('market')
 const voteTimeLimitMinutes = config.get('voteTimeLimitMinutes')
@@ -131,19 +131,19 @@ let trackVoteCount = {}; // Initialize vote count object
 let trackVoteUsers = {}; // Track users who have voted for each track
 
 
-if (!token) {
+if (!legacySlackBotToken) {
   throw new Error('SLACK_API_TOKEN is not set');
 }
 
 const { RTMClient } = require('@slack/rtm-api');
 const { WebClient } = require('@slack/web-api');
-const rtm = new RTMClient(token, {
+const rtm = new RTMClient(legacySlackBotToken, {
   logLevel: 'error',
   dataStore: false,
   autoReconnect: true,
   autoMark: true
 });
-const web = new WebClient(token);
+const web = new WebClient(legacySlackBotToken);
 
 let botUserId;
 
@@ -222,7 +222,7 @@ async function _lookupChannelID() {
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${legacySlackBotToken}`,
           'Content-Type': 'application/json',
         },
       });
@@ -1902,7 +1902,7 @@ async function _debug(channel, userName) {
 
     const envVars = `\n*Environment Variables*:\n  NODE_VERSION: ${process.env.NODE_VERSION || 'not set'}\n  HOSTNAME: ${process.env.HOSTNAME || 'not set'}\n  YARN_VERSION: ${process.env.YARN_VERSION || 'not set'}`;
 
-    const sensitiveKeys = ['token', 'spotifyClientId', 'spotifyClientSecret', 'openaiApiKey'];
+    const sensitiveKeys = ['legacySlackBotToken', 'spotifyClientId', 'spotifyClientSecret', 'openaiApiKey'];
     const configKeys = Object.keys(config.stores.file.store);
     const configValues = configKeys
       .map(key => {

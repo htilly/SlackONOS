@@ -42,7 +42,7 @@ Replace:
 "music-admin" - with the #slack channel you want the bot to respond to admin commands.`
 "music" - with the #slack channel you want the bot to be a DJ in =)`
 "IP_TO_SONOS" - with the (static) IP of you sonos player / controller.`
-"SLACK:TOKEN" - with the token you got for the bot in "Slack.`
+"SLACK:TOKEN" - with the token you got for the legacy bot in Slack.`
 "US" - with the country that you use Spotify.
 75 - with the maximum volume you can set the Sonos to via "setvolume" in #Slack
 

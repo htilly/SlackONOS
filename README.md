@@ -53,11 +53,11 @@ Sonos needs to be configured and setup with Spotify and have access to internet.
 You must provide the token of your Slack bot and the IP of your Sonos in either config.json (see config.json.example), as arguments or as environment variables.
 Examples:
 ```bash
-node index.js --token "MySlackBotToken" --sonos "192.168.0.1"
+node index.js --legacySlackBotToken "MySlackBotToken" --sonos "192.168.0.1"
 ```
 or
 ```bash
-token="MySlackBotToken" sonos="192.168.0.1" node index.js
+legacySlackBotToken="MySlackBotToken" sonos="192.168.0.1" node index.js
 ```
 You can also provide any of the other variables from config.json.example as arguments or environment variables.
 The blacklist can be provided as either an array in config.json, or as a comma-separated string when using arguments or environment variables.
