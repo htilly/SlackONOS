@@ -184,7 +184,7 @@ const socketModeClient = new SocketModeClient({
 });
 
 // Handle incoming events
-socketModeClient.on('app_mention', async ({ event, ack }) => {
+socketModeClient.on('message', async ({ event, ack }) => {
   try {
     await ack();
     logger.info(`SMC received message: ${event.text}`);
@@ -202,9 +202,9 @@ socketModeClient.on('app_mention', async ({ event, ack }) => {
 
     logger.info(`Received: ${type} ${channel} <@${user}> ${ts} "${text}"`);
 
-    if (type !== 'message' || !text || !channel) {
+    if (type !== 'app_mention' || !text || !channel) {
       const errors = [
-        type !== 'message' ? `unexpected type ${type}.` : null,
+        type !== 'app_mention' ? `unexpected type ${type}.` : null,
         !text ? 'text was undefined.' : null,
         !channel ? 'channel was undefined.' : null
       ].filter(Boolean).join(' ');
