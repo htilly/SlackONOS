@@ -202,9 +202,9 @@ socketModeClient.on('message', async ({ event, ack }) => {
 
     logger.info(`Received: ${type} ${channel} <@${user}> ${ts} "${text}"`);
 
-    if (type !== 'app_mention' || !text || !channel) {
+    if (type !== 'message' || !text || !channel) {
       const errors = [
-        type !== 'app_mention' ? `unexpected type ${type}.` : null,
+        type !== 'message' ? `unexpected type ${type}.` : null,
         !text ? 'text was undefined.' : null,
         !channel ? 'channel was undefined.' : null
       ].filter(Boolean).join(' ');
@@ -548,7 +548,16 @@ function processInput(text, channel, userName) {
 }
 
 
-
+async function _slackMessage(message, channel_id) {
+  try {
+    await web.chat.postMessage({
+      channel: channel_id,
+      text: message
+    });
+  } catch (error) {
+    logger.error('Error sending message to Slack: ' + error);
+  }
+}
 
 // function _slackMessage(message, id) {
 //   if (rtm.connected) {
