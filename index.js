@@ -92,6 +92,31 @@ const SONOS = require('sonos')
 const Sonos = SONOS.Sonos
 const sonos = new Sonos(sonosIp)
 
+// Function to check Sonos connection
+async function checkSonosConnection() {
+  try {
+    const deviceInfo = await sonos.deviceDescription();
+    logger.info('Successfully connected to Sonos speaker:');
+    logger.info(`- Model: ${deviceInfo.modelDescription}`);
+    logger.info(`- Room: ${deviceInfo.roomName}`);
+    logger.info(`- IP: ${sonosIp}`);
+    return true;
+  } catch (error) {
+    logger.error('Failed to connect to Sonos speaker:');
+    logger.error(`- IP: ${sonosIp}`);
+    logger.error(`- Error: ${error.message}`);
+    return false;
+  }
+}
+
+// Check Sonos connection on startup
+(async () => {
+  const isConnected = await checkSonosConnection();
+  if (!isConnected) {
+    logger.error('Critical: Unable to connect to Sonos speaker. The application may not function correctly.');
+  }
+})();
+
 if (market !== 'US') {
   sonos.setSpotifyRegion(SONOS.SpotifyRegion.EU)
   logger.info('Setting Spotify region to EU...')
@@ -138,7 +163,7 @@ if (!legacySlackBotToken) {
 const { RTMClient } = require('@slack/rtm-api');
 const { WebClient } = require('@slack/web-api');
 const rtm = new RTMClient(legacySlackBotToken, {
-  logLevel: 'error',
+  logLevel: 'info',
   dataStore: false,
   autoReconnect: true,
   autoMark: true
@@ -195,10 +220,6 @@ rtm.on('error', (error) => {
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
-
-
-// Proper delay function
-const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Function to fetch the channel IDs
 async function _lookupChannelID() {
@@ -1559,7 +1580,7 @@ async function _searchplaylist(input, channel, userName) {
   _logUserAction(userName, 'searchplaylist');
   logger.info('_searchplaylist ' + input);
 
-  // Ensure userName is defined; set a fallback if it’s undefined
+  // Ensure userName is defined; set a fallback if it's undefined
   userName = userName || "User";
 
   const [data, message] = await spotify.searchSpotifyPlaylist(input, channel, userName, searchLimit);
