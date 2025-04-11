@@ -184,10 +184,10 @@ const socketModeClient = new SocketModeClient({
 });
 
 // Handle incoming events
-socketModeClient.on('message', async ({ event, ack }) => {
+socketModeClient.on('app_mention', async ({ event, ack }) => {
   try {
-    // Acknowledge the event
     await ack();
+    logger.info(`SMC received message: ${event.text}`);
 
     // Ignore messages from the bot itself
     if (event.user === botUserId) {
@@ -195,6 +195,10 @@ socketModeClient.on('message', async ({ event, ack }) => {
     }
 
     const { type, ts, text, channel, user } = event;
+
+    logger.info(event.text);
+    logger.info(event.channel);
+    logger.info(event.user);
 
     logger.info(`Received: ${type} ${channel} <@${user}> ${ts} "${text}"`);
 
@@ -211,27 +215,11 @@ socketModeClient.on('message', async ({ event, ack }) => {
 
     processInput(text, channel, `<@${user}>`);
   } catch (error) {
-    logger.error(`Error handling message: ${error}`);
-  }
-});
-
-socketModeClient.on('message.im', async ({ event, ack }) => {
-  try {
-    await ack();
-    logger.info(`Received IM message: ${event.text}`);
-  } catch (error) {
-    logger.error(`Error handling IM message: ${error}`);
-  }
-});
-
-socketModeClient.on('app_mentions:read', async ({ event, ack }) => {
-  try {
-    await ack();
-    logger.info(`Received app mentions: ${event.text}`);
-  } catch (error) {
     logger.error(`Error handling app mentions: ${error}`);
   }
 });
+
+
 // Handle connection errors
 socketModeClient.on('error', (error) => {
   logger.error(`Socket Mode error: ${error}`);
@@ -254,7 +242,7 @@ let botUserId;
     // Fetch the bot's user ID
     const authResponse = await web.auth.test();
     botUserId = authResponse.user_id;
-
+    logger.info(`Bot user ID: ${botUserId}`);
     // await rtm.start();
   } catch (error) {
     logger.error(`Error starting RTMClient: ${error}`);
