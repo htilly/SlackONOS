@@ -9,3 +9,4 @@ config/userActions.json
 docker-compose.yml
 Dockerfile-local
 build.txt
+*.DS_Store
