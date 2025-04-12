@@ -42,24 +42,41 @@ config.argv()
     logLevel: 'info'
   })
 
-// const adminChannel = config.get('adminChannel');
+// Application Config Values
 const gongLimit = config.get('gongLimit')
 const voteImmuneLimit = config.get('voteImmuneLimit')
 const voteLimit = config.get('voteLimit')
 const flushVoteLimit = config.get('flushVoteLimit')
-const legacySlackBotToken = config.get('legacySlackBotToken')
 const maxVolume = config.get('maxVolume')
-const market = config.get('market')
 const voteTimeLimitMinutes = config.get('voteTimeLimitMinutes')
+const logLevel = config.get('logLevel')
+
+//Spotify Config Values
+const market = config.get('market')
 const clientId = config.get('spotifyClientId')
 const clientSecret = config.get('spotifyClientSecret')
 const searchLimit = config.get('searchLimit')
-const logLevel = config.get('logLevel')
+
+//Sonos Config Values
 const sonosIp = config.get('sonos')
 const webPort = config.get('webPort')
 let ipAddress = config.get('ipAddress')
 
+//Slack Config
+const slackAppToken = config.get('slackAppToken')
+const useLegacyBot = config.get('useLegacyBot')
+let  legacySlackBotToken = config.get('legacySlackBotToken')
+if (!legacySlackBotToken) {
+  legacySlackBotToken = config.get('token')
+}
 
+let slackWebClientToken
+
+if (useLegacyBot != false) {
+  slackWebClientToken = legacySlackBotToken
+} else {
+  slackWebClientToken = slackAppToken
+}
 
 
 
@@ -68,7 +85,8 @@ if (!Array.isArray(blacklist)) {
   blacklist = blacklist.replace(/\s*(,|^|$)\s*/g, '$1').split(/\s*,\s*/)
 }
 
-/* Initialize Logger */
+/* Initialize Logger
+We have to wrap the Winston logger in this thin layer to satiate the SocketModeClient */
 const logger = new WinstonWrapper({
   level: logLevel,
   format: winston.format.combine(
@@ -157,28 +175,26 @@ let trackVoteCount = {}; // Initialize vote count object
 let trackVoteUsers = {}; // Track users who have voted for each track
 
 
-if (!legacySlackBotToken) {
-  throw new Error('SLACK_API_TOKEN is not set');
-}
 
 
 
-// const { RTMClient } = require('@slack/rtm-api');
+
+const { RTMClient } = require('@slack/rtm-api');
 const { WebClient } = require('@slack/web-api');
 const { SocketModeClient } = require('@slack/socket-mode');
 
-// const rtm = new RTMClient(legacySlackBotToken, {
-//   logLevel: 'info',
-//   dataStore: false,
-//   autoReconnect: true,
-//   autoMark: true
-// });
+const rtm = new RTMClient(legacySlackBotToken, {
+  logLevel: 'info',
+  dataStore: false,
+  autoReconnect: true,
+  autoMark: true
+});
 
-const web = new WebClient(legacySlackBotToken);
+const web = new WebClient(slackWebClientToken);
 
 // Initialize Socket Mode client
 const socketModeClient = new SocketModeClient({
-  appToken: config.get('appToken'), // This should be an app-level token (xapp-)
+  appToken: slackAppToken, // This should be an app-level token (xapp-...)
   logger: logger,
   logLevel: 'info'
 });
@@ -190,7 +206,7 @@ socketModeClient.on('message', async ({ event, ack }) => {
     logger.info(`SMC received message: ${event.text}`);
 
     // Ignore messages from the bot itself
-    if (event.user === botUserId) {
+    if (event.user === botUserId || event.user === undefined) {
       return;
     }
 
@@ -249,37 +265,37 @@ let botUserId;
   }
 })();
 
-// rtm.on('message', (event) => {
-//   // Ignore messages from the bot itself
-//   if (event.user === botUserId) {
-//     return;
-//   }
+rtm.on('message', (event) => {
+  // Ignore messages from the bot itself
+  if (event.user === botUserId) {
+    return;
+  }
 
-//   const { type, ts, text, channel, user } = event;
+  const { type, ts, text, channel, user } = event;
 
-//   logger.info(event.text);
-//   logger.info(event.channel);
-//   logger.info(event.user);
+  logger.info(event.text);
+  logger.info(event.channel);
+  logger.info(event.user);
 
-//   logger.info(`Received: ${type} ${channel} <@${user}> ${ts} "${text}"`);
+  logger.info(`RTM Received: ${type} ${channel} <@${user}> ${ts} "${text}"`);
 
-//   if (type !== 'message' || !text || !channel) {
-//     const errors = [
-//       type !== 'message' ? `unexpected type ${type}.` : null,
-//       !text ? 'text was undefined.' : null,
-//       !channel ? 'channel was undefined.' : null
-//     ].filter(Boolean).join(' ');
+  if (type !== 'message' || !text || !channel) {
+    const errors = [
+      type !== 'message' ? `unexpected type ${type}.` : null,
+      !text ? 'text was undefined.' : null,
+      !channel ? 'channel was undefined.' : null
+    ].filter(Boolean).join(' ');
 
-//     logger.error(`Could not respond. ${errors}`);
-//     return false;
-//   }
+    logger.error(`Could not respond. ${errors}`);
+    return false;
+  }
 
-//   processInput(text, channel, `<@${user}>`);
-// });
+  processInput(text, channel, `<@${user}>`);
+});
 
-// rtm.on('error', (error) => {
-//   logger.error(`RTMClient error: ${error}`);
-// });
+rtm.on('error', (error) => {
+  logger.error(`RTMClient error: ${error}`);
+});
 
 
 function delay(ms) {

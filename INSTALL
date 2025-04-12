@@ -1,8 +1,8 @@
-** Installation **
+# Installation
 
 In order to get the bot up and running you need to do the following.
 
-* Pre-requisit: *
+## Pre-requisit
 
 1: #Slack-group with admin rights
 2: A server / machine that can run node.js
@@ -11,7 +11,32 @@ In order to get the bot up and running you need to do the following.
 
 Note: In order to get Text-to-speach working you need to know the IP of the host running SlackONOS as well as having a TCP port (in setting) open for traffic from the Sonos to the device.
 
-#Slack
+## Slack App
+
+If you are setting up a Slack integration after March 31, 2025, [you will not be able to setup a Legacy Slack Bot](https://api.slack.com/changelog/2024-09-legacy-custom-bots-classic-apps-deprecation) (instruciton below).
+
+1. To begin, follow the Slack Documentation for [creating a Slack App.](https://docs.slack.dev/quickstart)
+2. Once you have a Slack App setup in [https://api.slack.com/apps](https://api.slack.com/apps), go to the "Basic Information" page and generate a App-Level Token.
+3. You will have to enable Socket Mode on the "Socket Mode" page. We need this for Event Subscriptions.
+4. On the "Install App" page, check that the app is installed in the channels where you want to control SlackONOS. These channels should appear under "Webhook URLs for Your Workspace."
+5. On the "OAuth & Permissions" page, ensure the app has the at least following Scope permissions. This is secondary to setting Event Subscriptions.
+    * app_mentions:read
+    * channels:history
+    * chat:write
+    * commands
+    * im:history
+    * incoming-webhook
+    * links:read
+    * links:write
+    * users:read
+    * users:write
+6. On the "Event Subscriptions" page, ensure Events are enabled. Under "Subscribe to bot events", ensure the following user events are listed. This should also set the correct permissions in "OAuth & Permissions."
+    * app_mention
+    * message.channels
+    * message.im
+
+
+## Legacy Slack Bot
 
 Create a bot in #Slack.
 You need to give it a name, and write down the API Token. You will need this in your setting file later.
@@ -21,8 +46,7 @@ Optional you can give the bot some nice namne, icon etc.
 
 For an icon, have a look in zenmusic/doc/images/ZenMusic.png
 
-
-Node.js - Slackonos!
+## Node.js - Slackonos!
 
 This guide assume you have git, node.js and NPM installed, and running linux =)
 
@@ -55,9 +79,7 @@ You should see something like:
 
 [Sat Apr 30 2016 21:44:10 GMT+0200 (CEST)] INFO Connecting... Welcome to Slack. You are @zenmusicbot of Schibsted Media Group You are in: #music As well as: music-admin 
 
-
-
-** Known Issues **
+## Known Issues
 
 If you for any reason get the following 500 error in the logs:
 

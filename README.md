@@ -49,6 +49,7 @@ slackonos:
 Server running the index.js needs to be able to talk to the Sonos on port 1400 (TCP)
 Sonos needs to be configured and setup with Spotify and have access to internet.
 
+
 **Configuration**
 You must provide the token of your Slack bot and the IP of your Sonos in either config.json (see config.json.example), as arguments or as environment variables.
 Examples:
@@ -63,6 +64,13 @@ You can also provide any of the other variables from config.json.example as argu
 The blacklist can be provided as either an array in config.json, or as a comma-separated string when using arguments or environment variables.
 
 Logo for the bot in #Slack can be found at "doc/images/ZenMusic.png
+
+**Slack Token Complications**
+* legacy bots can [no longer be created](https://api.slack.com/changelog/2024-09-legacy-custom-bots-classic-apps-deprecation)
+* app accepts two kinds of tokens, SlackBot Tokens, and App Tokens
+* If you are using a [Legacy Bot](https://api.slack.com/legacy/enabling-bot-users), you can continue to specify your token with `token` in your config.json, or use the new `legacyBotToken`.
+* If you are creating a new app, you must use the new [App-level token](https://api.slack.com/concepts/token-types#app-level), which you can specify with `slackAppToken` in your config.json. 
+* If both tokens are specified, the app will default to using Legacy Bot tokens and interacting with Slack using deprecated APIs. You can perscribe this behavior with "useLegacyBot": false.
 
 **What can it do?**
 
