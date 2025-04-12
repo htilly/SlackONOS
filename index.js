@@ -40,6 +40,7 @@ config.argv()
     searchLimit: 7,
     webPort: 8181,
     logLevel: 'info'
+    useLegacyBot: false
   })
 
 // Application Config Values
@@ -72,7 +73,7 @@ if (!legacySlackBotToken) {
 
 let slackWebClientToken
 
-if (useLegacyBot != false) {
+if (useLegacyBot) {
   slackWebClientToken = legacySlackBotToken
 } else {
   slackWebClientToken = slackAppToken
