@@ -39,7 +39,7 @@ config.argv()
     blacklist: [],
     searchLimit: 7,
     webPort: 8181,
-    logLevel: 'info'
+    logLevel: 'info',
     useLegacyBot: false
   })
 
