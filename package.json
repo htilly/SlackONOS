@@ -18,7 +18,7 @@
     "url": "git@github.com:htilly/zenmusic.git"
   },
   "devDependencies": {
-    "mocha": "^11.1.0",
+    "mocha": "^11.4.0",
     "chai": "5.2.0"
   },
   "author": "",
