@@ -1,28 +1,37 @@
-# Use the official Node.js image based on Alpine Linux
-# The --platform flag is used here to make sure we use a multi-platform base image
-FROM --platform=$TARGETPLATFORM node:24.0-slim AS base
+# syntax=docker/dockerfile:1.4
 
-# Update and install git (if needed for your application)
-#RUN apk update && \
-#    apk upgrade
+ARG TARGETPLATFORM
 
-# Clear npm cache to reduce image size and avoid potential issues
-RUN npm cache clean --force
+# Stage for Node 24 (default for amd64 and arm64)
+FROM --platform=$TARGETPLATFORM node:24.0-slim AS node24
 
-# Set the working directory for your application
+# Stage for Node 23 (fallback for arm/v7)
+FROM --platform=$TARGETPLATFORM node:23.0-slim AS node23
+
+# Select base depending on platform
+FROM node24 AS base
+ARG TARGETPLATFORM
+RUN if [ "$TARGETPLATFORM" = "linux/arm/v7" ]; then exit 1; fi
+
+FROM node23 AS base
+ARG TARGETPLATFORM
+RUN if [ "$TARGETPLATFORM" != "linux/arm/v7" ]; then exit 1; fi
+
+# From here on, shared application setup
 WORKDIR /app
 
-# Copy package.json and package-lock.json first to leverage Docker cache
-COPY package*.json ./
+# Clean npm cache to reduce image size
+RUN npm cache clean --force
 
-# Install application dependencies
+# Copy package files and install dependencies
+COPY package*.json ./
 RUN npm install --verbose
 
-# Copy the rest of your application files
+# Copy application code
 COPY . .
 
-# Ensure proper permissions (if needed, adjust as necessary)
+# Fix permissions (if needed)
 RUN chmod -R 755 /app
 
-# Command to run the application
+# Run your app
 CMD ["node", "index.js"]
