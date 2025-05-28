@@ -26,7 +26,7 @@ jobs:
 
     - name: Build and push multi-platform Docker image
       run: |
-        docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 --push \
+        docker buildx build --platform linux/amd64,linux/arm64 --push \
           -t ${{ secrets.DOCKERHUB_USERNAME }}/slackonos:latest .
 
     - name: Verify the platforms
@@ -34,22 +34,14 @@ jobs:
 
     - name: Increment build number in build.txt
       run: |
-        # Read the current build number
         BUILD_NUMBER=$(cat build.txt)
-        # Increment the build number by 1
         BUILD_NUMBER=$((BUILD_NUMBER + 1))
-        # Write the new build number back to build.txt
         echo $BUILD_NUMBER > build.txt
 
     - name: Commit and push updated build.txt
       run: |
-        # Configure git
         git config --local user.name "github-actions[bot]"
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
-
-        # Add build.txt
         git add build.txt
         git commit -m "Increment build number to $BUILD_NUMBER"
-
-        # Push changes
         git push
