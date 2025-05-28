@@ -26,7 +26,7 @@
   "dependencies": {
     "@slack/rtm-api": "^7.0.2",
     "@slack/web-api": "^7.8.0",
-    "nconf": "^0.12.1",
+    "nconf": "^0.13.0",
     "sonos": "^1.14.1",
     "urlencode": "^2.0.0",
     "@jsfeb26/urllib-sync": "^1.1.4",
