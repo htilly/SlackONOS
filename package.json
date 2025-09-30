@@ -30,7 +30,7 @@
     "sonos": "^1.14.1",
     "urlencode": "^2.0.0",
     "@jsfeb26/urllib-sync": "^1.1.4",
-    "winston": "^3.17.0",
+    "winston": "^3.18.0",
     "xml2js": "^0.6.2",
     "gtts": "^0.2.1",
     "mp3-duration": "^1.1.0"
