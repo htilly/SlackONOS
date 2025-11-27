@@ -1858,3 +1858,12 @@ function _moveTrackAdmin(input, channel, userName) {
       _slackMessage('Error moving track.', channel);
     });
 }
+
+
+
+if (process.env.NODE_ENV === 'test') {
+    module.exports = function numFormatter(num) {
+        if (num === null || num === undefined) return '';
+        return Number(num).toLocaleString('en-US');
+    };
+}
