@@ -18,7 +18,7 @@ const { execSync } = require('child_process');
 const gongBannedTracks = {};
 const SLACK_API_URL_LIST = 'https://slack.com/api/conversations.list';
 const userActionsFile = path.join(__dirname, 'config/userActions.json');
-const WinstonWrapper = require('./logger');
+
 
 config.argv()
   .env()
