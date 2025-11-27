@@ -265,3 +265,20 @@ module.exports = function (config) {
 
     return module.exports.instance
 }
+
+async function searchArtist(name) {
+    const data = await doSearch(name, 'artist');
+    if (data && data.artists && data.artists.items.length > 0) {
+        return data.artists.items[0];
+    }
+    return null;
+}
+
+async function getArtistTopTracks(artistId, market) {
+    const url = `${API_BASE}/artists/${artistId}/top-tracks?market=${market}`;
+    const response = await fetch(url, { headers: authHeader() });
+    const data = await response.json();
+    return data.tracks || [];
+}
+
+

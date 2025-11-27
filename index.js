@@ -807,6 +807,93 @@ function _isTrackGongBanned(trackName) {
   return gongBannedTracks[trackName] === true;
 }
 
+
+
+async function _bestof(input, channel, userName) {
+  _logUserAction(userName, 'bestof');
+
+  if (!input || input.length < 2) {
+    _slackMessage('Usage: bestof [artist]', channel);
+    return;
+  }
+
+  const artistName = input.slice(1).join(' ');
+  logger.info(`BESTOF request for artist: ${artistName}`);
+
+  try {
+    //
+    // STEP 1: Search for tracks containing the artist
+    //
+    const searchResults = await spotify.searchTrackList(artistName, 20);
+
+    if (!searchResults || searchResults.length === 0) {
+      _slackMessage(`No tracks found for *${artistName}*`, channel);
+      return;
+    }
+
+    //
+    // STEP 2: Infer the artist identity
+    //
+    // Pick the most common artist among the search results
+    const counts = {};
+    for (const t of searchResults) {
+      const a = t.artists[0].name;
+      counts[a] = (counts[a] || 0) + 1;
+    }
+
+    const bestArtist = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])[0][0];
+
+    logger.info(`Inferred artist: ${bestArtist}`);
+
+    //
+    // STEP 3: Filter tracks by that artist & sort by popularity
+    //
+    const tracksByArtist = searchResults
+      .filter(t => t.artists[0].name.toLowerCase() === bestArtist.toLowerCase())
+      .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
+      .slice(0, 10); // top 10 tracks
+
+    if (tracksByArtist.length === 0) {
+      _slackMessage(`Could not determine top tracks for *${bestArtist}*`, channel);
+      return;
+    }
+
+    //
+    // STEP 4: Queue tracks
+    //
+    let addedCount = 0;
+    for (const track of tracksByArtist) {
+      try {
+        await sonos.queue(track.uri);
+        logger.info(`Queued BESTOF track: ${track.name}`);
+        addedCount++;
+      } catch (err) {
+        logger.warn(`Could not queue track ${track.name}: ${err.message}`);
+      }
+    }
+
+    //
+    // STEP 5: Notify
+    //
+    let msg = `🎼 *Best of ${bestArtist}*\nAdded ${addedCount} tracks:\n`;
+    tracksByArtist.forEach((t, i) => {
+      msg += `> ${i + 1}. *${t.name}*\n`;
+    });
+
+    _slackMessage(msg, channel);
+
+  } catch (err) {
+    logger.error(`BESTOF error: ${err.stack || err}`);
+    _slackMessage(`Error fetching BESTOF for *${artistName}*.`, channel);
+  }
+}
+
+
+
+
+
+
 function _listImmune(channel) {
   const gongBannedTracksList = Object.keys(gongBannedTracks);
   if (gongBannedTracksList.length === 0) {
@@ -1750,10 +1837,6 @@ function _blacklist(input, channel, userName) {
   _slackMessage(`"${term}" has been added to the blacklist.`, channel);
 }
 
-function _bestof(input, channel, userName) {
-  _logUserAction(userName, 'bestof');
-  _slackMessage('This feature is not yet implemented. Please try again later.', channel);
-}
 
 function _append(input, channel, userName) {
   _logUserAction(userName, 'append');
