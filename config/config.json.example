@@ -17,6 +17,6 @@
     "blacklist" : "@justin.bieber, @one.direction",
     "spotifyClientId": "supersecretid",
     "spotifyClientSecret": "extrasupersecretsecret",
-    "logLevel": "info"
+    "logLevel": "info",
     "useLegacyBot": false
 }
