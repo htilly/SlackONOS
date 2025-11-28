@@ -1497,24 +1497,60 @@ async function _addalbum(input, channel, userName) {
   try {
     const result = await spotify.getAlbum(album);
 
-    // Check player state to see if we should auto-play
-    let shouldAutoPlay = false;
-    try {
-      const state = await sonos.getCurrentState();
-      if (state !== 'playing' && state !== 'transitioning') {
-        shouldAutoPlay = true;
+    // Get current player state
+    const state = await sonos.getCurrentState();
+    logger.info('Current state for addalbum: ' + state);
+
+    // If stopped, flush the queue to start fresh
+    if (state === 'stopped') {
+      logger.info('Player stopped - flushing queue and starting fresh');
+      try {
+        await sonos.flush();
+        logger.info('Queue flushed');
+      } catch (flushErr) {
+        logger.warn('Could not flush queue: ' + flushErr.message);
       }
-    } catch (stateErr) {
-      logger.warn('Could not check player state: ' + stateErr.message);
+
+      await sonos.queue(result.uri);
+      logger.info('Added album: ' + result.name);
+
+      // Wait a moment before starting playback
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await sonos.play();
+
+      let text = 'Started fresh! Added album ' + '*' + result.name + '*' + ' by ' + result.artist + ' and began playback. :notes:';
+
+      if (result.coverUrl) {
+        _slackMessage(text, channel, {
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: text
+              },
+              accessory: {
+                type: "image",
+                image_url: result.coverUrl,
+                alt_text: result.name + " cover"
+              }
+            }
+          ]
+        });
+      } else {
+        _slackMessage(text, channel);
+      }
+      return;
     }
 
+    // For playing/paused/transitioning states, just add to queue
     await sonos.queue(result.uri);
     logger.info('Added album: ' + result.name);
 
     let text = 'Added album ' + '*' + result.name + '*' + ' by ' + result.artist + ' to the queue.';
 
-    // Auto-play if player was not playing
-    if (shouldAutoPlay) {
+    // Auto-play if player was paused or in another non-playing state
+    if (state !== 'playing' && state !== 'transitioning') {
       try {
         await sonos.play();
         logger.info('Player was not playing, started playback.');
@@ -1595,24 +1631,42 @@ async function _addplaylist(input, channel, userName) {
   try {
     const result = await spotify.getPlaylist(playlist);
 
-    // Check player state to see if we should auto-play
-    let shouldAutoPlay = false;
-    try {
-      const state = await sonos.getCurrentState();
-      if (state !== 'playing' && state !== 'transitioning') {
-        shouldAutoPlay = true;
+    // Get current player state
+    const state = await sonos.getCurrentState();
+    logger.info('Current state for addplaylist: ' + state);
+
+    // If stopped, flush the queue to start fresh
+    if (state === 'stopped') {
+      logger.info('Player stopped - flushing queue and starting fresh');
+      try {
+        await sonos.flush();
+        logger.info('Queue flushed');
+      } catch (flushErr) {
+        logger.warn('Could not flush queue: ' + flushErr.message);
       }
-    } catch (stateErr) {
-      logger.warn('Could not check player state: ' + stateErr.message);
+
+      await sonos.queue(result.uri);
+      logger.info('Added playlist: ' + result.name);
+
+      // Wait a moment before starting playback
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await sonos.play();
+
+      _slackMessage(
+        'Started fresh! Added playlist ' + '*' + result.name + '*' + ' by ' + result.owner + ' and began playback. :notes:',
+        channel
+      );
+      return;
     }
 
+    // For playing/paused/transitioning states, just add to queue
     await sonos.queue(result.uri);
     logger.info('Added playlist: ' + result.name);
 
     let msg = 'Added playlist ' + '*' + result.name + '*' + ' by ' + result.owner + ' to the queue.';
 
-    // Auto-play if player was not playing
-    if (shouldAutoPlay) {
+    // Auto-play if player was paused or in another non-playing state
+    if (state !== 'playing' && state !== 'transitioning') {
       try {
         await sonos.play();
         logger.info('Player was not playing, started playback.');
