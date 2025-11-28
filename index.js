@@ -182,6 +182,7 @@ let trackVoteCount = {}; // Initialize vote count object
 let trackVoteUsers = {}; // Track users who have voted for each track
 
 const SlackSystem = require('./slack');
+const DiscordSystem = require('./discord');
 
 // Initialize Slack System
 const slack = SlackSystem({
@@ -191,11 +192,40 @@ const slack = SlackSystem({
   onCommand: processInput
 });
 
-// Start Slack - Moved to async startup sequence below
+// Initialize Discord (optional - only if token configured)
+let discord = null;
 
-// Helper function wrapper for backward compatibility
+// Thread-local context for tracking current platform
+let currentPlatform = 'slack';
+let currentChannel = null;
+
+// Helper function wrapper for backward compatibility (Slack)
 async function _slackMessage(message, channel_id, options = {}) {
-  await slack.sendMessage(message, channel_id, options);
+  // Auto-detect platform based on context if channel matches Discord
+  const platform = currentPlatform;
+  const targetChannel = channel_id || currentChannel;
+  
+  if (platform === 'discord' && discord) {
+    await DiscordSystem.sendDiscordMessage(targetChannel, message);
+  } else {
+    await slack.sendMessage(message, targetChannel, options);
+  }
+}
+
+// Helper function for Discord messages
+async function _discordMessage(message, channel_id) {
+  if (discord) {
+    await DiscordSystem.sendDiscordMessage(channel_id, message);
+  }
+}
+
+// Unified message sender - works for both platforms
+async function _sendMessage(message, channel_id, platform = 'slack') {
+  if (platform === 'discord') {
+    await _discordMessage(message, channel_id);
+  } else {
+    await slack.sendMessage(message, channel_id);
+  }
 }
 
 // Global web client for other functions that might need it (like _checkUser)
@@ -341,6 +371,21 @@ async function _checkSystemHealth() {
       logger.info('✅ Slack connection established.');
     } catch (slackErr) {
       throw new Error(`Failed to connect to Slack API: ${slackErr.message}`);
+    }
+
+    // 2b. Initialize Discord (optional)
+    if (config.get('discordToken')) {
+      try {
+        discord = await DiscordSystem.initializeDiscord({
+          discordToken: config.get('discordToken'),
+          discordChannels: config.get('discordChannels') || []
+        }, processInput);
+        logger.info('✅ Discord connection established.');
+      } catch (discordErr) {
+        logger.warn(`Discord initialization failed: ${discordErr.message}. Continuing with Slack only.`);
+      }
+    } else {
+      logger.info('ℹ️  Discord token not configured - running in Slack-only mode');
     }
 
     // 3. Lookup Channels
@@ -503,7 +548,11 @@ for (const [cmd, meta] of commandRegistry) {
   aliases.forEach(a => aliasMap.set(a.toLowerCase(), cmd));
 }
 
-async function processInput(text, channel, userName) {
+async function processInput(text, channel, userName, platform = 'slack') {
+  // Set platform context for message routing
+  currentPlatform = platform;
+  currentChannel = channel;
+  
   if (!text || typeof text !== 'string') {
     logger.warn('processInput called without text');
     return;
@@ -524,7 +573,7 @@ async function processInput(text, channel, userName) {
 
   if (!cmdKey) {
     // Unknown command — ignore or optionally respond
-    logger.info(`Unknown command "${rawTerm}" from ${userName} in ${channel}`);
+    logger.info(`Unknown command "${rawTerm}" from ${userName} in ${channel} [${platform}]`);
     return;
   }
 
