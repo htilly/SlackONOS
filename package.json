@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "pretest": "if [ ! -f 'config/config.json' ]; then cp 'config/config.json.example' 'config/config.json'; fi",
-    "test": "mocha --reporter spec"
+    "test": "NODE_ENV=test mocha --reporter spec"
   },
   "keywords": [
     "sonos",
@@ -18,22 +18,23 @@
     "url": "git@github.com:htilly/zenmusic.git"
   },
   "devDependencies": {
-    "mocha": "^11.5.0",
-    "chai": "5.2.0"
+    "mocha": "^11.7.3",
+    "chai": "6.2.0"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@slack/rtm-api": "^7.0.2",
+    "@slack/rtm-api": "^7.0.4",
     "@slack/web-api": "^7.12.0",
     "nconf": "^0.13.0",
     "sonos": "^1.14.1",
     "urlencode": "^2.0.0",
     "@jsfeb26/urllib-sync": "^1.1.4",
-    "winston": "^3.17.0",
+    "winston": "^3.18.3",
     "xml2js": "^0.6.2",
     "gtts": "^0.2.1",
-    "mp3-duration": "^1.1.0"
+    "mp3-duration": "^1.1.0",
+    "@slack/socket-mode": "^1.0.2"
   },
   "engines": {
     "node": ">=7.5"
