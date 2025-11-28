@@ -3,12 +3,17 @@
     "bohemian_rhapsody": {
       "name": "Bohemian Rhapsody",
       "artist": "Queen",
-      "uri": "spotify:track:4u7EnebtmKWzUH433cf5Qv"
+      "uri": "spotify:track:3z8h0TU7ReDPLIbEnYhWZb"
     },
     "smells_like_teen_spirit": {
       "name": "Smells Like Teen Spirit",
       "artist": "Nirvana",
       "uri": "spotify:track:4CeeEOM32jQcH3eN9Q2dGj"
+    },
+    "everlong": {
+      "name": "Everlong",
+      "artist": "Foo Fighters",
+      "uri": "spotify:track:5UWwZ5lm5PKu6eKsHAGxOk"
     }
   },
   "searchTrackList": {
@@ -16,39 +21,546 @@
       {
         "name": "Everlong",
         "artist": "Foo Fighters",
-        "artists": [{"name": "Foo Fighters"}],
         "uri": "spotify:track:5UWwZ5lm5PKu6eKsHAGxOk",
-        "popularity": 80
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/7jy3rLJdDQY21OgRLCZ9sD"
+            },
+            "href": "https://api.spotify.com/v1/artists/7jy3rLJdDQY21OgRLCZ9sD",
+            "id": "7jy3rLJdDQY21OgRLCZ9sD",
+            "name": "Foo Fighters",
+            "type": "artist",
+            "uri": "spotify:artist:7jy3rLJdDQY21OgRLCZ9sD"
+          }
+        ],
+        "popularity": 85
       },
       {
         "name": "The Pretender",
         "artist": "Foo Fighters",
-        "artists": [{"name": "Foo Fighters"}],
-        "uri": "spotify:track:7x9aauaA9cu6tyfpHnqDLo",
-        "popularity": 78
+        "uri": "spotify:track:7x8dCjCr0x6x2lXKujYD34",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/7jy3rLJdDQY21OgRLCZ9sD"
+            },
+            "href": "https://api.spotify.com/v1/artists/7jy3rLJdDQY21OgRLCZ9sD",
+            "id": "7jy3rLJdDQY21OgRLCZ9sD",
+            "name": "Foo Fighters",
+            "type": "artist",
+            "uri": "spotify:artist:7jy3rLJdDQY21OgRLCZ9sD"
+          }
+        ],
+        "popularity": 79
       },
       {
-        "name": "Learn to Fly",
+        "name": "My Hero",
         "artist": "Foo Fighters",
-        "artists": [{"name": "Foo Fighters"}],
-        "uri": "spotify:track:2O14MJzlBQB2xtWLBZOg0z",
-        "popularity": 75
+        "uri": "spotify:track:4dVbhS6OiYvFikshyaQaCN",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/7jy3rLJdDQY21OgRLCZ9sD"
+            },
+            "href": "https://api.spotify.com/v1/artists/7jy3rLJdDQY21OgRLCZ9sD",
+            "id": "7jy3rLJdDQY21OgRLCZ9sD",
+            "name": "Foo Fighters",
+            "type": "artist",
+            "uri": "spotify:artist:7jy3rLJdDQY21OgRLCZ9sD"
+          }
+        ],
+        "popularity": 76
+      },
+      {
+        "name": "Best of You",
+        "artist": "Foo Fighters",
+        "uri": "spotify:track:5FZxsHWIvUsmSK1IAvm2pp",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/7jy3rLJdDQY21OgRLCZ9sD"
+            },
+            "href": "https://api.spotify.com/v1/artists/7jy3rLJdDQY21OgRLCZ9sD",
+            "id": "7jy3rLJdDQY21OgRLCZ9sD",
+            "name": "Foo Fighters",
+            "type": "artist",
+            "uri": "spotify:artist:7jy3rLJdDQY21OgRLCZ9sD"
+          }
+        ],
+        "popularity": 76
+      },
+      {
+        "name": "Everlong - Live At Wembley Stadium, 2008",
+        "artist": "Foo Fighters",
+        "uri": "spotify:track:7F15yxnudmYJkBqAzmpbZU",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/7jy3rLJdDQY21OgRLCZ9sD"
+            },
+            "href": "https://api.spotify.com/v1/artists/7jy3rLJdDQY21OgRLCZ9sD",
+            "id": "7jy3rLJdDQY21OgRLCZ9sD",
+            "name": "Foo Fighters",
+            "type": "artist",
+            "uri": "spotify:artist:7jy3rLJdDQY21OgRLCZ9sD"
+          }
+        ],
+        "popularity": 27
+      },
+      {
+        "name": "I Wanna Go Home",
+        "artist": "Sator",
+        "uri": "spotify:track:4gcFZaW5QlUwJ85ypNunq7",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/4NPIUulkJi56Hj95u671sM"
+            },
+            "href": "https://api.spotify.com/v1/artists/4NPIUulkJi56Hj95u671sM",
+            "id": "4NPIUulkJi56Hj95u671sM",
+            "name": "Sator",
+            "type": "artist",
+            "uri": "spotify:artist:4NPIUulkJi56Hj95u671sM"
+          }
+        ],
+        "popularity": 40
+      },
+      {
+        "name": "Oas",
+        "artist": "Dina Ögon",
+        "uri": "spotify:track:0XpRnotgEEsbFHY7UfXH3o",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/55Juru3AZOT8GrCxOaV3EI"
+            },
+            "href": "https://api.spotify.com/v1/artists/55Juru3AZOT8GrCxOaV3EI",
+            "id": "55Juru3AZOT8GrCxOaV3EI",
+            "name": "Dina Ögon",
+            "type": "artist",
+            "uri": "spotify:artist:55Juru3AZOT8GrCxOaV3EI"
+          }
+        ],
+        "popularity": 44
+      },
+      {
+        "name": "Luft",
+        "artist": "Dia Psalma",
+        "uri": "spotify:track:2Qp6NIVjlnn63xoZUc5MOd",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/3CP5sRSk2ExHj3td5pXLrN"
+            },
+            "href": "https://api.spotify.com/v1/artists/3CP5sRSk2ExHj3td5pXLrN",
+            "id": "3CP5sRSk2ExHj3td5pXLrN",
+            "name": "Dia Psalma",
+            "type": "artist",
+            "uri": "spotify:artist:3CP5sRSk2ExHj3td5pXLrN"
+          }
+        ],
+        "popularity": 38
+      },
+      {
+        "name": "Terra",
+        "artist": "Terra ",
+        "uri": "spotify:track:0JPZByq6e8cDA9jagoD9AI",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/38KJOj7CCAHBDSLkjczak1"
+            },
+            "href": "https://api.spotify.com/v1/artists/38KJOj7CCAHBDSLkjczak1",
+            "id": "38KJOj7CCAHBDSLkjczak1",
+            "name": "Terra ",
+            "type": "artist",
+            "uri": "spotify:artist:38KJOj7CCAHBDSLkjczak1"
+          }
+        ],
+        "popularity": 37
+      },
+      {
+        "name": "The Life Of Davy Grolton - Long Road To Ruin Extra",
+        "artist": "Foo Fighters",
+        "uri": "spotify:track:1msuOn45qY4v3LDDJ7kiXr",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/7jy3rLJdDQY21OgRLCZ9sD"
+            },
+            "href": "https://api.spotify.com/v1/artists/7jy3rLJdDQY21OgRLCZ9sD",
+            "id": "7jy3rLJdDQY21OgRLCZ9sD",
+            "name": "Foo Fighters",
+            "type": "artist",
+            "uri": "spotify:artist:7jy3rLJdDQY21OgRLCZ9sD"
+          }
+        ],
+        "popularity": 2
       }
     ],
     "queen": [
       {
+        "name": "Queen of Kings",
+        "artist": "Alessandra",
+        "uri": "spotify:track:14LdhxElpZS0rKVV4nxtdA",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/35HMF6Y8dSzNfeJs3X65fw"
+            },
+            "href": "https://api.spotify.com/v1/artists/35HMF6Y8dSzNfeJs3X65fw",
+            "id": "35HMF6Y8dSzNfeJs3X65fw",
+            "name": "Alessandra",
+            "type": "artist",
+            "uri": "spotify:artist:35HMF6Y8dSzNfeJs3X65fw"
+          }
+        ],
+        "popularity": 67
+      },
+      {
         "name": "Bohemian Rhapsody",
         "artist": "Queen",
-        "artists": [{"name": "Queen"}],
-        "uri": "spotify:track:4u7EnebtmKWzUH433cf5Qv",
+        "uri": "spotify:track:3z8h0TU7ReDPLIbEnYhWZb",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/1dfeR4HaWDbWqFHLkxsg1d"
+            },
+            "href": "https://api.spotify.com/v1/artists/1dfeR4HaWDbWqFHLkxsg1d",
+            "id": "1dfeR4HaWDbWqFHLkxsg1d",
+            "name": "Queen",
+            "type": "artist",
+            "uri": "spotify:artist:1dfeR4HaWDbWqFHLkxsg1d"
+          }
+        ],
+        "popularity": 75
+      },
+      {
+        "name": "queen of the season",
+        "artist": "Hazlett",
+        "uri": "spotify:track:7dOu2a1hPCGPQI58lDSpel",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/1zO3MgzmcwZLLNUQqeU2XH"
+            },
+            "href": "https://api.spotify.com/v1/artists/1zO3MgzmcwZLLNUQqeU2XH",
+            "id": "1zO3MgzmcwZLLNUQqeU2XH",
+            "name": "Hazlett",
+            "type": "artist",
+            "uri": "spotify:artist:1zO3MgzmcwZLLNUQqeU2XH"
+          }
+        ],
+        "popularity": 47
+      },
+      {
+        "name": "Who Wants To Live Forever - Remastered 2011",
+        "artist": "Queen",
+        "uri": "spotify:track:3SGP8It5WDnCONyApJKRTJ",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/1dfeR4HaWDbWqFHLkxsg1d"
+            },
+            "href": "https://api.spotify.com/v1/artists/1dfeR4HaWDbWqFHLkxsg1d",
+            "id": "1dfeR4HaWDbWqFHLkxsg1d",
+            "name": "Queen",
+            "type": "artist",
+            "uri": "spotify:artist:1dfeR4HaWDbWqFHLkxsg1d"
+          }
+        ],
+        "popularity": 67
+      },
+      {
+        "name": "Don't Stop Me Now - Remastered 2011",
+        "artist": "Queen",
+        "uri": "spotify:track:5T8EDUDqKcs6OSOwEsfqG7",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/1dfeR4HaWDbWqFHLkxsg1d"
+            },
+            "href": "https://api.spotify.com/v1/artists/1dfeR4HaWDbWqFHLkxsg1d",
+            "id": "1dfeR4HaWDbWqFHLkxsg1d",
+            "name": "Queen",
+            "type": "artist",
+            "uri": "spotify:artist:1dfeR4HaWDbWqFHLkxsg1d"
+          }
+        ],
+        "popularity": 83
+      },
+      {
+        "name": "I Want To Break Free",
+        "artist": "Queen",
+        "uri": "spotify:track:7iAqvWLgZzXvH38lA06QZg",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/1dfeR4HaWDbWqFHLkxsg1d"
+            },
+            "href": "https://api.spotify.com/v1/artists/1dfeR4HaWDbWqFHLkxsg1d",
+            "id": "1dfeR4HaWDbWqFHLkxsg1d",
+            "name": "Queen",
+            "type": "artist",
+            "uri": "spotify:artist:1dfeR4HaWDbWqFHLkxsg1d"
+          }
+        ],
+        "popularity": 72
+      },
+      {
+        "name": "The Show Must Go On",
+        "artist": "Queen",
+        "uri": "spotify:track:5WZDLZVCvY1rEyNir6k8Pg",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/1dfeR4HaWDbWqFHLkxsg1d"
+            },
+            "href": "https://api.spotify.com/v1/artists/1dfeR4HaWDbWqFHLkxsg1d",
+            "id": "1dfeR4HaWDbWqFHLkxsg1d",
+            "name": "Queen",
+            "type": "artist",
+            "uri": "spotify:artist:1dfeR4HaWDbWqFHLkxsg1d"
+          }
+        ],
+        "popularity": 63
+      },
+      {
+        "name": "Dancing Queen",
+        "artist": "ABBA",
+        "uri": "spotify:track:0GjEhVFGZW8afUYGChu3Rr",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/0LcJLqbBmaGUft1e9Mm8HV"
+            },
+            "href": "https://api.spotify.com/v1/artists/0LcJLqbBmaGUft1e9Mm8HV",
+            "id": "0LcJLqbBmaGUft1e9Mm8HV",
+            "name": "ABBA",
+            "type": "artist",
+            "uri": "spotify:artist:0LcJLqbBmaGUft1e9Mm8HV"
+          }
+        ],
         "popularity": 85
       },
       {
-        "name": "We Will Rock You",
-        "artist": "Queen",
-        "artists": [{"name": "Queen"}],
-        "uri": "spotify:track:54flyrjcdnQdco7300avMJ",
+        "name": "Queen Of Hearts",
+        "artist": "Saxon",
+        "uri": "spotify:track:3DvimbZfQDeQmYnI7FRTfn",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/71vVmHeNgCVSa5SVmfvscU"
+            },
+            "href": "https://api.spotify.com/v1/artists/71vVmHeNgCVSa5SVmfvscU",
+            "id": "71vVmHeNgCVSa5SVmfvscU",
+            "name": "Saxon",
+            "type": "artist",
+            "uri": "spotify:artist:71vVmHeNgCVSa5SVmfvscU"
+          }
+        ],
+        "popularity": 2
+      },
+      {
+        "name": "Queen of My Heart - Live At Wembley '06",
+        "artist": "Westlife",
+        "uri": "spotify:track:02nl34bVCDCKo4hU8IED1X",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/5Z1CCuBsyhEHngq3U5IraY"
+            },
+            "href": "https://api.spotify.com/v1/artists/5Z1CCuBsyhEHngq3U5IraY",
+            "id": "5Z1CCuBsyhEHngq3U5IraY",
+            "name": "Westlife",
+            "type": "artist",
+            "uri": "spotify:artist:5Z1CCuBsyhEHngq3U5IraY"
+          }
+        ],
+        "popularity": 7
+      }
+    ],
+    "nirvana": [
+      {
+        "name": "Smells Like Teen Spirit",
+        "artist": "Nirvana",
+        "uri": "spotify:track:4CeeEOM32jQcH3eN9Q2dGj",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/6olE6TJLqED3rqDCT0FyPh"
+            },
+            "href": "https://api.spotify.com/v1/artists/6olE6TJLqED3rqDCT0FyPh",
+            "id": "6olE6TJLqED3rqDCT0FyPh",
+            "name": "Nirvana",
+            "type": "artist",
+            "uri": "spotify:artist:6olE6TJLqED3rqDCT0FyPh"
+          }
+        ],
+        "popularity": 85
+      },
+      {
+        "name": "Nirvana",
+        "artist": "Yasin",
+        "uri": "spotify:track:5iCLnB3AaBjk9lVwnAeyaO",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/6rYEqmajzlhGVaayOJ2bpJ"
+            },
+            "href": "https://api.spotify.com/v1/artists/6rYEqmajzlhGVaayOJ2bpJ",
+            "id": "6rYEqmajzlhGVaayOJ2bpJ",
+            "name": "Yasin",
+            "type": "artist",
+            "uri": "spotify:artist:6rYEqmajzlhGVaayOJ2bpJ"
+          }
+        ],
+        "popularity": 39
+      },
+      {
+        "name": "Come As You Are",
+        "artist": "Nirvana",
+        "uri": "spotify:track:2RsAajgo0g7bMCHxwH3Sk0",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/6olE6TJLqED3rqDCT0FyPh"
+            },
+            "href": "https://api.spotify.com/v1/artists/6olE6TJLqED3rqDCT0FyPh",
+            "id": "6olE6TJLqED3rqDCT0FyPh",
+            "name": "Nirvana",
+            "type": "artist",
+            "uri": "spotify:artist:6olE6TJLqED3rqDCT0FyPh"
+          }
+        ],
+        "popularity": 83
+      },
+      {
+        "name": "Something In The Way",
+        "artist": "Nirvana",
+        "uri": "spotify:track:4gHnSNHs8RyVukKoWdS99f",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/6olE6TJLqED3rqDCT0FyPh"
+            },
+            "href": "https://api.spotify.com/v1/artists/6olE6TJLqED3rqDCT0FyPh",
+            "id": "6olE6TJLqED3rqDCT0FyPh",
+            "name": "Nirvana",
+            "type": "artist",
+            "uri": "spotify:artist:6olE6TJLqED3rqDCT0FyPh"
+          }
+        ],
+        "popularity": 73
+      },
+      {
+        "name": "Lithium",
+        "artist": "Nirvana",
+        "uri": "spotify:track:5vHLwhxxlGzmClMcxRRFPr",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/6olE6TJLqED3rqDCT0FyPh"
+            },
+            "href": "https://api.spotify.com/v1/artists/6olE6TJLqED3rqDCT0FyPh",
+            "id": "6olE6TJLqED3rqDCT0FyPh",
+            "name": "Nirvana",
+            "type": "artist",
+            "uri": "spotify:artist:6olE6TJLqED3rqDCT0FyPh"
+          }
+        ],
+        "popularity": 74
+      },
+      {
+        "name": "Rape Me",
+        "artist": "Nirvana",
+        "uri": "spotify:track:5Rizj5FLb2AyNKu9esjYY6",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/6olE6TJLqED3rqDCT0FyPh"
+            },
+            "href": "https://api.spotify.com/v1/artists/6olE6TJLqED3rqDCT0FyPh",
+            "id": "6olE6TJLqED3rqDCT0FyPh",
+            "name": "Nirvana",
+            "type": "artist",
+            "uri": "spotify:artist:6olE6TJLqED3rqDCT0FyPh"
+          }
+        ],
+        "popularity": 72
+      },
+      {
+        "name": "Heart-Shaped Box",
+        "artist": "Nirvana",
+        "uri": "spotify:track:11LmqTE2naFULdEP94AUBa",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/6olE6TJLqED3rqDCT0FyPh"
+            },
+            "href": "https://api.spotify.com/v1/artists/6olE6TJLqED3rqDCT0FyPh",
+            "id": "6olE6TJLqED3rqDCT0FyPh",
+            "name": "Nirvana",
+            "type": "artist",
+            "uri": "spotify:artist:6olE6TJLqED3rqDCT0FyPh"
+          }
+        ],
         "popularity": 82
+      },
+      {
+        "name": "Nirvana - Live at Atlantis Studios",
+        "artist": "Dina Ögon",
+        "uri": "spotify:track:5dk7IrOuE74ozGZapamLyF",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/55Juru3AZOT8GrCxOaV3EI"
+            },
+            "href": "https://api.spotify.com/v1/artists/55Juru3AZOT8GrCxOaV3EI",
+            "id": "55Juru3AZOT8GrCxOaV3EI",
+            "name": "Dina Ögon",
+            "type": "artist",
+            "uri": "spotify:artist:55Juru3AZOT8GrCxOaV3EI"
+          }
+        ],
+        "popularity": 1
+      },
+      {
+        "name": "Dumb",
+        "artist": "Nirvana",
+        "uri": "spotify:track:5gRcv46AMTrosmTOqrOV3Q",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/6olE6TJLqED3rqDCT0FyPh"
+            },
+            "href": "https://api.spotify.com/v1/artists/6olE6TJLqED3rqDCT0FyPh",
+            "id": "6olE6TJLqED3rqDCT0FyPh",
+            "name": "Nirvana",
+            "type": "artist",
+            "uri": "spotify:artist:6olE6TJLqED3rqDCT0FyPh"
+          }
+        ],
+        "popularity": 74
+      },
+      {
+        "name": "My Best Friend's Girl - Live In Munich, Germany/1994",
+        "artist": "Nirvana",
+        "uri": "spotify:track:2W45IzpSYv2DrU6EUYM38z",
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/6olE6TJLqED3rqDCT0FyPh"
+            },
+            "href": "https://api.spotify.com/v1/artists/6olE6TJLqED3rqDCT0FyPh",
+            "id": "6olE6TJLqED3rqDCT0FyPh",
+            "name": "Nirvana",
+            "type": "artist",
+            "uri": "spotify:artist:6olE6TJLqED3rqDCT0FyPh"
+          }
+        ],
+        "popularity": 17
       }
     ]
   },
@@ -56,32 +568,70 @@
     "dark_side_of_the_moon": {
       "name": "The Dark Side of the Moon",
       "artist": "Pink Floyd",
-      "uri": "spotify:album:4LH4d3cOWNNsVw41Gqt2kv",
-      "coverUrl": "https://i.scdn.co/image/example"
+      "uri": "spotify:album:4LH4d3cOWNNsVw41Gqt2kv"
+    },
+    "nevermind": {
+      "name": "Nevermind (Remastered)",
+      "artist": "Nirvana",
+      "uri": "spotify:album:2UJcKiJxNryhL050F5Z1Fk"
     }
   },
   "searchPlaylist": {
     "rock_classics": [
       {
-        "name": "Rock Classics",
-        "owner": "Spotify",
-        "uri": "spotify:playlist:37i9dQZF1DWXRqgorJj26U"
+        "name": "100 Greatest Rock Songs",
+        "owner": "Topsify Australia",
+        "tracks": 123,
+        "uri": "spotify:playlist:61jNo7WKLOIQkahju8i0hw"
+      },
+      {
+        "name": "90s Rock Classics",
+        "owner": "brianruizc",
+        "tracks": 73,
+        "uri": "spotify:playlist:2HfFccisPxQfprhgIHM7XH"
+      }
+    ],
+    "chill_hits": [
+      {
+        "name": "Chill Hits 2025",
+        "owner": "We Are Diamond",
+        "tracks": 189,
+        "uri": "spotify:playlist:3R9f8YnwkTrDqhuJ5WHqP1"
+      },
+      {
+        "name": "Lounge Music 2025 🍹 Soft House, Ibiza Chill & Lounge Hits",
+        "owner": "Storm Music Group",
+        "tracks": 303,
+        "uri": "spotify:playlist:3ZrIRwh11hu5L9XC42ohmm"
       }
     ]
   },
   "getAlbum": {
     "nevermind": {
-      "name": "Nevermind",
+      "name": "Nevermind (Remastered)",
       "artist": "Nirvana",
-      "uri": "spotify:album:2guirTSEqymP3ysHkmEq6a",
-      "coverUrl": "https://i.scdn.co/image/example2"
+      "uri": "spotify:album:2UJcKiJxNryhL050F5Z1Fk",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273fbc71c99f9c1296c56dd51b6"
+    },
+    "dark_side": {
+      "name": "The Dark Side of the Moon",
+      "artist": "Pink Floyd",
+      "uri": "spotify:album:4LH4d3cOWNNsVw41Gqt2kv",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273db216ca805faf5fe35df4ee6"
     }
   },
   "getPlaylist": {
+    "rock_classics": {
+      "name": "100 Greatest Rock Songs",
+      "owner": "Topsify Australia",
+      "tracks": 123,
+      "uri": "spotify:playlist:61jNo7WKLOIQkahju8i0hw"
+    },
     "chill_hits": {
-      "name": "Chill Hits",
-      "owner": "Spotify",
-      "uri": "spotify:playlist:37i9dQZF1DX4WYpdgoIcn6"
+      "name": "Chill Hits 2025",
+      "owner": "We Are Diamond",
+      "tracks": 189,
+      "uri": "spotify:playlist:3R9f8YnwkTrDqhuJ5WHqP1"
     }
   }
 }
