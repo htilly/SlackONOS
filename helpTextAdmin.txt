@@ -1,20 +1,24 @@
-*------ ADMIN FUNCTIONS ------*
-`debug` : show debug info for Spotify, Node and Sonos
-`flush` : flush the current queue
-`remove` *number* : removes the track in the queue
-`move` *number* *number* : move the given track to desired position in the queue
-`setvolume` *number* : sets volume
-`play` : play track
-`stop` : stop life
-`say` *text* : text to speech
-`pause` : pause life
-`resume` : resume after pause
-`next` : play next track
-`previous` : play previous track
-`shuffle` : set playmode to shuffle
-`normal` : set playmode to normal
-`blacklist` : show users on blacklist
-`blacklist add @username` : add `@username` to the blacklist
-`blacklist del @username` : remove `@username` from the blacklist
-`stats` : show statisics for users and commands. Add username as input for specific users stats.
- ===  ===  === SlackONOS@GitHub ===  ===  ===
+*🎛️ Playback Control:*
+> `play` / `pause` / `resume` / `stop` - Basic playback controls.
+> `next` - Skip to the next track.
+> `previous` - Go back to the previous track.
+> `setvolume [0-100]` - Set the volume level.
+> `shuffle` / `normal` - Toggle shuffle mode.
+
+*📋 Queue Management:*
+> `flush` - Clear the entire queue instantly. 🗑️
+> `remove [position]` - Remove a specific track from the queue.
+> `move [from] [to]` (or `mv`) - Move a track from one position to another.
+> `thanos` (or `snap`) - Randomly remove half the queue. 💀
+> `blacklist [user]` - Ban/unban a user. Run without args to list blocked users. 🚫
+> `listimmune` - List all tracks currently immune to GONG.
+
+*⚙️ System & Config:*
+> `setconfig [key] [value]` (or `getconfig`) - View/change bot settings.
+{{configValues}}
+> `debug` - Show build number and system info.
+> `stats` - Show usage statistics for all users.
+> `stats [user]` - Show usage statistics for a specific user.
+
+*🗣️ Fun & Extras:*
+> `tts [message]` (or `say`) - Make Sonos speak a message aloud.
