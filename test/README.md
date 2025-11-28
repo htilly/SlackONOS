@@ -98,6 +98,65 @@ describe('Add command with mocked Sonos', function() {
 });
 ```
 
+## 📸 Spela in Spotify-svar (Snapshot Testing)
+
+### Vad är det?
+Istället för att mocka Spotify kan du **spela in riktiga API-svar** en gång och sedan använda dem i tester. Detta kallas "snapshot testing" eller "fixture-based testing".
+
+### Hur det fungerar:
+
+1. **Spela in svar** (kräver Spotify credentials):
+```bash
+npm run test:record
+```
+
+Detta kör skriptet `test/tools/record-spotify-responses.mjs` som:
+- Gör riktiga Spotify API-anrop
+- Sparar svaren till `test/fixtures/spotify-responses.json`
+- Du behöver bara göra detta en gång (eller när du vill uppdatera)
+
+2. **Använd i tester** (inga credentials behövs):
+```bash
+npm test
+```
+
+Testerna i `test/spotify.test.mjs` läser från fixtures och verifierar:
+- ✅ Att Spotify-svar parsas korrekt
+- ✅ Att "bestof" sorterar efter popularity
+- ✅ Att album/playlist formateras rätt
+- ✅ Att URI:er är giltiga
+
+### Fördelar:
+
+✅ **Snabbt** - Inga API-anrop under tester  
+✅ **Reproducerbart** - Samma resultat varje gång  
+✅ **Offline** - Fungerar utan internet  
+✅ **CI-friendly** - GitHub Actions behöver inga Spotify credentials  
+✅ **Realistiskt** - Använder riktiga data från Spotify
+
+### Lägg till fler test-cases:
+
+Editera `test/tools/record-spotify-responses.mjs` och lägg till:
+
+```javascript
+fixtures.searchTrack.my_new_test = await spotify.getTrack('test query');
+```
+
+Kör sedan:
+```bash
+npm run test:record
+```
+
+### Fixture-filen:
+
+`test/fixtures/spotify-responses.json` innehåller:
+- `searchTrack` - Individuella låtsökningar
+- `searchTrackList` - Listor för "bestof" kommandot
+- `searchAlbum` - Albumsökningar
+- `searchPlaylist` - Playlistsökningar
+- `getAlbum` - Album med cover art
+- `getPlaylist` - Playlists med owner info
+
 ## Tips för att skriva nya tester
 
 1. **Isolera logiken**: Bryt ut ren logik från I/O-operationer

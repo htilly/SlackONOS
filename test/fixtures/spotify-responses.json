@@ -1,0 +1,87 @@
+{
+  "searchTrack": {
+    "bohemian_rhapsody": {
+      "name": "Bohemian Rhapsody",
+      "artist": "Queen",
+      "uri": "spotify:track:4u7EnebtmKWzUH433cf5Qv"
+    },
+    "smells_like_teen_spirit": {
+      "name": "Smells Like Teen Spirit",
+      "artist": "Nirvana",
+      "uri": "spotify:track:4CeeEOM32jQcH3eN9Q2dGj"
+    }
+  },
+  "searchTrackList": {
+    "foo_fighters": [
+      {
+        "name": "Everlong",
+        "artist": "Foo Fighters",
+        "artists": [{"name": "Foo Fighters"}],
+        "uri": "spotify:track:5UWwZ5lm5PKu6eKsHAGxOk",
+        "popularity": 80
+      },
+      {
+        "name": "The Pretender",
+        "artist": "Foo Fighters",
+        "artists": [{"name": "Foo Fighters"}],
+        "uri": "spotify:track:7x9aauaA9cu6tyfpHnqDLo",
+        "popularity": 78
+      },
+      {
+        "name": "Learn to Fly",
+        "artist": "Foo Fighters",
+        "artists": [{"name": "Foo Fighters"}],
+        "uri": "spotify:track:2O14MJzlBQB2xtWLBZOg0z",
+        "popularity": 75
+      }
+    ],
+    "queen": [
+      {
+        "name": "Bohemian Rhapsody",
+        "artist": "Queen",
+        "artists": [{"name": "Queen"}],
+        "uri": "spotify:track:4u7EnebtmKWzUH433cf5Qv",
+        "popularity": 85
+      },
+      {
+        "name": "We Will Rock You",
+        "artist": "Queen",
+        "artists": [{"name": "Queen"}],
+        "uri": "spotify:track:54flyrjcdnQdco7300avMJ",
+        "popularity": 82
+      }
+    ]
+  },
+  "searchAlbum": {
+    "dark_side_of_the_moon": {
+      "name": "The Dark Side of the Moon",
+      "artist": "Pink Floyd",
+      "uri": "spotify:album:4LH4d3cOWNNsVw41Gqt2kv",
+      "coverUrl": "https://i.scdn.co/image/example"
+    }
+  },
+  "searchPlaylist": {
+    "rock_classics": [
+      {
+        "name": "Rock Classics",
+        "owner": "Spotify",
+        "uri": "spotify:playlist:37i9dQZF1DWXRqgorJj26U"
+      }
+    ]
+  },
+  "getAlbum": {
+    "nevermind": {
+      "name": "Nevermind",
+      "artist": "Nirvana",
+      "uri": "spotify:album:2guirTSEqymP3ysHkmEq6a",
+      "coverUrl": "https://i.scdn.co/image/example2"
+    }
+  },
+  "getPlaylist": {
+    "chill_hits": {
+      "name": "Chill Hits",
+      "owner": "Spotify",
+      "uri": "spotify:playlist:37i9dQZF1DX4WYpdgoIcn6"
+    }
+  }
+}
