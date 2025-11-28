@@ -219,7 +219,8 @@ module.exports = function (config) {
                 name: track.name,
                 artist: track.artists[0].name,
                 uri: track.uri,
-                artists: track.artists // Keep full artists array for display
+                artists: track.artists, // Keep full artists array for display
+                popularity: track.popularity // Keep popularity for sorting
             }));
         },
 

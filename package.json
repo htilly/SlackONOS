@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "pretest": "if [ ! -f 'config/config.json' ]; then cp 'config/config.json.example' 'config/config.json'; fi",
-    "test": "NODE_ENV=test mocha --reporter spec 'test/**/*.mjs' --exit",
+    "test": "NODE_ENV=test mocha --reporter spec 'test/**/*.mjs' --ignore 'test/tools/**' --exit",
     "test:record": "node test/tools/record-spotify-responses.mjs"
   },
   "keywords": [
