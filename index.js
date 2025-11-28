@@ -201,14 +201,26 @@ let currentChannel = null;
 
 // Helper function wrapper for backward compatibility (Slack)
 async function _slackMessage(message, channel_id, options = {}) {
-  // Auto-detect platform based on context if channel matches Discord
   const platform = currentPlatform;
   const targetChannel = channel_id || currentChannel;
-  
-  if (platform === 'discord' && discord) {
-    await DiscordSystem.sendDiscordMessage(targetChannel, message);
-  } else {
+
+  // If current context is Discord: never try Slack first.
+  if (platform === 'discord') {
+    try {
+      await DiscordSystem.sendDiscordMessage(targetChannel, message);
+      return;
+    } catch (e) {
+      logger.warn(`Discord send failed: ${e.message || e}. Message not delivered.`);
+      return; // Do NOT fall back to Slack; channel IDs incompatible
+    }
+  }
+
+  // Slack context normal path
+  try {
     await slack.sendMessage(message, targetChannel, options);
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    logger.error(`Error sending Slack message: ${msg}`);
   }
 }
 
@@ -378,9 +390,14 @@ async function _checkSystemHealth() {
       try {
         discord = await DiscordSystem.initializeDiscord({
           discordToken: config.get('discordToken'),
-          discordChannels: config.get('discordChannels') || []
-        }, processInput);
-        logger.info('✅ Discord connection established.');
+          discordChannels: config.get('discordChannels') || [],
+          logLevel: config.get('logLevel') || 'info'
+        }, processInput, logger);
+        if (discord) {
+          logger.info('✅ Discord connection established.');
+        } else {
+          logger.warn('Discord returned null (token maybe invalid). Running Slack-only.');
+        }
       } catch (discordErr) {
         logger.warn(`Discord initialization failed: ${discordErr.message}. Continuing with Slack only.`);
       }
