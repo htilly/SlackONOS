@@ -2256,16 +2256,14 @@ async function _tts(input, channel) {
       _slackMessage('Error generating text-to-speech.', channel);
       return;
     }
-    const currentTrack = await sonos.currentTrack();
-    const currentQueuePosition = currentTrack ? currentTrack.queuePosition : 0;
-    const currentUri = currentTrack ? currentTrack.uri : null;
-    const currentPlaybackState = await sonos.getCurrentState();
 
     try {
-      if (currentPlaybackState !== 'stopped') {
-        await sonos.pause();
-      }
+      // Get current track position
+      const currentTrack = await sonos.currentTrack();
+      const currentPosition = currentTrack ? currentTrack.queuePosition : 1;
+      const ttsPosition = currentPosition + 1;
 
+      // Get TTS file duration
       const fileDuration = await new Promise((resolve, reject) => {
         mp3Duration(ttsFilePath, (err, duration) => {
           if (err) reject(err);
@@ -2275,28 +2273,43 @@ async function _tts(input, channel) {
 
       // Use HTTP server to serve the TTS file
       const uri = `http://${ipAddress}:${webPort}/tts.mp3`;
-      logger.info('Queuing TTS file from: ' + uri);
-      await sonos.queue(uri, currentQueuePosition + 1);
-
-      if (currentUri) {
-        await sonos.reorderTracksInQueue(currentQueuePosition + 1, 1, currentQueuePosition + 1, 0);
-      }
+      logger.info('Queuing TTS file from: ' + uri + ' at position ' + ttsPosition);
+      
+      // Queue TTS right after current track
+      await sonos.queue(uri, ttsPosition);
+      
       _slackMessage(ttsMessage[Math.floor(Math.random() * ttsMessage.length)], channel);
 
-      await sonos.play();
+      // Skip to TTS
+      await sonos.next();
+      logger.info('Playing TTS, duration: ' + fileDuration + 's');
 
+      // Wait for TTS to finish playing, then find and remove it from queue
       setTimeout(async () => {
         try {
-          await sonos.removeTracksFromQueue(currentQueuePosition + 2, 1);
-          if (currentUri) {
-            await sonos.play();
+          // Find and remove the TTS file from the queue
+          const queue = await sonos.getQueue();
+          let ttsIndex = -1;
+          
+          for (let i = 0; i < queue.items.length; i++) {
+            if (queue.items[i].uri && queue.items[i].uri.includes('/tts.mp3')) {
+              ttsIndex = i;
+              break;
+            }
+          }
+          
+          if (ttsIndex >= 0) {
+            // Sonos uses 1-based indexing for removeTracksFromQueue
+            await sonos.removeTracksFromQueue(ttsIndex + 1, 1);
+            logger.info('Successfully removed TTS from queue at index ' + ttsIndex);
           } else {
-            await sonos.stop();
+            logger.info('TTS file not found in queue (may have already been removed)');
           }
         } catch (removeErr) {
-          logger.error('Error removing TTS track or resuming playback: ' + removeErr);
+          logger.warn('Could not remove TTS from queue: ' + removeErr.message);
         }
-      }, fileDuration * 1000 + 500); // Wait for the track to finish plus a buffer
+      }, (fileDuration + 1) * 1000); // Wait for TTS to finish + 1 second buffer
+      
     } catch (playbackErr) {
       logger.error('Error during TTS playback sequence: ' + playbackErr);
       _slackMessage('Error playing the message.', channel);
