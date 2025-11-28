@@ -644,16 +644,7 @@ async function processInput(text, channel, userName, platform = 'slack') {
   }
 }
 
-async function _slackMessage(message, channel_id) {
-  try {
-    await web.chat.postMessage({
-      channel: channel_id,
-      text: message,
-    });
-  } catch (error) {
-    logger.error('Error sending message to Slack: ' + error);
-  }
-}
+// Removed duplicate _slackMessage definition (platform-aware version earlier in file is authoritative)
 
 const userCache = {};
 

@@ -1,7 +1,7 @@
 'use strict'
 
 const { Client, GatewayIntentBits, Events } = require('discord.js');
-const logger = require('./logger.js');
+const WinstonWrapper = require('./logger.js');
 
 /**
  * Discord client module for SlackONOS
@@ -10,8 +10,31 @@ const logger = require('./logger.js');
 
 let discordClient = null;
 let botUserId = null;
+let discordLogger = null; // module-level logger reference
 
-async function initializeDiscord(config, messageHandler) {
+// We accept an injected logger (recommended). If not provided we create a minimal one.
+async function initializeDiscord(config, messageHandler, injectedLogger) {
+    let logger = injectedLogger;
+    if (!logger) {
+        try {
+            logger = new WinstonWrapper({
+                level: (config && config.logLevel) || 'info',
+                format: require('winston').format.simple(),
+                transports: [new (require('winston').transports.Console)()]
+            });
+        } catch (e) {
+            logger = {
+                info: console.log,
+                warn: console.warn,
+                error: console.error,
+                debug: console.debug
+            }; // last-resort fallback
+        }
+    }
+
+    // store logger globally for other functions
+    discordLogger = logger;
+
     if (!config.discordToken) {
         logger.warn('Discord token not configured - Discord integration disabled');
         return null;
@@ -30,9 +53,13 @@ async function initializeDiscord(config, messageHandler) {
 
         // Ready event - bot is connected
         discordClient.once(Events.ClientReady, (client) => {
-            botUserId = client.user.id;
-            logger.info(`✅ Discord bot logged in as ${client.user.tag}`);
-            logger.info(`   Bot user ID: ${botUserId}`);
+            try {
+                botUserId = client.user.id;
+                logger.info(`✅ Discord bot logged in as ${client.user.tag}`);
+                logger.info(`   Bot user ID: ${botUserId}`);
+            } catch (e) {
+                console.error('Discord ready logging failed:', e.message);
+            }
         });
 
         // Message event - handle incoming messages
@@ -41,10 +68,13 @@ async function initializeDiscord(config, messageHandler) {
             if (message.author.id === botUserId || message.author.bot) {
                 return;
             }
-
-            // Only respond in configured channels
-            if (config.discordChannels && !config.discordChannels.includes(message.channel.id)) {
-                return;
+            // Only respond in configured channels (supports IDs or names)
+            if (Array.isArray(config.discordChannels) && config.discordChannels.length > 0) {
+                const allowed = config.discordChannels;
+                if (!allowed.includes(message.channel.id) && !allowed.includes(message.channel.name)) {
+                    logger.debug(`[DISCORD] Ignoring message in ${message.channel.name} (${message.channel.id}) - not in allowed list`);
+                    return;
+                }
             }
 
             // Parse message content
@@ -68,7 +98,7 @@ async function initializeDiscord(config, messageHandler) {
 
         // Error handling
         discordClient.on(Events.Error, (error) => {
-            logger.error('[DISCORD] Client error:', error);
+            logger.error(`[DISCORD] Client error: ${error.message || error}`);
         });
 
         // Login to Discord
@@ -78,24 +108,30 @@ async function initializeDiscord(config, messageHandler) {
         return discordClient;
 
     } catch (error) {
-        logger.error('Failed to initialize Discord:', error);
+        logger.error(`Failed to initialize Discord: ${error.message || error}`);
         return null;
     }
 }
 
 async function sendDiscordMessage(channelId, text) {
     if (!discordClient) {
-        logger.warn('Discord client not initialized');
+        if (discordLogger) discordLogger.warn('Discord client not initialized');
         return;
     }
-
     try {
         const channel = await discordClient.channels.fetch(channelId);
-        if (channel && channel.isTextBased()) {
+        if (!channel) {
+            if (discordLogger) discordLogger.warn(`[DISCORD] Cannot find channel ${channelId} to send message`);
+            return;
+        }
+        if (channel.isTextBased && channel.isTextBased()) {
             await channel.send(text);
+            if (discordLogger) discordLogger.debug(`[DISCORD] Sent message to channel ${channelId}`);
+        } else {
+            if (discordLogger) discordLogger.warn(`[DISCORD] Channel ${channelId} is not text-based`);
         }
     } catch (error) {
-        logger.error(`Failed to send Discord message to ${channelId}:`, error);
+        if (discordLogger) discordLogger.error(`Failed to send Discord message to ${channelId}: ${error.message || error}`);
     }
 }
 
