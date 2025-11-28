@@ -77,9 +77,31 @@ module.exports = function (config) {
         return await response.json();
     }
 
+    /**
+     * Convert Spotify HTTP links to Spotify URIs
+     * Example: https://open.spotify.com/track/2PZHam8oh74c1xTQFo86dY?si=... → spotify:track:2PZHam8oh74c1xTQFo86dY
+     */
+    function _convertSpotifyLinkToUri(term) {
+        // Check if it's a Spotify HTTP link
+        const linkPattern = /https?:\/\/open\.spotify\.com\/(track|album|playlist)\/([a-zA-Z0-9]+)(\?.*)?/;
+        const match = term.match(linkPattern);
+
+        if (match) {
+            const type = match[1];  // track, album, or playlist
+            const id = match[2];    // the Spotify ID
+            return `spotify:${type}:${id}`;
+        }
+
+        // Return the original term if it's not a Spotify link
+        return term;
+    }
+
     module.exports.instance = {
         // Modern async methods
         getTrack: async function (term) {
+            // Convert Spotify HTTP links to URIs
+            term = _convertSpotifyLinkToUri(term);
+
             // If it's a Spotify URI
             if (term.startsWith('spotify:track:')) {
                 const trackId = term.split(':')[2];
@@ -112,6 +134,9 @@ module.exports = function (config) {
         },
 
         getAlbum: async function (term) {
+            // Convert Spotify HTTP links to URIs
+            term = _convertSpotifyLinkToUri(term);
+
             if (term.startsWith('spotify:album:')) {
                 const albumId = term.split(':')[2];
                 const data = await _search(`albums/${albumId}`, { market: config.market });
@@ -144,6 +169,9 @@ module.exports = function (config) {
         },
 
         getPlaylist: async function (term) {
+            // Convert Spotify HTTP links to URIs
+            term = _convertSpotifyLinkToUri(term);
+
             if (term.startsWith('spotify:playlist:')) {
                 const playlistId = term.split(':')[2];
                 const data = await _search(`playlists/${playlistId}`, { market: config.market });

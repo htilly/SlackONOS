@@ -53,9 +53,6 @@ module.exports = function SlackSystem({ botToken, appToken, logger, onCommand })
             if (body.type === 'event_callback') {
                 const e = body.event;
 
-                // Log raw event for debugging
-                logger.info(`[EVENT] ${e.type}: ${JSON.stringify(e)}`);
-
                 // Ignore our own messages
                 if (e.user === botUserId) return;
 

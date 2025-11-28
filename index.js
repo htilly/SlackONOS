@@ -18,7 +18,30 @@ const { execSync } = require('child_process');
 const gongBannedTracks = {};
 const SLACK_API_URL_LIST = 'https://slack.com/api/conversations.list';
 const userActionsFile = path.join(__dirname, 'config/userActions.json');
+const blacklistFile = path.join(__dirname, 'config/blacklist.json');
 const WinstonWrapper = require('./logger');
+
+// Helper to load blacklist
+function loadBlacklist() {
+  try {
+    if (fs.existsSync(blacklistFile)) {
+      const data = fs.readFileSync(blacklistFile, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.error('Error loading blacklist:', err);
+  }
+  return [];
+}
+
+// Helper to save blacklist
+function saveBlacklist(list) {
+  try {
+    fs.writeFileSync(blacklistFile, JSON.stringify(list, null, 2));
+  } catch (err) {
+    logger.error('Error saving blacklist:', err);
+  }
+}
 
 
 config.argv()
@@ -41,20 +64,20 @@ config.argv()
     logLevel: 'info'
   });
 
-// Application Config Values
-const gongLimit = config.get('gongLimit');
-const voteImmuneLimit = config.get('voteImmuneLimit');
-const voteLimit = config.get('voteLimit');
-const flushVoteLimit = config.get('flushVoteLimit');
-const maxVolume = config.get('maxVolume');
-const voteTimeLimitMinutes = config.get('voteTimeLimitMinutes') || 5;
+// Application Config Values (let for runtime changes)
+let gongLimit = config.get('gongLimit');
+let voteImmuneLimit = config.get('voteImmuneLimit');
+let voteLimit = config.get('voteLimit');
+let flushVoteLimit = config.get('flushVoteLimit');
+let maxVolume = config.get('maxVolume');
+let voteTimeLimitMinutes = config.get('voteTimeLimitMinutes') || 5;
 const logLevel = config.get('logLevel');
 
 //Spotify Config Values
 const market = config.get('market');
 const clientId = config.get('spotifyClientId');
 const clientSecret = config.get('spotifyClientSecret');
-const searchLimit = config.get('searchLimit');
+let searchLimit = config.get('searchLimit');
 
 //Sonos Config Values
 const sonosIp = config.get('sonos');
@@ -65,9 +88,14 @@ let ipAddress = config.get('ipAddress');
 const slackAppToken = config.get('slackAppToken');
 const slackBotToken = config.get('token');
 
-let blacklist = config.get('blacklist');
-if (!Array.isArray(blacklist)) {
-  blacklist = blacklist.replace(/\s*(,|^|$)\s*/g, '$1').split(/\s*,\s*/);
+let blacklist = loadBlacklist();
+// Migration: If empty, check config just in case (optional, can be removed later)
+if (blacklist.length === 0) {
+  const configBlacklist = config.get('blacklist');
+  if (Array.isArray(configBlacklist) && configBlacklist.length > 0) {
+    blacklist = configBlacklist;
+    saveBlacklist(blacklist); // Save to new file
+  }
 }
 
 /* Initialize Logger
@@ -114,12 +142,7 @@ async function checkSonosConnection() {
 }
 
 // Check Sonos connection on startup
-(async () => {
-  const isConnected = await checkSonosConnection();
-  if (!isConnected) {
-    logger.error('Critical: Unable to connect to Sonos speaker. The application may not function correctly.');
-  }
-})();
+// Sonos connection check moved to startup sequence
 
 if (market !== 'US') {
   sonos.setSpotifyRegion(SONOS.SpotifyRegion.EU);
@@ -257,17 +280,128 @@ async function _lookupChannelID() {
   }
 }
 
+// Validate critical configuration and report to Admin channel
+// Check system health and return a report
+async function _checkSystemHealth() {
+  const report = {
+    status: 'ok',
+    checks: []
+  };
+
+  // 1. Check Spotify
+  const spotifyCheck = { name: 'Spotify API', status: 'ok', message: 'Connected' };
+  if (!clientId || !clientSecret) {
+    spotifyCheck.status = 'error';
+    spotifyCheck.message = 'Missing Client ID or Secret';
+  } else {
+    try {
+      await spotify.searchTrackList('test', 1);
+    } catch (err) {
+      spotifyCheck.status = 'error';
+      spotifyCheck.message = `Connection failed: ${err.message}`;
+    }
+  }
+  report.checks.push(spotifyCheck);
+
+  // 2. Check Sonos
+  const sonosCheck = { name: 'Sonos Speaker', status: 'ok', message: `Connected at ${sonosIp}` };
+  if (!sonosIp) {
+    sonosCheck.status = 'error';
+    sonosCheck.message = 'Missing IP address in config';
+  } else {
+    const isConnected = await checkSonosConnection();
+    if (!isConnected) {
+      sonosCheck.status = 'error';
+      sonosCheck.message = `Unreachable at ${sonosIp}`;
+    }
+  }
+  report.checks.push(sonosCheck);
+
+  // Determine overall status
+  if (report.checks.some(c => c.status === 'error')) {
+    report.status = 'error';
+  }
+
+  return report;
+}
+
 // Coordinated Startup Sequence
 (async () => {
   try {
-    await slack.init();
+    logger.info('Starting SlackONOS...');
+
+    // 1. Validate Slack Tokens (Critical)
+    if (!slackBotToken || !slackAppToken) {
+      throw new Error(`Missing Slack API Keys. Cannot start.`);
+    }
+
+    // 2. Initialize Slack
+    try {
+      await slack.init();
+      logger.info('✅ Slack connection established.');
+    } catch (slackErr) {
+      throw new Error(`Failed to connect to Slack API: ${slackErr.message}`);
+    }
+
+    // 3. Lookup Channels
     await _lookupChannelID();
-    logger.info('System startup complete.');
+
+    // 4. Validate System Health
+    const health = await _checkSystemHealth();
+
+    if (health.status === 'error') {
+      const errors = health.checks
+        .filter(c => c.status === 'error')
+        .map(c => `❌ *${c.name}:* ${c.message}`);
+
+      const msg = "*🚨 Critical Startup Issues Detected:*\n" + errors.join("\n") + "\n\n_The bot may not function correctly until these are fixed._";
+      logger.error('Startup health check failed: ' + JSON.stringify(health));
+
+      if (global.adminChannel) {
+        await _slackMessage(msg, global.adminChannel);
+      }
+    } else {
+      logger.info('✅ System health check passed.');
+    }
+
+    logger.info('🚀 System startup complete.');
   } catch (err) {
-    logger.error('Startup failed: ' + err.message);
+    logger.error('⛔️ STARTUP FAILED: ' + err.message);
     process.exit(1);
   }
 })();
+
+// ==========================================
+// SIMPLE HTTP SERVER FOR TTS
+// ==========================================
+const httpServer = http.createServer((req, res) => {
+  if (req.url === '/tts.mp3') {
+    const ttsFilePath = path.join(os.tmpdir(), 'sonos-tts.mp3');
+    
+    if (fs.existsSync(ttsFilePath)) {
+      res.writeHead(200, {
+        'Content-Type': 'audio/mpeg',
+        'Accept-Ranges': 'bytes'
+      });
+      const stream = fs.createReadStream(ttsFilePath);
+      stream.pipe(res);
+      logger.info('Serving TTS file to Sonos');
+    } else {
+      res.writeHead(404);
+      res.end('TTS file not found');
+    }
+  } else if (req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('SlackONOS TTS Server');
+  } else {
+    res.writeHead(404);
+    res.end('Not found');
+  }
+});
+
+httpServer.listen(webPort, () => {
+  logger.info(`📻 HTTP server for TTS listening on port ${webPort}`);
+});
 
 // ==========================================
 // COMMAND REGISTRY & PARSING
@@ -351,6 +485,7 @@ const commandRegistry = new Map([
   ['shuffle', { fn: _shuffle, admin: true }],
   ['normal', { fn: _normal, admin: true }],
   ['setvolume', { fn: _setVolume, admin: true }],
+  ['setconfig', { fn: _setconfig, admin: true, aliases: ['getconfig', 'config'] }],
   ['blacklist', { fn: _blacklist, admin: true }],
   ['remove', { fn: (args, ch, u) => _removeTrack(args, ch), admin: true }],
   ['thanos', { fn: (args, ch, u) => _purgeHalfQueue(args, ch), admin: true, aliases: ['snap'] }],
@@ -410,6 +545,13 @@ async function processInput(text, channel, userName) {
 
   // Prepare sanitized user identifier (string maybe <@U123>)
   const normalizedUser = normalizeUser(userName);
+
+  // Check if user is blacklisted
+  if (blacklist.includes(normalizedUser)) {
+    logger.info(`Blocked command from blacklisted user: ${userName}`);
+    _slackMessage(`🚫 You are blacklisted and cannot use this bot.`, channel);
+    return;
+  }
 
   // Call handler safely
   try {
@@ -562,19 +704,25 @@ async function _showQueue(channel) {
 
       result.items.map(function (item, i) {
         let trackTitle = item.title;
+        let prefix = '';
+        
+        // Check if this is the currently playing track
+        const isCurrentTrack = track && (i + 1) === track.queuePosition;
+        
+        // Check if track is gong banned (immune)
         if (_isTrackGongBanned(item.title)) {
-          tracks.push(':lock: ' + '_#' + i + '_ ' + trackTitle + ' by ' + item.artist);
-          //           trackTitle = ':lock:' + trackTitle;
+          prefix = ':lock: ';
+          trackTitle = item.title;
         } else if (track && item.title === track.title) {
           trackTitle = '*' + trackTitle + '*';
         } else {
           trackTitle = '_' + trackTitle + '_';
         }
 
-        if (track && (i + 1) === track.queuePosition) {
+        if (isCurrentTrack) {
           tracks.push(':notes: ' + '_#' + i + '_ ' + trackTitle + ' by ' + item.artist);
         } else {
-          tracks.push('>_#' + i + '_ ' + trackTitle + ' by ' + item.artist);
+          tracks.push(prefix + '>_#' + i + '_ ' + trackTitle + ' by ' + item.artist);
         }
       });
       for (var i in tracks) {
@@ -645,7 +793,6 @@ function _upNext(channel) {
 // Vote section. All function related to voting.
 
 let voteTimer = null;
-const voteTimeLimit = voteTimeLimitMinutes * 60 * 1000; // Convert minutes to milliseconds
 
 function _flushvote(channel, userName) {
   _logUserAction(userName, 'flushvote');
@@ -664,12 +811,13 @@ function _flushvote(channel, userName) {
 
     if (flushVoteCounter === 1) {
       // Start the timer on the first vote
+      const currentVoteTimeLimit = voteTimeLimitMinutes * 60 * 1000;
       voteTimer = setTimeout(() => {
         flushVoteCounter = 0;
         flushVoteScore = {};
         _slackMessage('Voting period ended.', channel);
         logger.info('Voting period ended... Guess the playlist isn´t that bad after all!!');
-      }, voteTimeLimit);
+      }, currentVoteTimeLimit);
       _slackMessage(
         "Voting period started for a flush of the queue... You have " +
         voteTimeLimitMinutes +
@@ -708,6 +856,7 @@ function _gong(channel, userName) {
       logger.error(err);
     }
     logger.info('_gong > track: ' + track);
+    gongTrack = track; // Store current track name
 
     if (_isTrackGongBanned(track)) {
       logger.info('Track is gongBanned: ' + track);
@@ -874,7 +1023,23 @@ async function _bestof(input, channel, userName) {
     }
 
     //
-    // STEP 5: Notify
+    // STEP 5: Check if we need to start playback
+    //
+    try {
+      const state = await sonos.getCurrentState();
+      logger.info('Current state after bestof: ' + state);
+
+      if (state !== 'playing' && state !== 'transitioning') {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await sonos.play();
+        logger.info('Started playback after bestof.');
+      }
+    } catch (stateErr) {
+      logger.warn('Could not check/start playback: ' + stateErr.message);
+    }
+
+    //
+    // STEP 6: Notify
     //
     let msg = `🎼 *Best of ${bestArtist}*\nAdded ${addedCount} tracks:\n`;
     tracksByArtist.forEach((t, i) => {
@@ -1184,45 +1349,54 @@ async function _debug(channel, userName) {
   await _logUserAction(userName, 'debug');
 
   try {
-    // Get Sonos info
-    const sonosInfo = await sonos.deviceDescription();
+    // Run health check
+    const health = await _checkSystemHealth();
 
-    // Build debug message
-    const envVars = `\n*Environment Variables:*\n  NODE_VERSION: ${process.env.NODE_VERSION || 'not set'}\n  HOSTNAME: ${process.env.HOSTNAME || 'not set'}\n  YARN_VERSION: ${process.env.YARN_VERSION || 'not set'}`;
+    // Build Health Section
+    const healthStatus = health.checks.map(c => {
+      const icon = c.status === 'ok' ? '✅' : '❌';
+      return `${icon} *${c.name}:* ${c.message}`;
+    }).join('\n');
 
+    // Build Config Section
     const sensitiveKeys = ['token', 'slackAppToken', 'slackBotToken', 'spotifyClientId', 'spotifyClientSecret'];
     const configKeys = Object.keys(config.stores.file.store);
     const configValues = configKeys
       .map(key => {
         const value = config.get(key);
         const displayValue = sensitiveKeys.includes(key) ? '[REDACTED]' : JSON.stringify(value);
-        return `  ${key}: ${displayValue}`;
+        return `> \`${key}\`: ${displayValue}`;
       })
       .join('\n');
 
-    const message = `*Debug Information*\n\n` +
-      `*Build Number:* ${buildNumber}\n` +
-      `*IP Address:* ${ipAddress || 'not set'}\n` +
-      `*Node Version:* ${process.version}\n\n` +
-      `*Sonos Information:*\n` +
-      `  Model: ${sonosInfo.modelDescription}\n` +
-      `  Room: ${sonosInfo.roomName}\n` +
-      `  IP: ${sonosIp}\n\n` +
-      `*Configuration Values:*\n${configValues}\n` +
-      `${envVars}`;
+    const message =
+      `*🛠️ System Debug Report*\n` +
+      `------------------------------------------\n` +
+      `*📊 System Info:*\n` +
+      `> *Build:* ${buildNumber}\n` +
+      `> *Node:* ${process.version}\n` +
+      `> *Host:* ${process.env.HOSTNAME || 'unknown'}\n` +
+      `> *IP:* ${ipAddress || 'unknown'}\n\n` +
+
+      `*🏥 Health Check:*\n` +
+      `${healthStatus}\n\n` +
+
+      `*⚙️ Configuration:*\n` +
+      `${configValues}`;
 
     _slackMessage(message, channel);
   } catch (err) {
-    logger.error(`Error in debug command: ${err.message}`);
-    // Fallback to simple message if something fails
-    _slackMessage(`Build Number: ${buildNumber}\nIP: ${ipAddress || 'not set'}\nError getting full debug info: ${err.message}`, channel);
+    logger.error('Error in debug: ' + err.message);
+    _slackMessage('Failed to generate debug report: ' + err.message, channel);
   }
 }
 
 // This function needs to be a little smarter
 async function _add(input, channel, userName) {
   _logUserAction(userName, 'add');
-  // Add a track to the queue, support Spotify URI or search
+  // Add a track to the queue
+  // If stopped: flush queue and start fresh
+  // If playing: just add to existing queue
   if (!input || input.length < 2) {
     _slackMessage('You have to tell me what to add!', channel);
     return;
@@ -1233,23 +1407,35 @@ async function _add(input, channel, userName) {
   try {
     const result = await spotify.getTrack(track);
 
-    if (blacklist.includes(result.artist)) {
-      _slackMessage("Sorry, " + result.artist + " is on the blacklist and can't be added to the queue.", channel);
+    // Get current player state
+    const state = await sonos.getCurrentState();
+    logger.info('Current state for add: ' + state);
+
+    // If stopped, flush the queue to start fresh
+    if (state === 'stopped') {
+      logger.info('Player stopped - flushing queue and starting fresh');
+      try {
+        await sonos.flush();
+        logger.info('Queue flushed');
+      } catch (flushErr) {
+        logger.warn('Could not flush queue: ' + flushErr.message);
+      }
+
+      await sonos.queue(result.uri);
+      logger.info('Added track: ' + result.name);
+
+      // Wait a moment before starting playback
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await sonos.play();
+
+      _slackMessage(
+        'Started fresh! Added ' + '*' + result.name + '*' + ' by ' + result.artist + ' and began playback. :notes:',
+        channel
+      );
       return;
     }
 
-    // Check player state to see if we should auto-play
-    let shouldAutoPlay = false;
-    try {
-      const state = await sonos.getCurrentState();
-      if (state !== 'playing' && state !== 'transitioning') {
-        shouldAutoPlay = true;
-      }
-    } catch (stateErr) {
-      logger.warn('Could not check player state: ' + stateErr.message);
-    }
-
-    // Check if track is already in queue
+    // For playing/paused/transitioning states, check for duplicates
     try {
       const queue = await sonos.getQueue();
       if (queue && queue.items) {
@@ -1280,8 +1466,8 @@ async function _add(input, channel, userName) {
 
     let msg = 'Added ' + '*' + result.name + '*' + ' by ' + result.artist + ' to the queue.';
 
-    // Auto-play if player was not playing
-    if (shouldAutoPlay) {
+    // Auto-play if player was paused or in another non-playing state
+    if (state !== 'playing' && state !== 'transitioning') {
       try {
         await sonos.play();
         logger.info('Player was not playing, started playback.');
@@ -1310,11 +1496,6 @@ async function _addalbum(input, channel, userName) {
 
   try {
     const result = await spotify.getAlbum(album);
-
-    if (blacklist.includes(result.artist)) {
-      _slackMessage("Sorry, " + result.artist + " is on the blacklist and can't be added to the queue.", channel);
-      return;
-    }
 
     // Check player state to see if we should auto-play
     let shouldAutoPlay = false;
@@ -1413,11 +1594,6 @@ async function _addplaylist(input, channel, userName) {
 
   try {
     const result = await spotify.getPlaylist(playlist);
-
-    if (blacklist.includes(result.owner)) {
-      _slackMessage("Sorry, " + result.owner + " is on the blacklist and can't be added to the queue.", channel);
-      return;
-    }
 
     // Check player state to see if we should auto-play
     let shouldAutoPlay = false;
@@ -1549,23 +1725,64 @@ function _currentTrack(channel, cb) {
     });
 }
 
-function _gongplay(command, channel) {
+async function _gongplay(command, channel) {
   if (command === 'play') {
-    const gongFilePath = path.join(__dirname, 'gong.mp3');
-    sonos
-      .play(gongFilePath)
-      .then((success) => {
-        logger.info('Playing GONG sound.');
-        setTimeout(() => {
-          sonos.next().then(() => {
-            logger.info('Skipped to the next track after gong.');
-            gongBannedTracks[gongTrack] = false; // Reset the gong ban for the track
-          });
-        }, 1000);
-      })
-      .catch((err) => {
-        logger.error('Error playing GONG sound: ' + err);
-      });
+    // Ban the track that was gonged
+    if (gongTrack) {
+      gongBannedTracks[gongTrack] = true;
+      logger.info('Banned track from re-queue: ' + gongTrack);
+    }
+    
+    try {
+      // Get current track position
+      const currentTrack = await sonos.currentTrack();
+      const currentPosition = currentTrack ? currentTrack.queuePosition : 1;
+      const gongPosition = currentPosition + 1;
+      
+      // Queue the gong sound from Spotify right after current track (+1)
+      const gongUri = 'spotify:track:1FzsAo5gX5oEJD9PFVH5FO';
+      await sonos.queue(gongUri, gongPosition);
+      logger.info('Queued gong sound at position ' + gongPosition);
+      
+      // Skip to the gong sound
+      await sonos.next();
+      logger.info('Playing gong sound, will auto-advance to next track');
+      
+      // Wait for gong to finish playing and advance to next song (it's about 10 seconds long)
+      setTimeout(async () => {
+        try {
+          // Find and remove the gong sound from the queue
+          const queue = await sonos.getQueue();
+          let gongIndex = -1;
+          
+          for (let i = 0; i < queue.items.length; i++) {
+            if (queue.items[i].title === 'Gong 1' || queue.items[i].uri.includes('1FzsAo5gX5oEJD9PFVH5FO')) {
+              gongIndex = i;
+              break;
+            }
+          }
+          
+          if (gongIndex >= 0) {
+            // Sonos uses 1-based indexing for removeTracksFromQueue
+            await sonos.removeTracksFromQueue(gongIndex + 1, 1);
+            logger.info('Successfully removed gong sound from queue at index ' + gongIndex);
+          } else {
+            logger.info('Gong sound not found in queue (may have already been removed)');
+          }
+        } catch (removeErr) {
+          logger.warn('Could not remove gong from queue: ' + removeErr.message);
+        }
+      }, 12000); // Wait 12 seconds for gong to finish and auto-advance
+      
+    } catch (err) {
+      logger.error('Error playing GONG sound: ' + err);
+      // Fallback: just skip if gong playback fails
+      try {
+        await sonos.next();
+      } catch (skipErr) {
+        logger.error('Error skipping to next track: ' + skipErr);
+      }
+    }
   }
 }
 
@@ -1712,15 +1929,16 @@ function _removeTrack(input, channel) {
     _slackMessage('You must provide the track number to remove.', channel);
     return;
   }
-  const trackNb = Number(input[1]);
+  const trackNb = parseInt(input[1]) + 1;  // +1 because Sonos uses 1-based indexing
   if (isNaN(trackNb)) {
     _slackMessage('Invalid track number.', channel);
     return;
   }
   sonos
-    .removeTrackFromQueue(trackNb)
+    .removeTracksFromQueue(trackNb, 1)  // Remove 1 track starting at trackNb
     .then(() => {
-      _slackMessage(`Track #${trackNb} has been removed from the queue.`, channel);
+      logger.info('Removed track with index: ' + trackNb);
+      _slackMessage(`Track #${input[1]} has been removed from the queue.`, channel);
     })
     .catch((err) => {
       logger.error('Error removing track from queue: ' + err);
@@ -1771,54 +1989,37 @@ function _status(channel, cb) {
 }
 
 function _help(input, channel) {
-  let message = '';
-  if (channel === global.adminChannel) {
-    message =
-      `
-*Admin Commands:*
-> \`next\` - Skip to the next track.
-> \`previous\` - Go back to the previous track.
-> \`stop\` - Stop playback.
-> \`play\` - Start playback.
-> \`pause\` - Pause playback.
-> \`resume\` - Resume playback.
-> \`flush\` - Clear the entire queue.
-> \`shuffle\` - Activate shuffle mode.
-> \`normal\` - Deactivate shuffle mode.
-> \`setvolume [number]\` - Set the volume level (0-100).
-> \`blacklist [artist/track]\` - Add an artist or track to the blacklist.
-> \`remove [track number]\` - Remove a specific track from the queue.
-> \`thanos\` or \`snap\` - Randomly remove half of the tracks from the queue.
-> \`listimmune\` - List all tracks currently immune to GONG.
-> \`tts [message]\` - Make the Sonos speaker say a message.
-> \`move [from] [to]\` - Move a track from one position to another.
-> \`stats\` - Show usage stats for all users.
-> \`stats [user]\` - Show usage stats for a specific user.
-> \`debug\` - Show build and IP information.
-`;
-  } else {
-    message = `
-*Commands:*
-> \`add [track name or Spotify URI]\` - Add a track to the queue.
-> \`addalbum [album name or Spotify URI]\` - Add an entire album to the queue.
-> \`addplaylist [playlist name or Spotify URI]\` - Add an entire playlist to the queue.
-> \`search [track name]\` - Search for a track on Spotify.
-> \`searchalbum [album name]\` - Search for an album on Spotify.
-> \`current\` or \`wtf\` - Get the name of the currently playing track.
-> \`gong\` - Vote to skip the current track. Requires ${gongLimit} votes to pass.
-> \`gongcheck\` - Check how many GONG votes are left.
-> \`voteimmune [track number]\` - Vote to make a track immune to GONG. Requires ${voteImmuneLimit} votes.
-> \`vote [track number]\` - Vote to move a track to the top of the queue. Requires ${voteLimit} votes.
-> \`votecheck\` - Check the current vote count for tracks.
-> \`list\` or \`ls\` or \`playlist\` - Show the current queue.
-> \`upnext\` - Show the next 5 tracks in the queue.
-> \`volume\` - Get the current volume level.
-> \`flushvote\` - Vote to clear the entire queue. Requires ${flushVoteLimit} votes.
-> \`size\` or \`count\` - Get the number of songs in the queue.
-> \`status\` - Get the current playback status (e.g., playing, paused).
-`;
+  try {
+    let helpFile = channel === global.adminChannel ? 'helpTextAdmin.txt' : 'helpText.txt';
+    let message = fs.readFileSync(helpFile, 'utf8');
+
+    // Generate config values list for admin help
+    let configList = '';
+    if (channel === global.adminChannel) {
+      configList = `
+        • \`gongLimit\`: ${gongLimit}
+        • \`voteLimit\`: ${voteLimit}
+        • \`voteImmuneLimit\`: ${voteImmuneLimit}
+        • \`flushVoteLimit\`: ${flushVoteLimit}
+        • \`maxVolume\`: ${maxVolume}
+        • \`searchLimit\`: ${searchLimit}
+        • \`voteTimeLimitMinutes\`: ${voteTimeLimitMinutes}`;
+    }
+
+    // Replace template variables with actual values
+    message = message
+      .replace(/{{gongLimit}}/g, gongLimit)
+      .replace(/{{voteImmuneLimit}}/g, voteImmuneLimit)
+      .replace(/{{voteLimit}}/g, voteLimit)
+      .replace(/{{flushVoteLimit}}/g, flushVoteLimit)
+      .replace(/{{searchLimit}}/g, searchLimit)
+      .replace(/{{configValues}}/g, configList);
+
+    _slackMessage(message, channel);
+  } catch (err) {
+    logger.error('Error reading help file: ' + err.message);
+    _slackMessage('Error loading help text. Please contact an admin.', channel);
   }
-  _slackMessage(message, channel);
 }
 
 function _blacklist(input, channel, userName) {
@@ -1827,20 +2028,206 @@ function _blacklist(input, channel, userName) {
     return;
   }
   if (!input || input.length < 2) {
-    _slackMessage('You must provide an artist or track to blacklist.', channel);
+    if (blacklist.length === 0) {
+      _slackMessage('The blacklist is currently empty. Everyone is behaving! 😇', channel);
+    } else {
+      const userList = blacklist.map(u => `<@${u}>`).join(', ');
+      _slackMessage(`*🚫 Blacklisted Users:*\n${userList}\n\n_To remove a user, simply run \`blacklist @user\` again._`, channel);
+    }
     return;
   }
-  const term = input.slice(1).join(' ');
-  blacklist.push(term);
-  config.set('blacklist', blacklist);
-  config.save();
-  _slackMessage(`"${term}" has been added to the blacklist.`, channel);
+
+  // Normalize user string (remove <@...>)
+  let targetUser = normalizeUser(input[1]);
+
+  if (!targetUser) {
+    _slackMessage('Invalid user format.', channel);
+    return;
+  }
+
+  const index = blacklist.indexOf(targetUser);
+
+  if (index > -1) {
+    // Remove from blacklist
+    blacklist.splice(index, 1);
+    _slackMessage(`User <@${targetUser}> has been removed from the blacklist. They can now use the bot.`, channel);
+  } else {
+    // Add to blacklist
+    blacklist.push(targetUser);
+    _slackMessage(`User <@${targetUser}> has been added to the blacklist. They are now banned from using the bot. 🚫`, channel);
+  }
+
+  saveBlacklist(blacklist);
+}
+
+function _setconfig(input, channel, userName) {
+  _logUserAction(userName, 'setconfig');
+  if (channel !== global.adminChannel) {
+    return;
+  }
+
+  // Usage: setconfig <key> <value>
+  if (!input || input.length < 3) {
+    const currentConfig = `
+*Current Configurable Settings:*
+> \`gongLimit\`: ${gongLimit}
+> \`voteLimit\`: ${voteLimit}
+> \`voteImmuneLimit\`: ${voteImmuneLimit}
+> \`flushVoteLimit\`: ${flushVoteLimit}
+> \`maxVolume\`: ${maxVolume}
+> \`searchLimit\`: ${searchLimit}
+> \`voteTimeLimitMinutes\`: ${voteTimeLimitMinutes}
+
+*Usage:* \`setconfig <key> <value>\`
+*Example:* \`setconfig gongLimit 5\`
+    `;
+    _slackMessage(currentConfig.trim(), channel);
+    return;
+  }
+
+  const key = input[1];
+  const value = input[2];
+
+  // Define allowed config keys and their validation
+  const allowedConfigs = {
+    gongLimit: { type: 'number', min: 1, max: 20 },
+    voteLimit: { type: 'number', min: 1, max: 20 },
+    voteImmuneLimit: { type: 'number', min: 1, max: 20 },
+    flushVoteLimit: { type: 'number', min: 1, max: 20 },
+    maxVolume: { type: 'number', min: 0, max: 100 },
+    searchLimit: { type: 'number', min: 1, max: 50 },
+    voteTimeLimitMinutes: { type: 'number', min: 1, max: 60 }
+  };
+
+  if (!allowedConfigs[key]) {
+    _slackMessage(`Invalid config key "${key}". Use \`setconfig\` without arguments to see available options.`, channel);
+    return;
+  }
+
+  const configDef = allowedConfigs[key];
+
+  // Validate value
+  if (configDef.type === 'number') {
+    const numValue = Number(value);
+    if (isNaN(numValue)) {
+      _slackMessage(`Value for "${key}" must be a number.`, channel);
+      return;
+    }
+    if (numValue < configDef.min || numValue > configDef.max) {
+      _slackMessage(`Value for "${key}" must be between ${configDef.min} and ${configDef.max}.`, channel);
+      return;
+    }
+
+    const oldValue = config.get(key);
+
+    // Update runtime variable
+    switch (key) {
+      case 'gongLimit':
+        gongLimit = numValue;
+        break;
+      case 'voteLimit':
+        voteLimit = numValue;
+        break;
+      case 'voteImmuneLimit':
+        voteImmuneLimit = numValue;
+        break;
+      case 'flushVoteLimit':
+        flushVoteLimit = numValue;
+        break;
+      case 'maxVolume':
+        maxVolume = numValue;
+        break;
+      case 'searchLimit':
+        searchLimit = numValue;
+        break;
+      case 'voteTimeLimitMinutes':
+        voteTimeLimitMinutes = numValue;
+        break;
+    }
+
+    // Persist to config file
+    config.set(key, numValue);
+    config.save(function (err) {
+      if (err) {
+        logger.error('Error saving config: ' + err);
+        _slackMessage(`Updated \`${key}\` to \`${numValue}\` in memory, but failed to save to disk.`, channel);
+        return;
+      }
+      _slackMessage(`✅ Successfully updated \`${key}\` from \`${oldValue}\` to \`${numValue}\` and saved to config.`, channel);
+    });
+  }
 }
 
 
-function _append(input, channel, userName) {
+async function _append(input, channel, userName) {
   _logUserAction(userName, 'append');
-  _slackMessage('This feature is not yet implemented. Please try again later.', channel);
+
+  // Append a track to the queue (never flushes existing queue)
+  // Start playing if not already playing
+  if (!input || input.length < 2) {
+    _slackMessage('You have to tell me what to add!', channel);
+    return;
+  }
+
+  const track = input.slice(1).join(' ');
+  logger.info('Track to append: ' + track);
+
+  try {
+    const result = await spotify.getTrack(track);
+
+    // Check if track is already in queue
+    try {
+      const queue = await sonos.getQueue();
+      if (queue && queue.items) {
+        let duplicatePosition = -1;
+        const isDuplicate = queue.items.some((item, index) => {
+          if (item.uri === result.uri || (item.title === result.name && item.artist === result.artist)) {
+            duplicatePosition = index;
+            return true;
+          }
+          return false;
+        });
+
+        if (isDuplicate) {
+          _slackMessage(
+            `*${result.name}* by _${result.artist}_ is already in the queue at position #${duplicatePosition}! :musical_note:\nWant it to play sooner? Use \`vote ${duplicatePosition}\` to move it up! :arrow_up:`,
+            channel
+          );
+          return;
+        }
+      }
+    } catch (queueErr) {
+      // If we can't get the queue, just log and continue with adding
+      logger.warn('Could not check queue for duplicates: ' + queueErr.message);
+    }
+
+    // Always add to queue (preserving existing tracks)
+    await sonos.queue(result.uri);
+    logger.info('Appended track: ' + result.name);
+
+    let msg = 'Added ' + '*' + result.name + '*' + ' by ' + result.artist + ' to the queue.';
+
+    // Check if we need to start playback
+    try {
+      const state = await sonos.getCurrentState();
+      logger.info('Current state after append: ' + state);
+
+      if (state !== 'playing' && state !== 'transitioning') {
+        // Wait a moment before starting playback
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await sonos.play();
+        logger.info('Started playback after append.');
+        msg += ' Playback started! :notes:';
+      }
+    } catch (stateErr) {
+      logger.warn('Could not check/start playback: ' + stateErr.message);
+    }
+
+    _slackMessage(msg, channel);
+  } catch (err) {
+    logger.error('Error appending track: ' + err.message);
+    _slackMessage('Could not find that track or error adding it :(', channel);
+  }
 }
 
 function _addToSpotifyPlaylist(input, channel) {
@@ -1886,8 +2273,10 @@ async function _tts(input, channel) {
         });
       });
 
-      const uri = `x-file-cifs://sonos-smb/share/sonos/tts/${path.basename(ttsFilePath)}`;
-      await sonos.queueNext(uri);
+      // Use HTTP server to serve the TTS file
+      const uri = `http://${ipAddress}:${webPort}/tts.mp3`;
+      logger.info('Queuing TTS file from: ' + uri);
+      await sonos.queue(uri, currentQueuePosition + 1);
 
       if (currentUri) {
         await sonos.reorderTracksInQueue(currentQueuePosition + 1, 1, currentQueuePosition + 1, 0);
@@ -1898,7 +2287,7 @@ async function _tts(input, channel) {
 
       setTimeout(async () => {
         try {
-          await sonos.removeTrackFromQueue(currentQueuePosition + 1);
+          await sonos.removeTracksFromQueue(currentQueuePosition + 2, 1);
           if (currentUri) {
             await sonos.play();
           } else {
@@ -1945,8 +2334,8 @@ function _moveTrackAdmin(input, channel, userName) {
 
 
 if (process.env.NODE_ENV === 'test') {
-    module.exports = function numFormatter(num) {
-        if (num === null || num === undefined) return '';
-        return Number(num).toLocaleString('en-US');
-    };
+  module.exports = function numFormatter(num) {
+    if (num === null || num === undefined) return '';
+    return Number(num).toLocaleString('en-US');
+  };
 }
