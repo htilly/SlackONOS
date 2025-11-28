@@ -1,8 +1,8 @@
-** Installation **
+# Installation
 
 In order to get the bot up and running you need to do the following.
 
-* Pre-requisit: *
+## Pre-requisit
 
 1: #Slack-group with admin rights
 2: A server / machine that can run node.js
@@ -11,18 +11,65 @@ In order to get the bot up and running you need to do the following.
 
 Note: In order to get Text-to-speach working you need to know the IP of the host running SlackONOS as well as having a TCP port (in setting) open for traffic from the Sonos to the device.
 
-#Slack
+## Slack App (v2.0+ - Socket Mode Required)
 
-Create a bot in #Slack.
-You need to give it a name, and write down the API Token. You will need this in your setting file later.
-Hit "Save Integration" and you are done in #Slack.
+**⚠️ Important: As of v2.0, SlackONOS requires Socket Mode. Legacy bot tokens are no longer supported.**
 
-Optional you can give the bot some nice namne, icon etc.
+Follow these steps to create and configure your Slack app:
 
-For an icon, have a look in zenmusic/doc/images/ZenMusic.png
+### 1. Create a Slack App
 
+1. Go to https://api.slack.com/apps and click "Create New App"
+2. Choose "From scratch"
+3. Give it a name (e.g., "SlackONOS") and select your workspace
+4. Click "Create App"
 
-Node.js - Slackonos!
+### 2. Enable Socket Mode
+
+1. In your app settings, go to **"Socket Mode"** (under Features)
+2. Toggle **"Enable Socket Mode"** to ON
+3. You'll be prompted to generate an app-level token
+4. Give it a name (e.g., "SlackONOS Socket Token")
+5. Add the `connections:write` scope
+6. Click "Generate"
+7. **IMPORTANT**: Copy this token (starts with `xapp-`). This is your `slackAppToken`
+
+### 3. Configure OAuth Permissions
+
+1. Go to **"OAuth & Permissions"** (under Features)
+2. Scroll to **"Scopes"** → **"Bot Token Scopes"**
+3. Add the following scopes:
+   * `app_mentions:read`
+   * `channels:history`
+   * `chat:write`
+   * `users:read`
+4. Scroll to the top and click **"Install to Workspace"**
+5. Authorize the app
+6. **IMPORTANT**: Copy the **"Bot User OAuth Token"** (starts with `xoxb-`). This is your `token`
+
+### 4. Subscribe to Events
+
+1. Go to **"Event Subscriptions"** (under Features)
+2. Toggle **"Enable Events"** to ON
+3. Under **"Subscribe to bot events"**, add:
+   * `app_mention`
+   * `message.channels`
+   * `message.im`
+4. Click **"Save Changes"**
+
+### 5. Invite Bot to Channels
+
+1. In Slack, go to the channel where you want to use the bot (e.g., `#music-test`)
+2. Type `/invite @SlackONOS` (or whatever you named your bot)
+3. Do this for both your music channel and admin channel
+
+### 6. Save Your Tokens
+
+You now have two tokens:
+- **App-Level Token** (`xapp-...`) → `slackAppToken` in config
+- **Bot User OAuth Token** (`xoxb-...`) → `token` in config
+
+## Node.js - Slackonos!
 
 This guide assume you have git, node.js and NPM installed, and running linux =)
 
@@ -39,12 +86,30 @@ Edit config.json with your favorit text editor.
 
 Replace:
 
-"music-admin" - with the #slack channel you want the bot to respond to admin commands.`
-"music" - with the #slack channel you want the bot to be a DJ in =)`
-"IP_TO_SONOS" - with the (static) IP of you sonos player / controller.`
-"SLACK:TOKEN" - with the token you got for the bot in "Slack.`
-"US" - with the country that you use Spotify.
-75 - with the maximum volume you can set the Sonos to via "setvolume" in #Slack
+- `"music-admin"` - with the #slack channel you want the bot to respond to admin commands
+- `"music"` - with the #slack channel you want the bot to be a DJ in
+- `"IP_TO_SONOS"` - with the (static) IP of your Sonos player/controller
+- `"SLACK:APP:TOKEN"` - with the app-level token (xapp-...) from step 2 above
+- `"SLACK:BOT:TOKEN"` - with the bot user OAuth token (xoxb-...) from step 3 above
+- `"SPOTIFY:CLIENT:ID"` - with your Spotify Client ID from https://developer.spotify.com/dashboard
+- `"SPOTIFY:CLIENT:SECRET"` - with your Spotify Client Secret
+- `"US"` - with the country code where you use Spotify (e.g., "SE" for Sweden, "US" for United States)
+- `75` - with the maximum volume you can set the Sonos to via "setvolume" in #Slack
+
+**Example config.json:**
+```json
+{
+  "adminChannel": "music-admin",
+  "standardChannel": "music",
+  "sonos": "192.168.1.100",
+  "slackAppToken": "xapp-1-A0ABC123...",
+  "token": "xoxb-123456789...",
+  "spotifyClientId": "abc123...",
+  "spotifyClientSecret": "def456...",
+  "market": "SE",
+  "maxVolume": 75
+}
+```
 
 And last thing... start the bot!
 
@@ -55,9 +120,7 @@ You should see something like:
 
 [Sat Apr 30 2016 21:44:10 GMT+0200 (CEST)] INFO Connecting... Welcome to Slack. You are @zenmusicbot of Schibsted Media Group You are in: #music As well as: music-admin 
 
-
-
-** Known Issues **
+## Known Issues
 
 If you for any reason get the following 500 error in the logs:
 

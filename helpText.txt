@@ -1,21 +1,28 @@
-Current commands!
- ===  ===  ===  ===  ===  ===  === 
-`add` *text* : add song to the queue and start playing if idle. Will start with a fresh queue.
-`addalbum` *text* : add an album to the queue and start playing if idle. Will start with a fresh queue.
-`bestof` : *text* : add top 10 tracks by the artist
-`status` : show current status of Sonos
-`current` : list current track
-`search` *text* : search for a track, does NOT add it to the queue
-`searchalbum` *text* : search for an album, does NOT add it to the queue
-`searchplaylist` *text* : search for a playlist, does NOT add it to the queue
-`addplaylist` *text* : add a playlist to the queue and start playing if idle. Will start with a fresh queue.
-`append` *text* : append a song to the previous playlist and start playing the same list again.
-`vote` *number* : vote for a track to be played next!!! Votes neeed *{{voteLimit}}* :rocket: 
-`votecheck` : how many votes there are currently, as well as who has voted.
-`gong` : current track is bad! *{{gongLimit}}* gongs will skip the track
-`gongcheck` : how many gong votes there are currently, as well as who has gonged.
-`voteimmune` *number* : vote to make the current track immune to gong. *{{voteLimit}}* votes will make it immune
-`flushvote` : vote to flush the queue. *{{flushVoteLimit}}* votes will flush the queue :toilet: 
-`upnext` : show the next track to be played
-`volume` : view current volume
-`list` : list current queue
+*🎵 Music Commands:*
+> `add [track]` - Add a track (search term, Spotify URI, or link). When stopped, starts a fresh queue. 🔄
+> `append [track]` - Add a track (search term, Spotify URI, or link) without clearing the queue. 📝
+> `addalbum [album]` - Add an entire album (search term, Spotify URI, or link) to the queue.
+> `addplaylist [playlist]` - Add an entire playlist (search term, Spotify URI, or link) to the queue.
+> `search [track]` - Search for a track on Spotify (shows top {{searchLimit}} results).
+> `searchalbum [album]` - Search for an album on Spotify.
+> `searchplaylist [playlist]` - Search for a playlist on Spotify.
+
+*ℹ️ Info Commands:*
+> `current` (or `wtf`) - Show what's currently playing.
+> `list` (or `ls`, `playlist`) - Show the entire queue.
+> `upnext` - Show the next 5 tracks.
+> `size` (or `count`) - Get the number of songs in the queue.
+> `volume` - Get the current volume level.
+> `status` - Get the current playback status.
+> `bestof [user]` - Show the top tracks added by a user.
+
+*🗳️ Voting Commands:*
+> `gong` (or `dong`) - Vote to skip the current track. Needs {{gongLimit}} votes. 🔔
+> `gongcheck` - Check how many GONG votes are remaining.
+> `voteimmune [position]` - Protect a track from being gonged. Needs {{voteImmuneLimit}} votes. 🛡️
+> `voteimmunecheck` - Check vote immune status.
+> `vote [position]` - Move a track to the top. Needs {{voteLimit}} votes. ⬆️
+> `votecheck` - Check the current vote counts.
+> `flushvote` - Vote to clear the entire queue. Needs {{flushVoteLimit}} votes. 🗑️
+
+_Tip: You can use Spotify URIs (spotify:track:...) OR paste Spotify links (https://open.spotify.com/...) with add, append, addalbum, and addplaylist commands!_

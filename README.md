@@ -49,20 +49,65 @@ slackonos:
 Server running the index.js needs to be able to talk to the Sonos on port 1400 (TCP)
 Sonos needs to be configured and setup with Spotify and have access to internet.
 
+
 **Configuration**
 You must provide the token of your Slack bot and the IP of your Sonos in either config.json (see config.json.example), as arguments or as environment variables.
 Examples:
 ```bash
-node index.js --token "MySlackBotToken" --sonos "192.168.0.1"
+node index.js --legacySlackBotToken "MySlackBotToken" --sonos "192.168.0.1"
 ```
 or
 ```bash
-token="MySlackBotToken" sonos="192.168.0.1" node index.js
+legacySlackBotToken="MySlackBotToken" sonos="192.168.0.1" node index.js
 ```
 You can also provide any of the other variables from config.json.example as arguments or environment variables.
 The blacklist can be provided as either an array in config.json, or as a comma-separated string when using arguments or environment variables.
 
 Logo for the bot in #Slack can be found at "doc/images/ZenMusic.png
+
+**⚠️ BREAKING CHANGES (v2.0+)**
+
+**Socket Mode Migration**
+
+As of v2.0, SlackONOS has migrated from the deprecated RTM API to **Socket Mode** for improved reliability and performance. This requires new configuration:
+
+**Required Changes:**
+1. **New App-Level Token Required**: You MUST create an app-level token (starts with `xapp-`) in your Slack app settings
+2. **Socket Mode Must Be Enabled**: Enable Socket Mode in your Slack app configuration
+3. **Updated Configuration**: Both `slackAppToken` (app-level) and `token` (bot token, `xoxb-`) are now required
+
+**Migration Steps:**
+
+1. Go to https://api.slack.com/apps/YOUR_APP_ID/socket-mode
+2. Enable Socket Mode
+3. Generate an app-level token with `connections:write` scope
+4. Add the token to your `config.json`:
+   ```json
+   {
+     "slackAppToken": "xapp-1-A0...",
+     "token": "xoxb-123...",
+     ...
+   }
+   ```
+
+**Legacy Bot Token Support**
+
+⚠️ Legacy bot tokens are **deprecated** and no longer supported as of v2.0. You must migrate to Socket Mode.
+
+- Legacy bots can [no longer be created](https://api.slack.com/changelog/2024-09-legacy-custom-bots-classic-apps-deprecation)
+- If you were using `legacySlackBotToken`, you must create a new Slack app and configure it with Socket Mode
+- The `useLegacyBot` configuration option has been removed
+
+**Architectural Improvements (v2.0)**
+
+SlackONOS v2.0 includes significant architectural improvements:
+
+- **Modular Design**: Slack and Spotify integrations are now separate, clean modules (`slack.js`, `spotify-async.js`)
+- **Non-Blocking Operations**: All Spotify API calls use async/await with native `fetch`, eliminating blocking operations
+- **Declarative Command Registry**: Commands are defined in a clean, maintainable registry instead of large switch statements
+- **Improved Error Handling**: Centralized error handling and logging for better debugging
+- **Robust Event Handling**: Better filtering and processing of Slack events
+- **Network Resilience**: Increased ping timeouts to handle network latency better
 
 **What can it do?**
 
