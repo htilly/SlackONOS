@@ -1,0 +1,45 @@
+name: Test and Coverage
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test-with-coverage:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Install coverage tool
+      run: npm install --save-dev c8
+    
+    - name: Create config file
+      run: cp config/config.json.example config/config.json
+    
+    - name: Run tests with coverage
+      run: npx c8 --reporter=text --reporter=lcov npm test
+    
+    - name: Display coverage summary
+      run: npx c8 report --reporter=text-summary
+    
+    - name: Upload coverage to Codecov (optional)
+      if: github.event_name == 'push'
+      uses: codecov/codecov-action@v4
+      with:
+        files: ./coverage/lcov.info
+        flags: unittests
+        name: codecov-slackonos
+      continue-on-error: true
