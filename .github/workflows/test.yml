@@ -22,23 +22,21 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
-        cache: 'npm'
     
     - name: Install dependencies
-      run: npm ci
+      run: npm install
     
     - name: Create config file
-      run: cp config/config.json.example config/config.json
+      run: |
+        if [ ! -f config/config.json ]; then
+          cp config/config.json.example config/config.json
+        fi
     
     - name: Run tests
       run: npm test
+      env:
+        NODE_ENV: test
     
-    - name: Upload test results
+    - name: Test Summary
       if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-results-node-${{ matrix.node-version }}
-        path: |
-          test-results/
-          coverage/
-        retention-days: 30
+      run: echo "Tests completed for Node.js ${{ matrix.node-version }}"

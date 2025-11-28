@@ -18,28 +18,30 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '20.x'
-        cache: 'npm'
     
     - name: Install dependencies
-      run: npm ci
+      run: npm install
     
     - name: Install coverage tool
       run: npm install --save-dev c8
     
     - name: Create config file
-      run: cp config/config.json.example config/config.json
+      run: |
+        if [ ! -f config/config.json ]; then
+          cp config/config.json.example config/config.json
+        fi
     
     - name: Run tests with coverage
       run: npx c8 --reporter=text --reporter=lcov npm test
+      env:
+        NODE_ENV: test
     
     - name: Display coverage summary
+      if: always()
       run: npx c8 report --reporter=text-summary
     
-    - name: Upload coverage to Codecov (optional)
-      if: github.event_name == 'push'
-      uses: codecov/codecov-action@v4
-      with:
-        files: ./coverage/lcov.info
-        flags: unittests
-        name: codecov-slackonos
-      continue-on-error: true
+    - name: Comment coverage on PR
+      if: github.event_name == 'pull_request'
+      run: |
+        echo "Coverage report generated"
+        npx c8 report --reporter=text
