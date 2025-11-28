@@ -7,13 +7,16 @@
     "voteTimeLimitMinutes" : 2,
     "flushVoteLimit" : 6,
     "sonos" : "IP_TO_SONOS",
-    "token" : "SLACK:TOKEN",
+    "legacySlackToken" : "SLACK:TOKEN",
+    "slackAppToken" : "SLACK:APPTOKEN",
+    "token": "SLACK:APPTOKEN",
     "webPort" : "8080",
     "ipAddress" : "IP_HOST",
     "market" : "US",
     "maxVolume" : 75,
     "blacklist" : "@justin.bieber, @one.direction",
-    "spotifyClientId": "",
-    "spotifyClientSecret": "",
-    "logLevel": "info"
+    "spotifyClientId": "supersecretid",
+    "spotifyClientSecret": "extrasupersecretsecret",
+    "logLevel": "info",
+    "useLegacyBot": false
 }
