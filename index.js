@@ -2284,7 +2284,8 @@ async function _tts(input, channel) {
       await sonos.next();
       logger.info('Playing TTS, duration: ' + fileDuration + 's');
 
-      // Wait for TTS to finish playing, then find and remove it from queue
+      // Wait for TTS to finish playing (just the TTS duration + small buffer)
+      // We don't need to wait for the current track since we already skipped
       setTimeout(async () => {
         try {
           // Find and remove the TTS file from the queue
@@ -2302,13 +2303,17 @@ async function _tts(input, channel) {
             // Sonos uses 1-based indexing for removeTracksFromQueue
             await sonos.removeTracksFromQueue(ttsIndex + 1, 1);
             logger.info('Successfully removed TTS from queue at index ' + ttsIndex);
+            
+            // Skip to next track immediately after removing TTS
+            await sonos.next();
+            logger.info('Skipped to next track after TTS');
           } else {
             logger.info('TTS file not found in queue (may have already been removed)');
           }
         } catch (removeErr) {
           logger.warn('Could not remove TTS from queue: ' + removeErr.message);
         }
-      }, (fileDuration + 1) * 1000); // Wait for TTS to finish + 1 second buffer
+      }, (fileDuration + 0.5) * 1000); // Just TTS duration + 0.5 second buffer
       
     } catch (playbackErr) {
       logger.error('Error during TTS playback sequence: ' + playbackErr);
