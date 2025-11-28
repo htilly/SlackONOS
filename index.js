@@ -539,7 +539,7 @@ async function processInput(text, channel, userName) {
   if (isAdminCmd && channel !== global.adminChannel) {
     logger.info(`Unauthorized admin cmd attempt: ${cmdKey} by ${userName} in ${channel}`);
     // Silent ignore or notify
-    _slackMessage("You don't have permission to run that here.", channel);
+    _slackMessage('🚫 Nice try! That\'s an admin-only command. This incident will be reported to... well, nobody cares. 😏', channel);
     return;
   }
 
@@ -571,7 +571,7 @@ async function processInput(text, channel, userName) {
   } catch (err) {
     logger.error(`Error running command ${cmdKey}: ${err.stack || err.message || err}`);
     try {
-      _slackMessage('Error handling your command. Logging the error for admins.', channel);
+      _slackMessage('🚨 Whoops! Something went wrong handling your command. The error has been logged! 📋', channel);
     } catch (e) {
       /* best effort */
     }
@@ -625,7 +625,7 @@ function _getVolume(channel) {
     .getVolume()
     .then((vol) => {
       logger.info('The volume is: ' + vol);
-      _slackMessage('Currently blasting at ' + vol + ' dB _(ddB)_', channel);
+      _slackMessage('🔊 Currently blasting at *' + vol + '* out of ' + maxVolume + ' (your ears\' limits, not ours)', channel);
     })
     .catch((err) => {
       logger.error('Error occurred: ' + err);
@@ -641,13 +641,13 @@ function _setVolume(input, channel, userName) {
   const vol = Number(input[1]);
 
   if (isNaN(vol)) {
-    _slackMessage('Nope.', channel);
+    _slackMessage('🤔 That\'s not a number, that\'s... I don\'t even know what that is. Try again with actual digits!', channel);
     return;
   }
 
   logger.info('Volume is: ' + vol);
   if (vol > maxVolume) {
-    _slackMessage("That's a bit extreme, " + userName + '... lower please.', channel);
+    _slackMessage('🚨 Whoa there, ' + userName + '! That\'s louder than a metal concert in a phone booth. Max is *' + maxVolume + '*. Try again! 🎸', channel);
     return;
   }
 
@@ -671,14 +671,14 @@ function _countQueue(channel, cb) {
       if (cb) {
         return cb(result.total);
       }
-      _slackMessage(`${result.total} songs in the queue`, channel);
+      _slackMessage(`🎵 We've got *${result.total}* ${result.total === 1 ? 'track' : 'tracks'} queued up and ready to rock! 🎸`, channel);
     })
     .catch((err) => {
       logger.error(err);
       if (cb) {
         return cb(null, err);
       }
-      _slackMessage('Error getting queue length', channel);
+      _slackMessage('🤷 Error getting queue length. Try again in a moment! 🔄', channel);
     });
 }
 
@@ -692,7 +692,7 @@ async function _showQueue(channel) {
     _currentTrack(channel, function (err, track) {
       if (!result || !result.items || result.items.length === 0) {
         logger.debug('Queue is empty');
-        _slackMessage('Seems like the queue is empty... Have you tried adding a song?!', channel);
+        _slackMessage('🦗 *Crickets...* The queue is empty! Try `add <song>` to get started! 🎵', channel);
         return;
       }
       if (err) {
@@ -750,7 +750,7 @@ function _upNext(channel) {
       _currentTrack(channel, function (err, track) {
         if (!result || !result.items || result.items.length === 0) {
           logger.debug('Queue is empty or undefined');
-          _slackMessage('Seems like the queue is empty... Have you tried adding a song?!', channel);
+          _slackMessage('🎶 The queue is emptier than a broken jukebox! Add something with `add <song>`! 🎵', channel);
           return;
         }
         if (err) {
@@ -759,7 +759,7 @@ function _upNext(channel) {
         }
         if (!track) {
           logger.debug('Current track is undefined');
-          _slackMessage('No current track is playing.', channel);
+          _slackMessage('🎵 No track is currently playing. Start something with `add <song>`! 🎶', channel);
           return;
         }
 
@@ -803,7 +803,7 @@ function _flushvote(channel, userName) {
   }
 
   if (flushVoteScore[userName] >= flushVoteLimitPerUser) {
-    _slackMessage('Are you trying to cheat, ' + userName + '? DENIED!', channel);
+    _slackMessage('🚫 Whoa there, ' + userName + '! You\'ve already cast your flush vote. No cheating! 😏', channel);
   } else {
     flushVoteScore[userName] += 1;
     flushVoteCounter++;
@@ -815,7 +815,7 @@ function _flushvote(channel, userName) {
       voteTimer = setTimeout(() => {
         flushVoteCounter = 0;
         flushVoteScore = {};
-        _slackMessage('Voting period ended.', channel);
+        _slackMessage('⏰ Voting period for flush has ended. Votes reset! Start fresh if you want to flush. 🔄', channel);
         logger.info('Voting period ended... Guess the playlist isn´t that bad after all!!');
       }, currentVoteTimeLimit);
       _slackMessage(
@@ -836,7 +836,7 @@ function _flushvote(channel, userName) {
 
     if (flushVoteCounter >= flushVoteLimit) {
       clearTimeout(voteTimer); // Clear the timer if the vote limit is reached
-      _slackMessage('The votes have spoken! Flushing the queue...:toilet:', channel);
+      _slackMessage('🚨🚨🚨 *DEMOCRACY IN ACTION!* The votes have spoken - flushing the queue! 🚽🎵', channel);
       try {
         sonos.flush();
       } catch (error) {
@@ -860,7 +860,7 @@ function _gong(channel, userName) {
 
     if (_isTrackGongBanned(track)) {
       logger.info('Track is gongBanned: ' + track);
-      _slackMessage('Sorry ' + userName + ', the people have voted and this track cannot be gonged...', channel);
+      _slackMessage('🔒 Sorry ' + userName + ', this track has diplomatic immunity! The people have voted to protect it from your gong. 🛡️', channel);
       return;
     }
 
@@ -872,10 +872,10 @@ function _gong(channel, userName) {
     }
 
     if (gongScore[userName] >= gongLimitPerUser) {
-      _slackMessage('Are you trying to cheat, ' + userName + '? DENIED!', channel);
+      _slackMessage('🚫 Hold up, ' + userName + '! You\'ve already gonged this track. One gong per person! 🔔', channel);
     } else {
       if (userName in voteImmuneScore) {
-        _slackMessage("Having regrets, " + userName + "? We're glad you came to your senses...", channel);
+        _slackMessage("💭 Having regrets, " + userName + "? We're glad you came to your senses... Crisis averted! 😅", channel);
       }
 
       gongScore[userName] += 1;
@@ -885,7 +885,7 @@ function _gong(channel, userName) {
         channel
       );
       if (gongCounter >= gongLimit) {
-        _slackMessage('The music got GONGED!!', channel);
+        _slackMessage('🔔💥 *THE PEOPLE HAVE SPOKEN!* This track has been GONGED into oblivion! ☠️', channel);
         _gongplay('play', channel);
         gongCounter = 0;
         gongScore = {};
@@ -920,22 +920,22 @@ function _voteImmune(input, channel, userName) {
         }
 
         if (voteImmuneScore[userName] >= voteImmuneLimitPerUser) {
-          _slackMessage('Are you trying to cheat, ' + userName + '? DENIED!', channel);
+          _slackMessage('🚫 Stop right there, ' + userName + '! You\'ve already voted for immunity. One vote per person! 🛡️', channel);
         } else {
           if (!(voteNb in voteImmuneUsers)) {
             voteImmuneUsers[voteNb] = new Set();
           }
 
           if (voteImmuneUsers[voteNb].has(userName)) {
-            _slackMessage('You have already voted for this track, ' + userName + '.', channel);
+            _slackMessage('🗳️ You\'ve already cast your immunity vote for this track, ' + userName + '! 🛡️', channel);
           } else {
             voteImmuneScore[userName] += 1;
             voteImmuneCounter++;
             voteImmuneUsers[voteNb].add(userName);
 
-            _slackMessage('This is VOTE ' + voteImmuneCounter + '/' + voteImmuneLimit + ' for ' + '*' + voteTrackName + '*', channel);
+            _slackMessage('🗳️ This is VOTE *' + voteImmuneCounter + '/' + voteImmuneLimit + '* for *' + voteTrackName + '* - Keep voting for immunity! 🛡️', channel);
             if (voteImmuneCounter >= voteImmuneLimit) {
-              _slackMessage('This track is now immune to GONG! (just this once)', channel);
+              _slackMessage('🛡️ *IMMUNITY GRANTED!* This track is now protected from the gong hammer... for this playthrough! 🔨❌', channel);
               voteImmuneCounter = 0;
               voteImmuneScore = {};
               voteImmuneUsers[voteNb].clear(); // Clear the users who voted for this track
@@ -944,7 +944,7 @@ function _voteImmune(input, channel, userName) {
           }
         }
       } else {
-        _slackMessage('Track not found in the queue.', channel);
+        _slackMessage('🤔 Track not found in the queue. Check `list` to see what\'s playing! 📋', channel);
       }
     })
     .catch((err) => {
@@ -962,7 +962,7 @@ async function _bestof(input, channel, userName) {
   _logUserAction(userName, 'bestof');
 
   if (!input || input.length < 2) {
-    _slackMessage('Usage: bestof [artist]', channel);
+    _slackMessage('🎸 Usage: `bestof <artist name>` - I\'ll queue up their greatest hits! 🎵', channel);
     return;
   }
 
@@ -976,7 +976,7 @@ async function _bestof(input, channel, userName) {
     const searchResults = await spotify.searchTrackList(artistName, 20);
 
     if (!searchResults || searchResults.length === 0) {
-      _slackMessage(`No tracks found for *${artistName}*`, channel);
+      _slackMessage(`🤷 No tracks found for *${artistName}*. Try checking the spelling or a different artist! 🎸`, channel);
       return;
     }
 
@@ -1004,7 +1004,7 @@ async function _bestof(input, channel, userName) {
       .slice(0, 10); // top 10 tracks
 
     if (tracksByArtist.length === 0) {
-      _slackMessage(`Could not determine top tracks for *${bestArtist}*`, channel);
+      _slackMessage(`🤔 Couldn't determine top tracks for *${bestArtist}*. Try being more specific! 🎵`, channel);
       return;
     }
 
@@ -1050,7 +1050,7 @@ async function _bestof(input, channel, userName) {
 
   } catch (err) {
     logger.error(`BESTOF error: ${err.stack || err}`);
-    _slackMessage(`Error fetching BESTOF for *${artistName}*.`, channel);
+    _slackMessage(`🚨 Error fetching BESTOF for *${artistName}*. Try again in a moment! 🔄`, channel);
   }
 }
 
@@ -1062,7 +1062,7 @@ async function _bestof(input, channel, userName) {
 function _listImmune(channel) {
   const gongBannedTracksList = Object.keys(gongBannedTracks);
   if (gongBannedTracksList.length === 0) {
-    _slackMessage('No tracks are currently immune.', channel);
+    _slackMessage('🤷 No tracks are currently immune. Everything is fair game for the gong! 🔔', channel);
   } else {
     const message = 'Immune Tracks:\n' + gongBannedTracksList.join('\n');
     _slackMessage(message, channel);
@@ -1100,14 +1100,14 @@ function _vote(input, channel, userName) {
         }
 
         if (voteScore[userName] >= voteLimitPerUser) {
-          _slackMessage('Are you trying to cheat, ' + userName + '? DENIED!', channel);
+          _slackMessage('🚫 Nice try, ' + userName + '! You\'ve already voted for this track. Patience! 🎵', channel);
         } else {
           if (!(voteNb in trackVoteUsers)) {
             trackVoteUsers[voteNb] = new Set();
           }
 
           if (trackVoteUsers[voteNb].has(userName)) {
-            _slackMessage('You have already voted for this track, ' + userName + '.', channel);
+            _slackMessage('🗳️ You already voted for this track, ' + userName + '! One vote per person! 🎯', channel);
           } else {
             voteScore[userName] += 1;
             voteCounter++;
@@ -1120,7 +1120,7 @@ function _vote(input, channel, userName) {
 
             logger.info('Track ' + voteTrackName + ' has received ' + trackVoteCount[voteNb] + ' votes.');
 
-            _slackMessage('This is VOTE ' + trackVoteCount[voteNb] + '/' + voteLimit + ' for ' + '*' + voteTrackName + '*', channel);
+            _slackMessage('🗳️ This is VOTE *' + trackVoteCount[voteNb] + '/' + voteLimit + '* for *' + voteTrackName + '* - Almost there! 🎵', channel);
             if (trackVoteCount[voteNb] >= voteLimit) {
               logger.info('Track ' + voteTrackName + ' has reached the vote limit.');
               _slackMessage(randomMessage, channel);
@@ -1156,7 +1156,7 @@ function _vote(input, channel, userName) {
           }
         }
       } else {
-        _slackMessage('Track not found in the queue.', channel);
+        _slackMessage('🤷 That track number isn\'t in the queue. Use `list` to see available tracks! 📋', channel);
       }
     })
     .catch((err) => {
@@ -1168,7 +1168,7 @@ function _votecheck(channel) {
   logger.info('_votecheck...');
   let voteInfo = '';
   if (Object.keys(trackVoteCount).length === 0) {
-    _slackMessage('No tracks have been voted on yet.', channel);
+    _slackMessage('🤷 No tracks have been voted on yet. Be the first! Use `vote <track#>` 🎵', channel);
     return;
   }
   for (const trackNb in trackVoteCount) {
@@ -1180,7 +1180,7 @@ function _votecheck(channel) {
 
 function _voteImmunecheck(channel) {
   logger.info('_voteImmunecheck...');
-  _slackMessage('Currently there are ' + voteImmuneCounter + ' votes of ' + voteImmuneLimit + ' to make a song immune to GONG.', channel);
+  _slackMessage('🛡️ Currently there are *' + voteImmuneCounter + ' votes* of *' + voteImmuneLimit + '* needed to grant a song immunity from GONG! 🔔', channel);
   _listImmune(channel);
 }
 
@@ -1327,7 +1327,7 @@ async function _stats(input, channel, userName) {
       }
 
       if (!userStats) {
-        _slackMessage(`No stats found for user ${targetUser}.`, channel);
+        _slackMessage(`🤷 No stats found for user <@${targetUser}>. They haven't used the bot yet! 📊`, channel);
         return;
       }
 
@@ -1340,7 +1340,7 @@ async function _stats(input, channel, userName) {
     }
   } catch (err) {
     logger.error('Error reading stats file: ' + err);
-    _slackMessage('Error fetching stats.', channel);
+    _slackMessage('📊 Oops! Error fetching stats. Try again in a moment! 🔄', channel);
   }
 }
 
@@ -1387,7 +1387,7 @@ async function _debug(channel, userName) {
     _slackMessage(message, channel);
   } catch (err) {
     logger.error('Error in debug: ' + err.message);
-    _slackMessage('Failed to generate debug report: ' + err.message, channel);
+    _slackMessage('🚨 Failed to generate debug report: ' + err.message + ' 🔧', channel);
   }
 }
 
@@ -1398,7 +1398,7 @@ async function _add(input, channel, userName) {
   // If stopped: flush queue and start fresh
   // If playing: just add to existing queue
   if (!input || input.length < 2) {
-    _slackMessage('You have to tell me what to add!', channel);
+    _slackMessage('🎵 You gotta tell me what to add! Use `add <song name or artist>` 🎶', channel);
     return;
   }
   const track = input.slice(1).join(' ');
@@ -1480,7 +1480,7 @@ async function _add(input, channel, userName) {
     _slackMessage(msg, channel);
   } catch (err) {
     logger.error('Error adding track: ' + err.message);
-    _slackMessage('Could not find that track or error adding it :(', channel);
+    _slackMessage('🤷 Couldn\'t find that track or hit an error adding it. Try being more specific with the song name! 🎵', channel);
   }
 }
 
@@ -1488,7 +1488,7 @@ async function _addalbum(input, channel, userName) {
   _logUserAction(userName, 'addalbum');
   // Add an album to the queue, support Spotify URI or search
   if (!input || input.length < 2) {
-    _slackMessage('You have to tell me what album to add!', channel);
+    _slackMessage('💿 You gotta tell me which album to add! Try `addalbum <album name>` 🎶', channel);
     return;
   }
   const album = input.slice(1).join(' ');
@@ -1546,7 +1546,7 @@ async function _addalbum(input, channel, userName) {
     }
   } catch (err) {
     logger.error('Error adding album: ' + err.message);
-    _slackMessage('Could not find that album or error adding it :(', channel);
+    _slackMessage('🔎 Couldn\'t find that album. Double-check the spelling or try including the artist name! 🎶', channel);
   }
 }
 
@@ -1554,7 +1554,7 @@ async function _searchplaylist(input, channel, userName) {
   _logUserAction(userName, 'searchplaylist');
   // Search for a playlist on Spotify
   if (!input || input.length < 2) {
-    _slackMessage('You have to tell me what playlist to search for!', channel);
+    _slackMessage('🔍 Tell me which playlist to search for! `searchplaylist <name>` 🎶', channel);
     return;
   }
   const playlist = input.slice(1).join(' ');
@@ -1564,7 +1564,7 @@ async function _searchplaylist(input, channel, userName) {
     const playlists = await spotify.searchPlaylistList(playlist, 10); // Fetch 10 to handle null results
 
     if (!playlists || playlists.length === 0) {
-      _slackMessage('Could not find that playlist :(', channel);
+      _slackMessage('🤷 Couldn\'t find that playlist. Check the spelling or try a different search! 🎶', channel);
       return;
     }
 
@@ -1578,7 +1578,7 @@ async function _searchplaylist(input, channel, userName) {
     _slackMessage(message, channel);
   } catch (err) {
     logger.error('Error searching for playlist: ' + err.message);
-    _slackMessage('Could not search for playlist. Error: ' + err.message, channel);
+    _slackMessage('🚨 Couldn\'t search for playlists. Error: ' + err.message + ' 🔄', channel);
   }
 }
 
@@ -1586,7 +1586,7 @@ async function _addplaylist(input, channel, userName) {
   _logUserAction(userName, 'addplaylist');
   // Add a playlist to the queue, support Spotify URI or search
   if (!input || input.length < 2) {
-    _slackMessage('You have to tell me what playlist to add!', channel);
+    _slackMessage('📋 You need to tell me which playlist to add! Use `addplaylist <playlist name>` 🎵', channel);
     return;
   }
   const playlist = input.slice(1).join(' ');
@@ -1625,7 +1625,7 @@ async function _addplaylist(input, channel, userName) {
     _slackMessage(msg, channel);
   } catch (err) {
     logger.error('Error adding playlist: ' + err.message);
-    _slackMessage('Could not find that playlist or error adding it :(', channel);
+    _slackMessage('🔎 Couldn\'t find that playlist. Try a Spotify link or check the spelling! 🎵', channel);
   }
 }
 
@@ -1633,7 +1633,7 @@ async function _search(input, channel, userName) {
   _logUserAction(userName, 'search');
   // Search for a track on Spotify
   if (!input || input.length < 2) {
-    _slackMessage('You have to tell me what to search for!', channel);
+    _slackMessage('🔍 What should I search for? Try `search <song or artist>` 🎵', channel);
     return;
   }
 
@@ -1644,25 +1644,25 @@ async function _search(input, channel, userName) {
     const tracks = await spotify.searchTrackList(term, searchLimit);
 
     if (!tracks || tracks.length === 0) {
-      _slackMessage('Could not find that track :(', channel);
+      _slackMessage("🤷 Couldn't find anything matching that. Try different keywords or check the spelling! 🎵", channel);
       return;
     }
 
-    let message = `Found ${tracks.length} tracks:\n`;
+    let message = `🎵 Found *${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}*:\n`;
     tracks.forEach((track, index) => {
-      message += `>${index}: *${track.name}* by _${track.artists[0].name}_\n`;
+      message += `>${index + 1}. *${track.name}* by _${track.artists[0].name}_\n`;
     });
     _slackMessage(message, channel);
   } catch (err) {
     logger.error('Error searching for track: ' + err.message);
-    _slackMessage('Could not search for tracks. Error: ' + err.message, channel);
+    _slackMessage('🚨 Couldn\'t search for tracks. Error: ' + err.message + ' Try again! 🔄', channel);
   }
 }
 
 async function _searchalbum(input, channel) {
   // Search for an album on Spotify
   if (!input || input.length < 2) {
-    _slackMessage('You have to tell me what album to search for!', channel);
+    _slackMessage('🔍 You gotta tell me what album to search for! Try `searchalbum <album name>` 🎶', channel);
     return;
   }
   const album = input.slice(1).join(' ');
@@ -1672,7 +1672,7 @@ async function _searchalbum(input, channel) {
     const albums = await spotify.searchAlbumList(album, searchLimit);
 
     if (!albums || albums.length === 0) {
-      _slackMessage('Could not find that album :(', channel);
+      _slackMessage('🤔 Couldn\'t find that album. Try including the artist name or checking the spelling! 🎶', channel);
       return;
     }
 
@@ -1683,7 +1683,7 @@ async function _searchalbum(input, channel) {
     _slackMessage(message, channel);
   } catch (err) {
     logger.error('Error searching for album: ' + err.message);
-    _slackMessage('Could not search for albums. Error: ' + err.message, channel);
+    _slackMessage('🚨 Couldn\'t search for albums. Error: ' + err.message + ' 🔄', channel);
   }
 }
 
@@ -1714,13 +1714,13 @@ function _currentTrack(channel, cb) {
         _slackMessage(message, channel);
         if (cb) cb(null, track);
       } else {
-        _slackMessage('Nothing is currently playing.', channel);
+        _slackMessage('🔇 *Silence...* Nothing is currently playing. Use `add` to get started! 🎵', channel);
         if (cb) cb(null, null);
       }
     })
     .catch((err) => {
       logger.error('Error getting current track: ' + err);
-      _slackMessage('Error getting current track.', channel);
+      _slackMessage('🚨 Error getting current track info. Try again! 🔄', channel);
       if (cb) cb(err);
     });
 }
@@ -1794,7 +1794,7 @@ function _nextTrack(channel, userName) {
   sonos
     .next()
     .then(() => {
-      _slackMessage('Skipped to the next track.', channel);
+      _slackMessage('⏭️ Skipped! On to the next banger... 🎵', channel);
     })
     .catch((err) => {
       logger.error('Error skipping to next track: ' + err);
@@ -1809,7 +1809,7 @@ function _previous(input, channel, userName) {
   sonos
     .previous()
     .then(() => {
-      _slackMessage('Went back to the previous track.', channel);
+      _slackMessage('⏮️ Going back in time! Previous track loading... 🕙', channel);
     })
     .catch((err) => {
       logger.error('Error going to previous track: ' + err);
@@ -1824,7 +1824,7 @@ function _stop(input, channel, userName) {
   sonos
     .stop()
     .then(() => {
-      _slackMessage('Playback stopped.', channel);
+      _slackMessage('⏹️ *Silence falls...* Playback stopped. 🔇', channel);
     })
     .catch((err) => {
       logger.error('Error stopping playback: ' + err);
@@ -1839,7 +1839,7 @@ function _play(input, channel, userName) {
   sonos
     .play()
     .then(() => {
-      _slackMessage('Playback started.', channel);
+      _slackMessage('▶️ Let\'s gooo! Music is flowing! 🎶', channel);
     })
     .catch((err) => {
       logger.error('Error starting playback: ' + err);
@@ -1854,7 +1854,7 @@ function _pause(input, channel, userName) {
   sonos
     .pause()
     .then(() => {
-      _slackMessage('Playback paused.', channel);
+      _slackMessage('⏸️ Taking a breather... Paused! 💨', channel);
     })
     .catch((err) => {
       logger.error('Error pausing playback: ' + err);
@@ -1869,7 +1869,7 @@ function _resume(input, channel, userName) {
   sonos
     .play()
     .then(() => {
-      _slackMessage('Playback resumed.', channel);
+      _slackMessage('▶️ Back to the groove! Resuming playback... 🎵', channel);
     })
     .catch((err) => {
       logger.error('Error resuming playback: ' + err);
@@ -1884,7 +1884,7 @@ function _flush(input, channel, userName) {
   sonos
     .flush()
     .then(() => {
-      _slackMessage('Queue flushed.', channel);
+      _slackMessage('🚨 *FLUSHED!* The queue has been wiped clean. Time to start fresh! 🎶', channel);
     })
     .catch((err) => {
       logger.error('Error flushing queue: ' + err);
@@ -1899,7 +1899,7 @@ function _shuffle(input, channel, userName) {
   sonos
     .setPlayMode('SHUFFLE')
     .then(() => {
-      _slackMessage('Shuffle mode activated. Queue is now randomized!', channel);
+      _slackMessage('🎲 *Shuffle mode activated!* Queue randomized - let chaos reign! 🎵🔀', channel);
     })
     .catch((err) => {
       logger.error('Error setting play mode to shuffle: ' + err);
@@ -1914,7 +1914,7 @@ function _normal(input, channel, userName) {
   sonos
     .setPlayMode('NORMAL')
     .then(() => {
-      _slackMessage('Shuffle mode deactivated. Queue is now in normal order.', channel);
+      _slackMessage('📋 Back to normal! Queue is now in the order you actually wanted. ✅', channel);
     })
     .catch((err) => {
       logger.error('Error setting play mode to normal: ' + err);
@@ -1926,23 +1926,23 @@ function _removeTrack(input, channel) {
     return;
   }
   if (!input || input.length < 2) {
-    _slackMessage('You must provide the track number to remove.', channel);
+    _slackMessage('🔢 You must provide the track number to remove! Use `remove <number>` 🎯', channel);
     return;
   }
   const trackNb = parseInt(input[1]) + 1;  // +1 because Sonos uses 1-based indexing
   if (isNaN(trackNb)) {
-    _slackMessage('Invalid track number.', channel);
+    _slackMessage('🤔 That\'s not a valid track number. Check the queue with `list`! 📋', channel);
     return;
   }
   sonos
     .removeTracksFromQueue(trackNb, 1)  // Remove 1 track starting at trackNb
     .then(() => {
       logger.info('Removed track with index: ' + trackNb);
-      _slackMessage(`Track #${input[1]} has been removed from the queue.`, channel);
+      _slackMessage(`🗑️ Track #${input[1]} has been yeeted from the queue! 🚀`, channel);
     })
     .catch((err) => {
       logger.error('Error removing track from queue: ' + err);
-      _slackMessage('Error removing track from queue.', channel);
+      _slackMessage('🚨 Error removing track from queue. Try again! 🔄', channel);
     });
 }
 
@@ -1955,22 +1955,22 @@ function _purgeHalfQueue(input, channel) {
     .then((result) => {
       const halfQueue = Math.floor(result.total / 2);
       if (halfQueue === 0) {
-        _slackMessage('The queue is too small to snap!', channel);
+        _slackMessage('🤷 The queue is too tiny to snap! Thanos needs at least 2 tracks to work his magic. 👏', channel);
         return;
       }
       sonos
         .removeTracksFromQueue(halfQueue, halfQueue)
         .then(() => {
-          _slackMessage(`Thanos snapped half the queue. ${halfQueue} tracks were removed.`, channel);
+          _slackMessage(`👏 *SNAP!* Perfectly balanced, as all things should be. ${halfQueue} tracks turned to dust. ✨💨`, channel);
         })
         .catch((err) => {
           logger.error('Error removing tracks from queue: ' + err);
-          _slackMessage('Error snapping the queue.', channel);
+          _slackMessage('💥 Error executing the snap. Even Thanos has off days... Try again! 🔄', channel);
         });
     })
     .catch((err) => {
       logger.error('Error getting queue for snap: ' + err);
-      _slackMessage('Error getting queue for snap.', channel);
+      _slackMessage('🚨 Error getting queue for the snap. Try again! 🔄', channel);
     });
 }
 
@@ -1978,12 +1978,12 @@ function _status(channel, cb) {
   sonos
     .getCurrentState()
     .then((state) => {
-      _slackMessage('Current state is: ' + state, channel);
+      _slackMessage('🔴 Current playback state: *' + state + '* 🎵', channel);
       if (cb) cb(state);
     })
     .catch((err) => {
       logger.error('Error getting status: ' + err);
-      _slackMessage('Error getting status.', channel);
+      _slackMessage('🚨 Error getting playback status. Try again! 🔄', channel);
       if (cb) cb(null);
     });
 }
@@ -2018,7 +2018,7 @@ function _help(input, channel) {
     _slackMessage(message, channel);
   } catch (err) {
     logger.error('Error reading help file: ' + err.message);
-    _slackMessage('Error loading help text. Please contact an admin.', channel);
+    _slackMessage('🚨 Error loading help text. Please contact an admin! 📞', channel);
   }
 }
 
@@ -2041,7 +2041,7 @@ function _blacklist(input, channel, userName) {
   let targetUser = normalizeUser(input[1]);
 
   if (!targetUser) {
-    _slackMessage('Invalid user format.', channel);
+    _slackMessage('🤔 Invalid user format. Make sure to mention them like @username! 👤', channel);
     return;
   }
 
@@ -2050,7 +2050,7 @@ function _blacklist(input, channel, userName) {
   if (index > -1) {
     // Remove from blacklist
     blacklist.splice(index, 1);
-    _slackMessage(`User <@${targetUser}> has been removed from the blacklist. They can now use the bot.`, channel);
+    _slackMessage(`✅ User <@${targetUser}> has been removed from the blacklist! They can now use the bot again. 🎉`, channel);
   } else {
     // Add to blacklist
     blacklist.push(targetUser);
@@ -2100,7 +2100,7 @@ function _setconfig(input, channel, userName) {
   };
 
   if (!allowedConfigs[key]) {
-    _slackMessage(`Invalid config key "${key}". Use \`setconfig\` without arguments to see available options.`, channel);
+    _slackMessage(`❌ Invalid config key "${key}". Use \`setconfig\` without arguments to see available options! ⚙️`, channel);
     return;
   }
 
@@ -2110,11 +2110,11 @@ function _setconfig(input, channel, userName) {
   if (configDef.type === 'number') {
     const numValue = Number(value);
     if (isNaN(numValue)) {
-      _slackMessage(`Value for "${key}" must be a number.`, channel);
+      _slackMessage(`🔢 Value for "${key}" must be a number! Try again with digits. 🎯`, channel);
       return;
     }
     if (numValue < configDef.min || numValue > configDef.max) {
-      _slackMessage(`Value for "${key}" must be between ${configDef.min} and ${configDef.max}.`, channel);
+      _slackMessage(`📊 Value for "${key}" must be between *${configDef.min}* and *${configDef.max}*! 🎯`, channel);
       return;
     }
 
@@ -2150,7 +2150,7 @@ function _setconfig(input, channel, userName) {
     config.save(function (err) {
       if (err) {
         logger.error('Error saving config: ' + err);
-        _slackMessage(`Updated \`${key}\` to \`${numValue}\` in memory, but failed to save to disk.`, channel);
+        _slackMessage(`⚠️ Updated \`${key}\` to \`${numValue}\` in memory, but failed to save to disk! Changes won't persist after restart. 🚨`, channel);
         return;
       }
       _slackMessage(`✅ Successfully updated \`${key}\` from \`${oldValue}\` to \`${numValue}\` and saved to config.`, channel);
@@ -2165,7 +2165,7 @@ async function _append(input, channel, userName) {
   // Append a track to the queue (never flushes existing queue)
   // Start playing if not already playing
   if (!input || input.length < 2) {
-    _slackMessage('You have to tell me what to add!', channel);
+    _slackMessage('🎶 Tell me what song to append! Use `append <song name>` 🎵', channel);
     return;
   }
 
@@ -2205,7 +2205,7 @@ async function _append(input, channel, userName) {
     await sonos.queue(result.uri);
     logger.info('Appended track: ' + result.name);
 
-    let msg = 'Added ' + '*' + result.name + '*' + ' by ' + result.artist + ' to the queue.';
+    let msg = '✅ Added *' + result.name + '* by _' + result.artist + '_ to the queue!';
 
     // Check if we need to start playback
     try {
@@ -2226,7 +2226,7 @@ async function _append(input, channel, userName) {
     _slackMessage(msg, channel);
   } catch (err) {
     logger.error('Error appending track: ' + err.message);
-    _slackMessage('Could not find that track or error adding it :(', channel);
+    _slackMessage('🤷 Couldn\'t find that track or something went wrong. Try a different search! 🎶', channel);
   }
 }
 
@@ -2234,7 +2234,7 @@ function _addToSpotifyPlaylist(input, channel) {
   if (channel !== global.adminChannel) {
     return;
   }
-  _slackMessage('This feature is not yet implemented. Please try again later.', channel);
+  _slackMessage('🚧 This feature is still under construction! Check back later! 🛠️', channel);
 }
 
 async function _tts(input, channel) {
@@ -2243,7 +2243,7 @@ async function _tts(input, channel) {
   }
   const text = input.slice(1).join(' ');
   if (!text) {
-    _slackMessage('You must provide a message for the bot to say.', channel);
+    _slackMessage('💬 You must provide a message for the bot to say! Use `say <message>` 🔊', channel);
     return;
   }
 
@@ -2253,7 +2253,7 @@ async function _tts(input, channel) {
   gtts.save(ttsFilePath, async function (err, result) {
     if (err) {
       logger.error('Error saving TTS file: ' + err);
-      _slackMessage('Error generating text-to-speech.', channel);
+      _slackMessage('🚨 Error generating text-to-speech. Try again with a simpler message! 🔄', channel);
       return;
     }
 
@@ -2289,7 +2289,7 @@ async function _tts(input, channel) {
       
     } catch (playbackErr) {
       logger.error('Error during TTS playback sequence: ' + playbackErr);
-      _slackMessage('Error playing the message.', channel);
+      _slackMessage('🚨 Error playing the message. Check that the speaker is online! 🔊', channel);
     }
   });
 }
@@ -2300,24 +2300,24 @@ function _moveTrackAdmin(input, channel, userName) {
     return;
   }
   if (input.length < 3) {
-    _slackMessage('Please provide both the source and destination track numbers. (move [from] [to])', channel);
+    _slackMessage('📍 Please provide both the source and destination track numbers! Use `move [from] [to]` 🎯', channel);
     return;
   }
   const from = Number(input[1]);
   const to = Number(input[2]);
   if (isNaN(from) || isNaN(to)) {
-    _slackMessage('Invalid track numbers provided.', channel);
+    _slackMessage('🔢 Invalid track numbers! Both source and destination must be numbers. Try `move 3 1` 🎯', channel);
     return;
   }
 
   sonos
     .reorderTracksInQueue(from, 1, to, 0)
     .then(() => {
-      _slackMessage(`Successfully moved track from position ${from} to ${to}.`, channel);
+      _slackMessage(`📍 Successfully moved track from position *${from}* to *${to}*! Queue reshuffled! 🔀`, channel);
     })
     .catch((err) => {
       logger.error('Error moving track: ' + err);
-      _slackMessage('Error moving track.', channel);
+      _slackMessage('🚨 Error moving track. Check that both positions exist in the queue! 🔄', channel);
     });
 }
 
