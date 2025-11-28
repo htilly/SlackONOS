@@ -24,24 +24,27 @@ jobs:
     - name: Log in to Docker Hub
       run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
-    - name: Build and push multi-platform Docker image
-      run: |
-        docker buildx build --platform linux/amd64,linux/arm64 --push \
-          -t ${{ secrets.DOCKERHUB_USERNAME }}/slackonos:latest .
-
-    - name: Verify the platforms
-      run: docker buildx inspect --bootstrap
-
-    - name: Increment build number in build.txt
+    - name: Increment build number
+      id: build_number
       run: |
         BUILD_NUMBER=$(cat build.txt)
         BUILD_NUMBER=$((BUILD_NUMBER + 1))
         echo $BUILD_NUMBER > build.txt
+        echo "number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
+
+    - name: Build and push multi-platform Docker image
+      run: |
+        docker buildx build --platform linux/amd64,linux/arm64 --push \
+          -t ${{ secrets.DOCKERHUB_USERNAME }}/slackonos:latest \
+          -t ${{ secrets.DOCKERHUB_USERNAME }}/slackonos:build-${{ steps.build_number.outputs.number }} .
+
+    - name: Verify the platforms
+      run: docker buildx inspect --bootstrap
 
     - name: Commit and push updated build.txt
       run: |
         git config --local user.name "github-actions[bot]"
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git add build.txt
-        git commit -m "Increment build number to $BUILD_NUMBER"
+        git commit -m "Build ${{ steps.build_number.outputs.number }}"
         git push
