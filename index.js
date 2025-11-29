@@ -564,13 +564,17 @@ async function _checkSystemHealth() {
 // SIMPLE HTTP SERVER FOR TTS
 // ==========================================
 const httpServer = http.createServer((req, res) => {
-  if (req.url === '/tts.mp3') {
+  // Parse URL to ignore query params (used for cache-busting)
+  const urlPath = req.url.split('?')[0];
+  
+  if (urlPath === '/tts.mp3') {
     const ttsFilePath = path.join(os.tmpdir(), 'sonos-tts.mp3');
     
     if (fs.existsSync(ttsFilePath)) {
       res.writeHead(200, {
         'Content-Type': 'audio/mpeg',
-        'Accept-Ranges': 'bytes'
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
       });
       const stream = fs.createReadStream(ttsFilePath);
       stream.pipe(res);
@@ -2889,10 +2893,15 @@ async function _tts(input, channel) {
   }
 
   const ttsFilePath = path.join(os.tmpdir(), 'sonos-tts.mp3');
+  
+  // Pick a random intro message to use in both Slack and TTS
+  const introMessage = ttsMessage[Math.floor(Math.random() * ttsMessage.length)];
+  // Build full TTS text with intro, longer pause (...), and the actual message
+  const fullTtsText = `${introMessage}... ... ${text}`;
 
   try {
     // Get audio as base64 using the new library (handles long text automatically)
-    const audioResults = await googleTTS.getAllAudioBase64(text, {
+    const audioResults = await googleTTS.getAllAudioBase64(fullTtsText, {
       lang: 'en',
       slow: false,
       host: 'https://translate.google.com',
@@ -2908,11 +2917,6 @@ async function _tts(input, channel) {
     fs.writeFileSync(ttsFilePath, combinedBuffer);
     logger.info('TTS audio saved to: ' + ttsFilePath);
 
-    // Get current track position
-    const currentTrack = await sonos.currentTrack();
-    const currentPosition = currentTrack ? currentTrack.queuePosition : 1;
-    const ttsPosition = currentPosition + 1;
-
     // Get TTS file duration
     const fileDuration = await new Promise((resolve, reject) => {
       mp3Duration(ttsFilePath, (err, duration) => {
@@ -2920,22 +2924,42 @@ async function _tts(input, channel) {
         resolve(duration);
       });
     });
+    // Convert to milliseconds and add 2 sec buffer for Sonos to advance
+    const waitTime = Math.ceil(fileDuration * 1000) + 2000;
+    logger.info('TTS duration: ' + fileDuration.toFixed(2) + 's, will wait ' + waitTime + 'ms before cleanup');
 
-    // Use HTTP server to serve the TTS file
-    const uri = `http://${ipAddress}:${webPort}/tts.mp3`;
+    // Get current track position
+    const currentTrack = await sonos.currentTrack();
+    const currentPosition = currentTrack ? currentTrack.queuePosition : 1;
+    const ttsPosition = currentPosition + 1;
+
+    // Use HTTP server to serve the TTS file (with cache-busting timestamp)
+    const uri = `http://${ipAddress}:${webPort}/tts.mp3?t=${Date.now()}`;
     logger.info('Queuing TTS file from: ' + uri + ' at position ' + ttsPosition);
     
     // Queue TTS right after current track
     await sonos.queue(uri, ttsPosition);
     
-    _slackMessage(ttsMessage[Math.floor(Math.random() * ttsMessage.length)], channel);
+    _slackMessage(introMessage, channel);
 
     // Skip to TTS
     await sonos.next();
-    logger.info('Playing TTS, duration: ' + fileDuration + 's');
+    logger.info('Playing TTS at queue position ' + ttsPosition);
 
-    // Let Sonos auto-advance naturally after TTS finishes
-    // No need to manually remove or skip - Sonos will continue to next track automatically
+    // Wait for TTS to finish + 3 sec buffer, then remove from queue and go back
+    setTimeout(async () => {
+      try {
+        // Remove the TTS track from queue
+        await sonos.removeTracksFromQueue([ttsPosition]);
+        logger.info('Removed TTS track from queue at position ' + ttsPosition);
+        
+        // Go back to previous track (the one that was playing before TTS)
+        await sonos.previous();
+        logger.info('Returned to previous track after TTS cleanup');
+      } catch (e) {
+        logger.error('Error cleaning up after TTS: ' + e);
+      }
+    }, waitTime);
     
   } catch (err) {
     logger.error('Error during TTS: ' + err);
