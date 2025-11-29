@@ -9,6 +9,9 @@ const nconf = require('nconf');
 let openai = null;
 let isEnabled = false;
 let logger = null;
+let lastSuccessTS = null;
+let lastErrorTS = null;
+let lastErrorMessage = null;
 
 /**
  * Initialize OpenAI client
@@ -147,6 +150,8 @@ Parse this into a command.`;
     
     logger.info(`AI parsed "${userMessage}" → ${parsed.command} ${JSON.stringify(parsed.args)} (confidence: ${parsed.confidence})`);
     logger.debug(`AI reasoning: ${parsed.reasoning}`);
+    lastSuccessTS = new Date().toISOString();
+    lastErrorMessage = null;
     
     // Validate parsed response
     if (!parsed.command || !Array.isArray(parsed.args) || typeof parsed.confidence !== 'number') {
@@ -161,6 +166,8 @@ Parse this into a command.`;
     if (err.response) {
       logger.error('OpenAI API error: ' + JSON.stringify(err.response.data));
     }
+    lastErrorTS = new Date().toISOString();
+    lastErrorMessage = err.message;
     return null;
   }
 }
@@ -172,8 +179,19 @@ function isAIEnabled() {
   return isEnabled;
 }
 
+function getAIDebugInfo() {
+  return {
+    enabled: isEnabled,
+    lastSuccessTS,
+    lastErrorTS,
+    lastErrorMessage,
+    model: 'gpt-4o-mini'
+  };
+}
+
 module.exports = {
   initialize,
   parseNaturalLanguage,
-  isAIEnabled
+  isAIEnabled,
+  getAIDebugInfo
 };

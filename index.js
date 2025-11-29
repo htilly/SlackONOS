@@ -1619,9 +1619,17 @@ async function _debug(channel, userName) {
       `${configValues}\n\n` +
 
       `*🤖 OpenAI:*\n` +
-      `> Enabled: ${AIHandler.isAIEnabled() ? 'true' : 'false'}\n` +
-      `> Key Present: ${config.get('openaiApiKey') ? 'true' : 'false'}\n` +
-      `> Model: gpt-4o-mini\n`;
+      (() => {
+        const ai = AIHandler.getAIDebugInfo();
+        return (
+          `> Enabled: ${ai.enabled ? 'true' : 'false'}\n` +
+          `> Key Present: ${config.get('openaiApiKey') ? 'true' : 'false'}\n` +
+          `> Model: ${ai.model}\n` +
+          `> Last Success: ${ai.lastSuccessTS || 'n/a'}\n` +
+          `> Last Error: ${ai.lastErrorTS || 'n/a'}\n` +
+          (ai.lastErrorMessage ? `> Last Error Msg: ${ai.lastErrorMessage}\n` : '')
+        );
+      })();
 
     _slackMessage(message, channel);
   } catch (err) {
