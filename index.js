@@ -2714,6 +2714,7 @@ function _setconfig(input, channel, userName) {
 > \`maxVolume\`: ${maxVolume}
 > \`searchLimit\`: ${searchLimit}
 > \`voteTimeLimitMinutes\`: ${voteTimeLimitMinutes}
+> \`aiModel\`: ${config.get('aiModel') || 'gpt-4o'}
 > \`aiPrompt\`: ${(config.get('aiPrompt') || '').slice(0,80)}${(config.get('aiPrompt')||'').length>80?'…':''}
 
 *Usage:* \`setconfig <key> <value>\`
@@ -2735,6 +2736,7 @@ function _setconfig(input, channel, userName) {
     maxVolume: { type: 'number', min: 0, max: 100 },
     searchLimit: { type: 'number', min: 1, max: 50 },
     voteTimeLimitMinutes: { type: 'number', min: 1, max: 60 },
+    aiModel: { type: 'string', minLen: 1, maxLen: 50, allowed: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
     aiPrompt: { type: 'string', minLen: 1, maxLen: 500 }
   };
 
@@ -2798,6 +2800,11 @@ function _setconfig(input, channel, userName) {
     const newValue = input.slice(2).join(' ').trim();
     if (newValue.length < (configDef.minLen || 1) || newValue.length > (configDef.maxLen || 500)) {
       _slackMessage(`📝 Value length for \`${key}\` must be between ${configDef.minLen} and ${configDef.maxLen} characters.`, channel);
+      return;
+    }
+    // Check allowed values if specified
+    if (configDef.allowed && !configDef.allowed.includes(newValue)) {
+      _slackMessage(`📝 Invalid value for \`${key}\`. Allowed values: ${configDef.allowed.join(', ')}`, channel);
       return;
     }
     const oldValue = config.get(key) || '';
