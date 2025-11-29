@@ -2,7 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const mp3Duration = require('mp3-duration');
 const path = require('path');
-const GTTS = require('gtts'); // Import the gtts library
+const googleTTS = require('@sefinek/google-tts-api');
 const config = require('nconf');
 const winston = require('winston');
 const Spotify = require('./spotify-async');
@@ -2888,51 +2888,59 @@ async function _tts(input, channel) {
     return;
   }
 
-  const gtts = new GTTS(text, 'en');
   const ttsFilePath = path.join(os.tmpdir(), 'sonos-tts.mp3');
 
-  gtts.save(ttsFilePath, async function (err, result) {
-    if (err) {
-      logger.error('Error saving TTS file: ' + err);
-      _slackMessage('🚨 Error generating text-to-speech. Try again with a simpler message! 🔄', channel);
-      return;
-    }
+  try {
+    // Get audio as base64 using the new library (handles long text automatically)
+    const audioResults = await googleTTS.getAllAudioBase64(text, {
+      lang: 'en',
+      slow: false,
+      host: 'https://translate.google.com',
+      timeout: 10000,
+      splitPunct: ',.?!;:',
+    });
 
-    try {
-      // Get current track position
-      const currentTrack = await sonos.currentTrack();
-      const currentPosition = currentTrack ? currentTrack.queuePosition : 1;
-      const ttsPosition = currentPosition + 1;
+    // Combine all audio chunks into a single buffer
+    const audioBuffers = audioResults.map(result => Buffer.from(result.base64, 'base64'));
+    const combinedBuffer = Buffer.concat(audioBuffers);
+    
+    // Write the combined audio to file
+    fs.writeFileSync(ttsFilePath, combinedBuffer);
+    logger.info('TTS audio saved to: ' + ttsFilePath);
 
-      // Get TTS file duration
-      const fileDuration = await new Promise((resolve, reject) => {
-        mp3Duration(ttsFilePath, (err, duration) => {
-          if (err) reject(err);
-          resolve(duration);
-        });
+    // Get current track position
+    const currentTrack = await sonos.currentTrack();
+    const currentPosition = currentTrack ? currentTrack.queuePosition : 1;
+    const ttsPosition = currentPosition + 1;
+
+    // Get TTS file duration
+    const fileDuration = await new Promise((resolve, reject) => {
+      mp3Duration(ttsFilePath, (err, duration) => {
+        if (err) reject(err);
+        resolve(duration);
       });
+    });
 
-      // Use HTTP server to serve the TTS file
-      const uri = `http://${ipAddress}:${webPort}/tts.mp3`;
-      logger.info('Queuing TTS file from: ' + uri + ' at position ' + ttsPosition);
-      
-      // Queue TTS right after current track
-      await sonos.queue(uri, ttsPosition);
-      
-      _slackMessage(ttsMessage[Math.floor(Math.random() * ttsMessage.length)], channel);
+    // Use HTTP server to serve the TTS file
+    const uri = `http://${ipAddress}:${webPort}/tts.mp3`;
+    logger.info('Queuing TTS file from: ' + uri + ' at position ' + ttsPosition);
+    
+    // Queue TTS right after current track
+    await sonos.queue(uri, ttsPosition);
+    
+    _slackMessage(ttsMessage[Math.floor(Math.random() * ttsMessage.length)], channel);
 
-      // Skip to TTS
-      await sonos.next();
-      logger.info('Playing TTS, duration: ' + fileDuration + 's');
+    // Skip to TTS
+    await sonos.next();
+    logger.info('Playing TTS, duration: ' + fileDuration + 's');
 
-      // Let Sonos auto-advance naturally after TTS finishes
-      // No need to manually remove or skip - Sonos will continue to next track automatically
-      
-    } catch (playbackErr) {
-      logger.error('Error during TTS playback sequence: ' + playbackErr);
-      _slackMessage('🚨 Error playing the message. Check that the speaker is online! 🔊', channel);
-    }
-  });
+    // Let Sonos auto-advance naturally after TTS finishes
+    // No need to manually remove or skip - Sonos will continue to next track automatically
+    
+  } catch (err) {
+    logger.error('Error during TTS: ' + err);
+    _slackMessage('🚨 Error generating text-to-speech. Try again with a simpler message! 🔄', channel);
+  }
 }
 
 function _moveTrackAdmin(input, channel, userName) {
