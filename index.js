@@ -184,13 +184,16 @@ let trackVoteUsers = {}; // Track users who have voted for each track
 const SlackSystem = require('./slack');
 const DiscordSystem = require('./discord');
 
-// Initialize Slack System
-const slack = SlackSystem({
-  botToken: slackBotToken,
-  appToken: slackAppToken,
-  logger: logger,
-  onCommand: processInput
-});
+// Initialize Slack System (optional - only if tokens configured)
+let slack = null;
+if (slackBotToken && slackAppToken) {
+  slack = SlackSystem({
+    botToken: slackBotToken,
+    appToken: slackAppToken,
+    logger: logger,
+    onCommand: processInput
+  });
+}
 
 // Initialize Discord (optional - only if token configured)
 let discord = null;
@@ -218,7 +221,11 @@ async function _slackMessage(message, channel_id, options = {}) {
 
   // Slack context normal path
   try {
-    await slack.sendMessage(message, targetChannel, options);
+    if (slack) {
+      await slack.sendMessage(message, targetChannel, options);
+    } else {
+      logger.warn('Slack not initialized - cannot send message');
+    }
   } catch (err) {
     const msg = err && err.message ? err.message : String(err);
     logger.error(`Error sending Slack message: ${msg}`);
@@ -236,13 +243,13 @@ async function _discordMessage(message, channel_id) {
 async function _sendMessage(message, channel_id, platform = 'slack') {
   if (platform === 'discord') {
     await _discordMessage(message, channel_id);
-  } else {
+  } else if (slack) {
     await slack.sendMessage(message, channel_id);
   }
 }
 
 // Global web client for other functions that might need it (like _checkUser)
-const web = slack.web;
+const web = slack ? slack.web : null;
 let botUserId; // This is handled internally in slack.js now, but kept if referenced elsewhere (though it shouldn't be)
 
 function delay(ms) {
@@ -373,21 +380,32 @@ async function _checkSystemHealth() {
   try {
     logger.info('Starting SlackONOS...');
 
-    // 1. Validate Slack Tokens (Critical)
-    if (!slackBotToken || !slackAppToken) {
-      throw new Error(`Missing Slack API Keys. Cannot start.`);
+    // Check that at least one platform is configured
+    const hasSlack = slackBotToken && slackAppToken;
+    const hasDiscord = config.get('discordToken');
+    
+    if (!hasSlack && !hasDiscord) {
+      throw new Error('No platform configured! Provide either Slack tokens (slackAppToken + token) or Discord token (discordToken)');
     }
 
-    // 2. Initialize Slack
-    try {
-      await slack.init();
-      logger.info('✅ Slack connection established.');
-    } catch (slackErr) {
-      throw new Error(`Failed to connect to Slack API: ${slackErr.message}`);
+    // 2. Initialize Slack (if configured)
+    if (hasSlack) {
+      try {
+        await slack.init();
+        logger.info('✅ Slack connection established.');
+      } catch (slackErr) {
+        logger.error(`Failed to connect to Slack API: ${slackErr.message}`);
+        if (!hasDiscord) {
+          throw new Error('Slack initialization failed and no Discord fallback configured');
+        }
+        logger.warn('Continuing with Discord-only mode...');
+      }
+    } else {
+      logger.info('ℹ️  Slack tokens not configured - running in Discord-only mode');
     }
 
-    // 2b. Initialize Discord (optional)
-    if (config.get('discordToken')) {
+    // 2b. Initialize Discord (if configured)
+    if (hasDiscord) {
       try {
         discord = await DiscordSystem.initializeDiscord({
           discordToken: config.get('discordToken'),
@@ -404,11 +422,18 @@ async function _checkSystemHealth() {
         logger.warn(`Discord initialization failed: ${discordErr.message}. Continuing with Slack only.`);
       }
     } else {
-      logger.info('ℹ️  Discord token not configured - running in Slack-only mode');
+      logger.info('ℹ️  Discord token not configured');
     }
 
-    // 3. Lookup Channels
-    await _lookupChannelID();
+    // 3. Lookup Slack Channels (only if Slack is initialized)
+    if (slack) {
+      await _lookupChannelID();
+    } else {
+      logger.info('Skipping Slack channel lookup (Discord-only mode)');
+      // Set dummy globals for Discord-only mode
+      global.adminChannel = null;
+      global.standardChannel = null;
+    }
 
     // 4. Validate System Health
     const health = await _checkSystemHealth();
@@ -663,6 +688,12 @@ const userCache = {};
 
 async function _checkUser(userId) {
   try {
+    // Discord users come as plain usernames, Slack users as <@U123>
+    if (!web) {
+      // Discord-only mode: just return the username as-is
+      return userId;
+    }
+    
     // Clean the userId if wrapped in <@...>
     userId = userId.replace(/[<@>]/g, '');
 
