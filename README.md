@@ -4,63 +4,74 @@
 ![Coverage](https://github.com/htilly/SlackONOS/workflows/Test%20and%20Coverage/badge.svg)
 
 
-# SlackONOS
-**Slack / Discord / Sonos / Spotify / Node.js - Control Sonos through Slack & Discord**
+# SlackONOS - Democratic Music Bot for Discord & Slack
 
-Now supports both **Slack** and **Discord**! Run them simultaneously or use Discord-only mode.
+**Control Your Sonos Speakers with Community Voting**
+
+A democratic music bot for Discord and Slack that lets teams control Sonos speakers with Spotify integration. Features community voting, democratic skip tracking with "gong" commands, and seamless multi-platform support.
+
+🎵 **Perfect for:** Offices, shared spaces, gaming communities, Discord servers, and music lovers who want fair queue control
+
+✨ **Key Features:**
+- 🗳️ **Democratic Voting** - Community decides what plays next with vote-to-play system
+- 🔔 **Gong System** - Skip tracks democratically when enough users vote to gong
+- 🎮 **Discord Support** - Full emoji reaction voting (🎵 to vote, 🔔 to gong)
+- 💬 **Slack Integration** - Modern Socket Mode support with channel-based permissions
+- 🎶 **Spotify Integration** - Search and queue tracks, albums, and playlists
+- 👥 **Multi-Platform** - Run Discord and Slack simultaneously on one Sonos system
+- 🎯 **Role-Based Permissions** - Admin controls for flush, volume, and queue management
+- 🚫 **Gong Ban System** - Tracks voted down become immune to re-queuing
 
 *Screenshot*
 
 ![ScreenShot](http://raw.github.com/htilly/zenmusic/master/doc/images/Screenshot.png)
 
+## Quick Start
 
+**What You Need:**
+1. A Sonos speaker configured with Spotify
+2. A Slack bot token **OR** Discord bot token (or both!)
+3. A server running Node.js
+4. Static IP address for your Sonos speaker
+5. Spotify Developer credentials (Client ID & Secret) from https://developer.spotify.com/dashboard/applications
+
+**Docker Installation (Recommended)**
+
+```yaml
+services:
+  slackonos:
+    container_name: slackonos
+    image: htilly/slackonos:latest
+    restart: unless-stopped
+    volumes:
+      - /PATH_TO_CONFIG_FOLDER:/app/config
+```
+
+📖 **[Complete Discord Setup Guide](DISCORD.md)** - Step-by-step Discord bot configuration
+
+---
 
 (&#x1F534;) *** config.json MUST be moved to config folder.*** (&#x1F534;)
+---
 
-**What is it?**
+## How It Works
 
-A chat bot that controls Sonos speakers (with Spotify integration) through **Slack** and **Discord**. Highly democratic bot with community voting features!
+SlackONOS is a democratic music bot that gives communities fair control over shared Sonos speakers. Instead of one person controlling the music, everyone can participate through voting and democratic skip features.
 
-Uses https://github.com/bencevans/node-sonos to control Sonos.
+**Uses [node-sonos](https://github.com/bencevans/node-sonos) for Sonos control.**
 
-**Platforms:**
-- ✅ **Slack** - Full Socket Mode support with channel-based admin permissions
-- ✅ **Discord** - Full support with role-based admin permissions  
-- 🎵 **Shared Queue** - Both platforms control the same Sonos speaker
-- 🗳️ **Democratic Controls** - Gong and vote systems work across platforms
+### Platform Support
+- ✅ **Slack** - Modern Socket Mode with channel-based admin permissions
+- ✅ **Discord** - Full support with role-based admin + emoji reaction voting
+- 🎵 **Shared Queue** - Both platforms control the same Sonos speaker simultaneously
+- 🗳️ **Cross-Platform Democracy** - Gong and vote systems work across all platforms
 
-📖 **[Discord Setup Guide](DISCORD.md)** - Complete setup instructions for Discord integration
+### Network Requirements
 
-**What do I need in order to get it to work?**
-
-1: A Sonos player (configured with Spotify).  
-2: A Slack bot configured in #Slack **OR** a Discord bot  
-3: A server running node.js  
-4: Know the IP of your Sonos. Preferably a static one.  
-5: A valid spotify account with Client ID & Client Secret. Head over to:   https://developer.spotify.com/dashboard/applications to set it up. Enter the data in the config.json file.  
-
-**Installation**
-
-DOCKER COMPOSE
-
-(you must point to the config.json, example can be found [here](https://github.com/htilly/zenmusic/blob/master/config/config.json.example))
-
-```
-services:
-slackonos:
-  container_name: slackonos
-  image: htilly/slackonos:latest
-  restart: unless-stopped
-  volumes:
-    - /PATH_TO_CONFIG_FILE_FOLDER:/app/config
-```
-
-
-**Firewall settings**
-
-Server running the index.js needs to be able to talk to the Sonos on port 1400 (TCP)
-Sonos needs to be configured and setup with Spotify and have access to internet.
-
+**Firewall Settings:**
+- Server must reach Sonos on port **1400 (TCP)**
+- Sonos must have internet access for Spotify streaming
+- Recommended: Static IP for Sonos speaker
 
 **Configuration**
 You must provide the token of your Slack bot and the IP of your Sonos in either config.json (see config.json.example), as arguments or as environment variables.
@@ -123,46 +134,93 @@ SlackONOS v2.0 includes significant architectural improvements:
 
 **What can it do?**
 
-It will queue you requests and play it..  However if X amount of people for any strange reason doesn't like the current track, it will listen to the command "**gong**" and eventually skip to the next track.
+### Democratic Music Control
 
-It also future some admin commands like "setvolume", "next", "stop" etc.
+**Community Queue Management:**
+The bot queues song requests and plays them in order. If enough people dislike the current track, they can use the "**gong**" command to democratically skip it.
 
-List of commands (just type help in the channel)
+### User Commands
 
-* `help` : this list 
-* `current` : list current track
-* `search` _text_ : search for a track, does NOT add it to the queue
-* `add` _text_ : Add song to the queue and start playing if idle.
-* `append` _text_ : Append a song to the previous playlist and start playing the same list again.
-* `gong` : The current track is bad! Vote for skipping this track
-* `gongcheck` : How many gong votes there are currently, as well as who has GONGED.
-* `vote` _exactSongTitle_ : Vote for a specific song title in the queue.
-* `volume` : view current volume
-* `list` : list current queue
-* `status` : show the current status
+**Music Control:**
+* `add <song/artist/album>` - Add music to the queue and start playing
+* `search <text>` - Search for tracks without adding to queue
+* `bestof <artist>` - Queue the top 10 tracks by an artist
+* `current` - Show currently playing track with time remaining
+* `list` - Display the current queue
+* `status` - Show playback status
 
-**ADMIN FUNCTIONS**
+**Democratic Features:**
+* `gong` - Vote to skip the current track (requires multiple votes)
+* `vote <track number>` - Vote to move a queued track up in priority
+* `gongcheck` - See current gong votes and who voted
+* `votecheck` - See current vote counts for tracks
+* `volume` - View current volume level
 
-* `flush` : flush the current queue
-* `setvolume` _number_ : sets volume
-* `play` : play track
-* `stop` : stop life
-* `next` : play next track
-* `previous` : play previous track
-* `shuffle` : shuffles playlist
+**Discord Emoji Reactions:**
+* 🎵 - Vote for a track (click on "Added..." messages)
+* 🔔 - Gong/skip a track (click on "Added..." messages)
+
+### Admin Commands
+
+**Queue Management:**
+* `flush` - Clear the entire queue
+* `next` - Skip to next track immediately
+* `previous` - Go back to previous track
+* `shuffle` - Shuffle the playlist
+
+**Playback Control:**
+* `play` - Resume playback
+* `stop` - Stop playback
+* `setvolume <number>` - Set volume (0-100)
+
+**System:**
+* `blacklist add <@user>` - Prevent user from adding songs
+* `blacklist remove <@user>` - Restore user permissions
+* `blacklist list` - Show blacklisted users
     
-**Info**
+---
 
-Please use it to get some music in the office / home. 
+## Use Cases
 
-We would appreciate if you drop a comment or send a pm... and please feel free to add / change stuff!! Much appreciated!
+**Perfect for:**
+- 🏢 **Office Environments** - Democratic music control for shared workspaces
+- 🎮 **Discord Communities** - Music bot for gaming servers and communities
+- 🏠 **Shared Living Spaces** - Fair queue management for roommates
+- 🎉 **Events & Parties** - Let guests control the music democratically
+- ☕ **Cafes & Lounges** - Customer-influenced playlists with admin oversight
 
-**Installation**
+---
 
-For installation, see the file INSTALL.
+## Installation & Setup
 
-Or have a look at the Wiki.
-https://github.com/htilly/zenmusic/wiki
+For detailed installation instructions, see the [INSTALL](INSTALL) file.
+
+For Discord-specific setup, see the **[Discord Setup Guide](DISCORD.md)**.
+
+**Wiki:** https://github.com/htilly/zenmusic/wiki
+
+---
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit pull requests, report bugs, or suggest features.
+
+**Development:**
+- Run tests: `npm test`
+- Docker build: `docker build -t slackonos .`
+- See [TESTING.md](TESTING.md) for test workflow information
+
+---
+
+## Keywords
+
+Discord music bot, Slack music bot, Sonos Discord integration, democratic music voting, office music bot, Spotify Discord controller, Sonos Slack bot, community music control, democratic skip, vote-to-play, gaming server music, shared speaker control
+
+---
+
+**Feedback Welcome!**
+
+Please drop a comment or send a PM if you use this bot! Contributions and improvements are much appreciated!
 
 
 **KnownBugs**
