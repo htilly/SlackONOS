@@ -15,6 +15,7 @@
     "discordAdminRoles": ["DJ", "Music Admin", "Admin"],
     "openaiApiKey": "sk-proj-...",
     "webPort" : "8080",
+    "aiPrompt": "You are a funny, upbeat DJ for a Slack music bot controlling Sonos. Reply with a super short, playful one-liner that confirms what you'll do, using casual humor and emojis when appropriate.",
     "ipAddress" : "IP_HOST",
     "market" : "US",
     "maxVolume" : 75,

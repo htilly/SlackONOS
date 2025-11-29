@@ -107,13 +107,15 @@ Parse the user's message and respond ONLY with valid JSON in this exact format:
   "command": "command_name",
   "args": ["arg1", "arg2"],
   "confidence": 0.95,
-  "reasoning": "Brief explanation of parsing"
+  "reasoning": "Brief explanation of parsing",
+  "summary": "Short, funny DJ-style one-liner confirming the action"
 }
 
 Rules:
 - confidence should be 0.0 to 1.0 (use 0.9+ for clear requests, 0.5-0.8 for ambiguous, <0.5 for unclear)
 - For "add" and "search": extract the song/artist/album as a single argument
-- For "bestof": extract artist name
+ - For "add" and "search": extract the song/artist/album as a single argument; if the user implies a quantity (e.g., "some", "a couple", "few", "several", or mentions a number), include a second numeric argument for desired count (default 5 for vague quantities)
+- For "bestof": extract artist name; if user asks for top N (e.g., "top three", "best 3"), include N as second argument (number)
 - For "vote": extract track number if mentioned
 - For commands without arguments (gong, current, list, etc): use empty args array
 - Always use lowercase command names
@@ -124,7 +126,8 @@ User: "spela de bästa låtarna med U2" → {"command": "bestof", "args": ["U2"]
 User: "lägg till Forever Young" → {"command": "add", "args": ["Forever Young"], "confidence": 0.92, "reasoning": "Add single track"}
 User: "skippa den här skiten" → {"command": "gong", "args": [], "confidence": 0.88, "reasoning": "Slang for skipping track"}
 User: "vad spelas nu?" → {"command": "current", "args": [], "confidence": 0.95, "reasoning": "Asking for current track"}
-User: "hur är vädret?" → {"command": "help", "args": [], "confidence": 0.3, "reasoning": "Not music-related, suggesting help"}`;
+User: "hur är vädret?" → {"command": "help", "args": [], "confidence": 0.3, "reasoning": "Not music-related, suggesting help"}
+User: "play the best three songs by Foo Fighters" → {"command": "bestof", "args": ["Foo Fighters", "3"], "confidence": 0.95, "reasoning": "Top-N request for artist"}`
 
   const userPrompt = `User: ${userName}
 Message: "${userMessage}"
@@ -134,10 +137,13 @@ Parse this into a command.`;
   try {
     logger.debug(`AI parsing request from ${userName}: "${userMessage}"`);
     
+    const djPrompt = nconf.get('aiPrompt') || 'You are a funny, upbeat DJ. Reply with a super short, playful one-liner about what you\'ll do.';
+
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: systemPrompt },
+        { role: 'system', content: `DJ Style: ${djPrompt}` },
         { role: 'user', content: userPrompt }
       ],
       temperature: 0.3, // Lower temperature for more deterministic parsing
@@ -159,6 +165,12 @@ Parse this into a command.`;
       return null;
     }
     
+    // Ensure summary exists and is short
+    if (typeof parsed.summary !== 'string' || parsed.summary.length === 0) {
+      parsed.summary = '🎧 Got it! Spinning those tunes now!';
+    } else {
+      parsed.summary = parsed.summary.slice(0, 160);
+    }
     return parsed;
     
   } catch (err) {

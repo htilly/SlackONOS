@@ -81,7 +81,7 @@ module.exports = function SlackSystem({ botToken, appToken, logger, onCommand })
                 if (e.type === 'app_mention') {
                     const cleaned = e.text.replace(/<@[^>]+>/, "").trim();
                     logger.info(`Incoming MENTION from ${e.user}: ${cleaned}`);
-                    onCommand(cleaned, e.channel, `<@${e.user}>`);
+                    onCommand(cleaned, e.channel, `<@${e.user}>`, 'slack', false, true);  // isMention = true
                     return;
                 }
             }
