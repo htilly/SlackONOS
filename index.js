@@ -10,6 +10,7 @@ const utils = require('./utils');
 const process = require('process');
 const parseString = require('xml2js').parseString;
 const http = require('http');
+const AIHandler = require('./ai-handler');
 const gongMessage = fs.readFileSync('gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('vote.txt', 'utf8').split('\n').filter(Boolean);
 const ttsMessage = fs.readFileSync('tts.txt', 'utf8').split('\n').filter(Boolean);
@@ -158,6 +159,14 @@ const spotify = Spotify({
   logger: logger,
 });
 
+/* Initialize AI Handler */
+AIHandler.initialize();
+if (AIHandler.isAIEnabled()) {
+  logger.info('🤖 AI natural language parsing is ENABLED');
+} else {
+  logger.info('AI natural language parsing is disabled (no API key)');
+}
+
 let gongCounter = 0;
 let gongScore = {};
 const gongLimitPerUser = 1;
@@ -184,6 +193,13 @@ let trackVoteUsers = {}; // Track users who have voted for each track
 const SlackSystem = require('./slack');
 const DiscordSystem = require('./discord');
 
+// Command router stub - will be properly defined after commandRegistry
+// This allows us to pass it to Slack/Discord initialization
+let routeCommand = async (text, channel, userName, platform = 'slack', isAdmin = false) => {
+  // Temporary stub - will be replaced after commandRegistry is defined
+  logger.warn('routeCommand called before initialization');
+};
+
 // Initialize Slack System (optional - only if tokens configured)
 let slack = null;
 if (slackBotToken && slackAppToken) {
@@ -191,7 +207,7 @@ if (slackBotToken && slackAppToken) {
     botToken: slackBotToken,
     appToken: slackAppToken,
     logger: logger,
-    onCommand: processInput
+    onCommand: (...args) => routeCommand(...args)  // Closure ensures we get updated function
   });
 }
 
@@ -412,7 +428,7 @@ async function _checkSystemHealth() {
           discordChannels: config.get('discordChannels') || [],
           discordAdminRoles: config.get('discordAdminRoles') || [],
           logLevel: config.get('logLevel') || 'info'
-        }, processInput, logger);
+        }, (...args) => routeCommand(...args), logger);  // Use closure for AI parsing support
         if (discord) {
           logger.info('✅ Discord connection established.');
           
@@ -629,6 +645,81 @@ for (const [cmd, meta] of commandRegistry) {
   const aliases = meta.aliases || [];
   aliases.forEach(a => aliasMap.set(a.toLowerCase(), cmd));
 }
+
+/**
+ * Handle natural language @mention messages with AI parsing
+ * Falls back to standard command processing if AI is disabled or parsing fails
+ */
+async function handleNaturalLanguage(text, channel, userName, platform = 'slack', isAdmin = false) {
+  // Remove @bot mention
+  const cleanText = text.replace(/<@[^>]+>/g, '').trim();
+  
+  // If it starts with a known command, skip AI and process normally
+  const firstWord = cleanText.split(/\s+/)[0].toLowerCase();
+  if (commandRegistry.has(firstWord) || aliasMap.has(firstWord)) {
+    logger.debug(`Message starts with known command "${firstWord}", skipping AI`);
+    return processInput(cleanText, channel, userName, platform, isAdmin);
+  }
+  
+  // Try AI parsing
+  if (!AIHandler.isAIEnabled()) {
+    logger.debug('AI disabled, falling back to standard processing');
+    _slackMessage('🤔 I didn\'t understand that. Try: `add <song>`, `bestof <artist>`, `gong`, `current`, or `help`', channel);
+    return;
+  }
+  
+  try {
+    const parsed = await AIHandler.parseNaturalLanguage(cleanText, userName);
+    
+    if (!parsed) {
+      logger.warn(`AI parsing returned null for: "${cleanText}"`);
+      _slackMessage('🤖 Sorry, I couldn\'t understand that. Try `help` to see available commands!', channel);
+      return;
+    }
+    
+    // Check confidence threshold
+    if (parsed.confidence < 0.5) {
+      logger.info(`Low confidence (${parsed.confidence}) for: "${cleanText}" → ${parsed.command}`);
+      _slackMessage(`🤔 Not sure I understood. Did you mean: \`${parsed.command} ${parsed.args.join(' ')}\`?\nTry \`help\` for available commands.`, channel);
+      return;
+    }
+    
+    // Log successful AI parse
+    logger.info(`✨ AI parsed: "${cleanText}" → ${parsed.command} [${parsed.args.join(', ')}] (${(parsed.confidence * 100).toFixed(0)}%)`);
+    
+    // Construct command text and process it
+    const commandText = parsed.args.length > 0 
+      ? `${parsed.command} ${parsed.args.join(' ')}`
+      : parsed.command;
+    
+    await processInput(commandText, channel, userName, platform, isAdmin);
+    
+  } catch (err) {
+    logger.error(`Error in AI natural language handler: ${err.message}`);
+    _slackMessage('❌ Oops, something went wrong processing your request. Try using a command directly!', channel);
+  }
+}
+
+/**
+ * Command router - detects if message needs AI parsing or standard processing
+ * Routes @mentions and natural language to AI, commands directly to processInput
+ * Replaces the stub defined earlier
+ */
+routeCommand = async function(text, channel, userName, platform = 'slack', isAdmin = false) {
+  // Check if this looks like a natural language request (not starting with a command)
+  const trimmed = text.replace(/<@[^>]+>/g, '').trim();
+  const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
+  
+  // If it starts with a known command, process normally
+  if (commandRegistry.has(firstWord) || aliasMap.has(firstWord)) {
+    return processInput(text, channel, userName, platform, isAdmin);
+  }
+  
+  // Otherwise, try AI natural language parsing
+  return handleNaturalLanguage(text, channel, userName, platform, isAdmin);
+};
+
+logger.info('✅ Command router initialized with AI support');
 
 async function processInput(text, channel, userName, platform = 'slack', isAdmin = false) {
   // Set platform context for message routing

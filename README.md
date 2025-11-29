@@ -13,6 +13,7 @@ A democratic music bot for Discord and Slack that lets teams control Sonos speak
 🎵 **Perfect for:** Offices, shared spaces, gaming communities, Discord servers, and music lovers who want fair queue control
 
 ✨ **Key Features:**
+- 🤖 **AI Natural Language** - Talk naturally! "@bot play the best songs by Queen" (NEW!)
 - 🗳️ **Democratic Voting** - Community decides what plays next with vote-to-play system
 - 🔔 **Gong System** - Skip tracks democratically when enough users vote to gong
 - 🎮 **Discord Support** - Full emoji reaction voting (🎵 to vote, 🔔 to gong)
@@ -133,6 +134,32 @@ SlackONOS v2.0 includes significant architectural improvements:
 - **Network Resilience**: Increased ping timeouts to handle network latency better
 
 **What can it do?**
+
+### 🤖 AI Natural Language (NEW!)
+
+**Talk to the bot naturally** by mentioning it in Slack or Discord! No need to remember exact commands.
+
+**Examples:**
+- `@SlackONOS play the best songs by U2` → Queues U2's top tracks
+- `@bot add Forever Young` → Adds the song to queue
+- `@SlackONOS what's playing?` → Shows current track
+- `@bot skip this terrible song` → Gongs the current track
+- `@SlackONOS show me the queue` → Lists all queued tracks
+
+**How it works:**
+- Powered by OpenAI GPT-4o-mini for accurate command parsing
+- Understands natural language in multiple languages (Swedish, English, etc.)
+- Falls back to regular commands if AI is disabled
+- Optional feature - works without AI if no API key is provided
+
+**Setup:**
+1. Get an OpenAI API key from https://platform.openai.com/api-keys
+2. Add to `config.json`: `"openaiApiKey": "sk-proj-..."`
+3. That's it! Start mentioning the bot naturally
+
+**Note:** AI parsing only activates when you @mention the bot with text that doesn't start with a known command. Regular commands (like `add song name`) still work instantly without AI.
+
+---
 
 ### Democratic Music Control
 

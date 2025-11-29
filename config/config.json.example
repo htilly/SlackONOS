@@ -13,6 +13,7 @@
     "discordToken": "DISCORD:BOT:TOKEN",
     "discordChannels": ["DISCORD_CHANNEL_ID_1", "DISCORD_CHANNEL_ID_2"],
     "discordAdminRoles": ["DJ", "Music Admin", "Admin"],
+    "openaiApiKey": "sk-proj-...",
     "webPort" : "8080",
     "ipAddress" : "IP_HOST",
     "market" : "US",
