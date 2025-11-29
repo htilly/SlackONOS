@@ -1,120 +1,128 @@
-# GitHub Actions för SlackONOS
+# GitHub Actions for SlackONOS
 
-Detta repo har två GitHub Actions workflows som automatiskt körs vid code changes.
+This repo has two GitHub Actions workflows that automatically run on code changes.
 
 ## 🔍 Workflows
 
 ### 1. `test.yml` - Run Tests
-**Körs vid:** Push eller Pull Request till `master`, `main`, eller `develop`
+**Runs on:** Push or Pull Request to `master`, `main`, or `develop`
 
-**Vad den gör:**
-- ✅ Testar mot Node.js 18.x, 20.x, och 22.x
-- ✅ Installerar dependencies
-- ✅ Skapar config fil från example
-- ✅ Kör alla tester med `npm test`
-- ✅ Laddar upp test results som artifacts
+**What it does:**
+- ✅ Tests against Node.js 18.x, 20.x, and 22.x
+- ✅ Installs dependencies
+- ✅ Creates config file from example
+- ✅ Runs all tests with `npm test`
+- ✅ Uses recorded Spotify responses (no API calls during tests)
+- ✅ Uploads test results as artifacts
 
-**Matrix testing:** Säkerställer att koden fungerar på flera Node-versioner!
+**Matrix testing:** Ensures the code works on multiple Node versions!
+
+**Offline testing:** Tests use pre-recorded Spotify API responses from `test/fixtures/spotify-responses.json`, so no live API credentials are needed during CI runs.
 
 ### 2. `coverage.yml` - Test and Coverage
-**Körs vid:** Push eller Pull Request till `master` eller `main`
+**Runs on:** Push or Pull Request to `master` or `main`
 
-**Vad den gör:**
-- ✅ Kör tester med code coverage (c8)
-- ✅ Genererar coverage report
-- ✅ Visar coverage summary
-- ✅ (Valfritt) Laddar upp till Codecov för visualisering
+**What it does:**
+- ✅ Runs tests with code coverage (c8)
+- ✅ Generates coverage report
+- ✅ Shows coverage summary
+- ✅ (Optional) Uploads to Codecov for visualization
 
-## 📊 Se resultat
+## 📊 View Results
 
-### I GitHub:
-1. Gå till din repo på GitHub
-2. Klicka på "Actions" fliken
-3. Se status på alla test-körningar
+### In GitHub:
+1. Go to your repo on GitHub
+2. Click the "Actions" tab
+3. See status of all test runs
 
 ### Pull Requests:
-- ✅ Grön check = Alla tester passerar
-- ❌ Röd X = Någon test failar
+- ✅ Green check = All tests pass
+- ❌ Red X = Some tests fail
 
-GitHub blockerar merge om testerna failar! (kan konfigureras)
+GitHub blocks merge if tests fail! (can be configured)
 
 ## 🎯 Status Badge
 
-Lägg till en status badge i din README.md:
+Add a status badge to your README.md:
 
 ```markdown
 ![Tests](https://github.com/htilly/SlackONOS/workflows/Run%20Tests/badge.svg)
 ![Coverage](https://github.com/htilly/SlackONOS/workflows/Test%20and%20Coverage/badge.svg)
 ```
 
-Detta visar live status från senaste test-körningen! ✨
+This shows live status from the latest test run! ✨
 
-## 🔧 Konfigurera Branch Protection
+## 🔧 Configure Branch Protection
 
-För att kräva att tester passerar innan merge:
+To require tests to pass before merge:
 
-1. Gå till Settings → Branches
-2. Lägg till rule för `master` branch
-3. Aktivera "Require status checks to pass before merging"
-4. Välj "test" workflow
-5. Spara
+1. Go to Settings → Branches
+2. Add rule for `master` branch
+3. Enable "Require status checks to pass before merging"
+4. Select "test" workflow
+5. Save
 
-Nu kan ingen merga kod som failar tester! 🛡️
+Now no one can merge code that fails tests! 🛡️
 
-## 📈 Codecov Integration (Valfritt)
+## 📈 Codecov Integration (Optional)
 
-För att visualisera code coverage:
+To visualize code coverage:
 
-1. Gå till [codecov.io](https://codecov.io)
-2. Logga in med GitHub
-3. Aktivera repo: `htilly/SlackONOS`
-4. Få token och lägg till som GitHub Secret: `CODECOV_TOKEN`
-5. Uppdatera `coverage.yml` med token
+1. Go to [codecov.io](https://codecov.io)
+2. Log in with GitHub
+3. Enable repo: `htilly/SlackONOS`
+4. Get token and add as GitHub Secret: `CODECOV_TOKEN`
+5. Update `coverage.yml` with token
 
-Nu får du snygga coverage reports och graphs! 📊
+Now you get nice coverage reports and graphs! 📊
 
-## 🚀 Lokal utveckling
+## 🚀 Local Development
 
-Testerna körs automatiskt i GitHub, men du kan också köra dem lokalt:
+Tests run automatically in GitHub, but you can also run them locally:
 
 ```bash
-# Vanliga tester
+# Regular tests (uses recorded Spotify fixtures)
 npm test
 
-# Med coverage
+# With coverage
 npx c8 npm test
+
+# Record new Spotify API responses (requires real credentials)
+npm run test:record
 ```
 
-## 🔄 Workflow triggers
+**Note:** The test suite uses pre-recorded Spotify API responses stored in `test/fixtures/spotify-responses.json`. This allows tests to run without real API credentials and ensures consistent results. To update the fixtures with fresh data, use `npm run test:record` with valid Spotify credentials configured.
 
-**Automatiska triggers:**
-- `git push` till master/main/develop
-- Pull Request mot master/main/develop
-- Manuell trigger via GitHub Actions UI
+## 🔄 Workflow Triggers
 
-**Hoppa över tester:**
-Om du vill hoppa över CI (t.ex. för README-ändringar):
+**Automatic triggers:**
+- `git push` to master/main/develop
+- Pull Request against master/main/develop
+- Manual trigger via GitHub Actions UI
+
+**Skip tests:**
+If you want to skip CI (e.g., for README changes):
 ```bash
 git commit -m "Update README [skip ci]"
 ```
 
-## 📝 Anpassa workflows
+## 📝 Customize Workflows
 
-### Ändra vilka branches som testas:
+### Change which branches are tested:
 ```yaml
 on:
   push:
-    branches: [ master, feature/* ]  # Lägg till fler branches
+    branches: [ master, feature/* ]  # Add more branches
 ```
 
-### Lägg till fler Node-versioner:
+### Add more Node versions:
 ```yaml
 strategy:
   matrix:
-    node-version: [18.x, 20.x, 22.x, 24.x]  # Lägg till nya versioner
+    node-version: [18.x, 20.x, 22.x, 24.x]  # Add new versions
 ```
 
-### Lägg till OS-matrix (testa på Windows/Mac):
+### Add OS matrix (test on Windows/Mac):
 ```yaml
 strategy:
   matrix:
@@ -123,12 +131,12 @@ strategy:
 runs-on: ${{ matrix.os }}
 ```
 
-## 🎉 Fördelar
+## 🎉 Benefits
 
-✅ **Automatisk testning** - Ingen manuell process
-✅ **Multi-version** - Testar på flera Node-versioner
-✅ **Pull Request checks** - Se status innan merge
-✅ **Coverage tracking** - Håll koll på test coverage
-✅ **Fast feedback** - Få reda på problem direkt
+✅ **Automatic testing** - No manual process
+✅ **Multi-version** - Tests on multiple Node versions
+✅ **Pull Request checks** - See status before merge
+✅ **Coverage tracking** - Keep track of test coverage
+✅ **Fast feedback** - Find out about problems immediately
 
-Testa att pusha kod nu och se workflows köra! 🚀
+Try pushing code now and watch the workflows run! 🚀
