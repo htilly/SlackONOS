@@ -88,8 +88,11 @@ async function initializeDiscord(config, messageHandler, injectedLogger) {
 
             // Handle mentions - Discord bot mentions are <@BOT_ID>
             let cleanText = text;
+            let isMention = false;
             if (text.includes(`<@${botUserId}>`)) {
                 cleanText = text.replace(`<@${botUserId}>`, '').trim();
+                isMention = true;
+                logger.info(`[DISCORD] Bot was mentioned, isMention=true`);
             }
 
             // Check if user has admin role
@@ -115,7 +118,7 @@ async function initializeDiscord(config, messageHandler, injectedLogger) {
 
             // Call the message handler (shared with Slack)
             if (messageHandler) {
-                await messageHandler(cleanText, channelId, userName, 'discord', isAdmin);
+                await messageHandler(cleanText, channelId, userName, 'discord', isAdmin, isMention);
             }
         });
 

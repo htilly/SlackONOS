@@ -778,6 +778,12 @@ async function _configdump(input, channel, userName) {
  */
 async function handleNaturalLanguage(text, channel, userName, platform = 'slack', isAdmin = false) {
   logger.info(`>>> handleNaturalLanguage called with: "${text}"`);
+  
+  // Set platform context for message routing (needed for _slackMessage to work correctly)
+  currentPlatform = platform;
+  currentChannel = channel;
+  currentIsAdmin = isAdmin;
+  
   // Remove @bot mention
   const cleanText = text.replace(/<@[^>]+>/g, '').trim();
   logger.info(`>>> cleanText after stripping mention: "${cleanText}"`);
@@ -2485,7 +2491,7 @@ function _flush(input, channel, userName) {
   sonos
     .flush()
     .then(() => {
-      _slackMessage('🚨 *FLUSHED!* The queue has been wiped clean. Time to start fresh! 🎶', channel);
+      _slackMessage('🚽 *FLUSHED!* The queue has been wiped clean. Time to start fresh! 🎶', channel);
     })
     .catch((err) => {
       logger.error('Error flushing queue: ' + err);
@@ -2571,7 +2577,7 @@ function _status(channel, cb) {
   sonos
     .getCurrentState()
     .then((state) => {
-      _slackMessage('🔴 Current playback state: *' + state + '* 🎵', channel);
+      _slackMessage('🔊 Current playback state: *' + state + '* 🎵', channel);
       if (cb) cb(state);
     })
     .catch((err) => {

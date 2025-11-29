@@ -113,9 +113,9 @@ Parse the user's message and respond ONLY with valid JSON in this exact format:
 
 Rules:
 - confidence should be 0.0 to 1.0 (use 0.9+ for clear requests, 0.5-0.8 for ambiguous, <0.5 for unclear)
-- For "add" and "search": extract the song/artist/album as a single argument
- - For "add" and "search": extract the song/artist/album as a single argument; if the user implies a quantity (e.g., "some", "a couple", "few", "several", or mentions a number), include a second numeric argument for desired count (default 5 for vague quantities)
-- For "bestof": extract artist name; if user asks for top N (e.g., "top three", "best 3"), include N as second argument (number)
+- For "add" and "search": extract ONLY the song/artist/album name as the first argument (remove filler words like "songs by", "tracks from", "music of", "great", "best", "good")
+- For "add" and "search": if user implies quantity (e.g., "some", "a couple", "few", "several", "great songs", "good tracks", or a number), include count as second argument (default 5 for vague quantities)
+- For "bestof": extract artist name only; if user asks for top N (e.g., "top three", "best 3"), include N as second argument (number)
 - For "vote": extract track number if mentioned
 - For commands without arguments (gong, current, list, etc): use empty args array
 - Always use lowercase command names
@@ -123,6 +123,8 @@ Rules:
 
 Examples:
 User: "spela de bästa låtarna med U2" → {"command": "bestof", "args": ["U2"], "confidence": 0.95, "reasoning": "Clear request for artist's best tracks"}
+User: "add some great songs of Foo Fighters" → {"command": "add", "args": ["Foo Fighters", "5"], "confidence": 0.95, "reasoning": "Request for multiple tracks by artist, using default count 5"}
+User: "play some Queen" → {"command": "add", "args": ["Queen", "5"], "confidence": 0.92, "reasoning": "Vague quantity, defaulting to 5 tracks"}
 User: "lägg till Forever Young" → {"command": "add", "args": ["Forever Young"], "confidence": 0.92, "reasoning": "Add single track"}
 User: "skippa den här skiten" → {"command": "gong", "args": [], "confidence": 0.88, "reasoning": "Slang for skipping track"}
 User: "vad spelas nu?" → {"command": "current", "args": [], "confidence": 0.95, "reasoning": "Asking for current track"}
@@ -138,9 +140,10 @@ Parse this into a command.`;
     logger.debug(`AI parsing request from ${userName}: "${userMessage}"`);
     
     const djPrompt = nconf.get('aiPrompt') || 'You are a funny, upbeat DJ. Reply with a super short, playful one-liner about what you\'ll do.';
+    const aiModel = nconf.get('aiModel') || 'gpt-4o';
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: aiModel,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'system', content: `DJ Style: ${djPrompt}` },
@@ -197,7 +200,7 @@ function getAIDebugInfo() {
     lastSuccessTS,
     lastErrorTS,
     lastErrorMessage,
-    model: 'gpt-4o-mini'
+    model: nconf.get('aiModel') || 'gpt-4o'
   };
 }
 
