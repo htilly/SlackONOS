@@ -90,9 +90,30 @@ async function initializeDiscord(config, messageHandler, injectedLogger) {
                 cleanText = text.replace(`<@${botUserId}>`, '').trim();
             }
 
+            // Check if user has admin role
+            let isAdmin = false;
+            if (message.member && Array.isArray(config.discordAdminRoles) && config.discordAdminRoles.length > 0) {
+                // Log all user roles at info level for debugging
+                const userRoles = message.member.roles.cache.map(r => `${r.name} (${r.id})`).join(', ');
+                logger.info(`[DISCORD] ${userName} has roles: ${userRoles}`);
+                logger.info(`[DISCORD] Checking against admin roles: ${config.discordAdminRoles.join(', ')}`);
+                
+                isAdmin = message.member.roles.cache.some(role => 
+                    config.discordAdminRoles.includes(role.name) || 
+                    config.discordAdminRoles.includes(role.id)
+                );
+                if (isAdmin) {
+                    logger.info(`[DISCORD] ✅ User ${userName} has admin role`);
+                } else {
+                    logger.info(`[DISCORD] ❌ User ${userName} does NOT have admin role`);
+                }
+            } else {
+                logger.info(`[DISCORD] Admin check skipped - member: ${!!message.member}, adminRoles: ${config.discordAdminRoles}`);
+            }
+
             // Call the message handler (shared with Slack)
             if (messageHandler) {
-                await messageHandler(cleanText, channelId, userName, 'discord');
+                await messageHandler(cleanText, channelId, userName, 'discord', isAdmin);
             }
         });
 

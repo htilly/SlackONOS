@@ -198,6 +198,7 @@ let discord = null;
 // Thread-local context for tracking current platform
 let currentPlatform = 'slack';
 let currentChannel = null;
+let currentIsAdmin = false;
 
 // Helper function wrapper for backward compatibility (Slack)
 async function _slackMessage(message, channel_id, options = {}) {
@@ -391,6 +392,7 @@ async function _checkSystemHealth() {
         discord = await DiscordSystem.initializeDiscord({
           discordToken: config.get('discordToken'),
           discordChannels: config.get('discordChannels') || [],
+          discordAdminRoles: config.get('discordAdminRoles') || [],
           logLevel: config.get('logLevel') || 'info'
         }, processInput, logger);
         if (discord) {
@@ -565,10 +567,11 @@ for (const [cmd, meta] of commandRegistry) {
   aliases.forEach(a => aliasMap.set(a.toLowerCase(), cmd));
 }
 
-async function processInput(text, channel, userName, platform = 'slack') {
+async function processInput(text, channel, userName, platform = 'slack', isAdmin = false) {
   // Set platform context for message routing
   currentPlatform = platform;
   currentChannel = channel;
+  currentIsAdmin = isAdmin;
   
   if (!text || typeof text !== 'string') {
     logger.warn('processInput called without text');
@@ -600,13 +603,23 @@ async function processInput(text, channel, userName, platform = 'slack') {
     return;
   }
 
-  // Admin check
+  // Admin check - platform aware
   const isAdminCmd = Boolean(cmdMeta.admin);
-  if (isAdminCmd && channel !== global.adminChannel) {
-    logger.info(`Unauthorized admin cmd attempt: ${cmdKey} by ${userName} in ${channel}`);
-    // Silent ignore or notify
-    _slackMessage('🚫 Nice try! That\'s an admin-only command. This incident will be reported to... well, nobody cares. 😏', channel);
-    return;
+  if (isAdminCmd) {
+    let authorized = false;
+    if (platform === 'discord') {
+      // Discord uses role-based permissions
+      authorized = isAdmin;
+    } else {
+      // Slack uses channel-based permissions
+      authorized = (channel === global.adminChannel);
+    }
+    
+    if (!authorized) {
+      logger.info(`Unauthorized admin cmd attempt: ${cmdKey} by ${userName} in ${channel} (platform: ${platform})`);
+      _slackMessage('🚫 Nice try! That\'s an admin-only command. This incident will be reported to... well, nobody cares. 😏', channel);
+      return;
+    }
   }
 
   // Prepare sanitized user identifier (string maybe <@U123>)
@@ -691,9 +704,7 @@ function _getVolume(channel) {
 
 function _setVolume(input, channel, userName) {
   _logUserAction(userName, 'setVolume');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
 
   const vol = Number(input[1]);
 
@@ -1899,9 +1910,7 @@ async function _gongplay(command, channel) {
 
 function _nextTrack(channel, userName) {
   _logUserAction(userName, 'next');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .next()
     .then(() => {
@@ -1914,9 +1923,7 @@ function _nextTrack(channel, userName) {
 
 function _previous(input, channel, userName) {
   _logUserAction(userName, 'previous');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .previous()
     .then(() => {
@@ -1929,9 +1936,7 @@ function _previous(input, channel, userName) {
 
 function _stop(input, channel, userName) {
   _logUserAction(userName, 'stop');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .stop()
     .then(() => {
@@ -1944,9 +1949,7 @@ function _stop(input, channel, userName) {
 
 function _play(input, channel, userName) {
   _logUserAction(userName, 'play');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .play()
     .then(() => {
@@ -1959,9 +1962,7 @@ function _play(input, channel, userName) {
 
 function _pause(input, channel, userName) {
   _logUserAction(userName, 'pause');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .pause()
     .then(() => {
@@ -1974,9 +1975,7 @@ function _pause(input, channel, userName) {
 
 function _resume(input, channel, userName) {
   _logUserAction(userName, 'resume');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .play()
     .then(() => {
@@ -1989,9 +1988,7 @@ function _resume(input, channel, userName) {
 
 function _flush(input, channel, userName) {
   _logUserAction(userName, 'flush');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .flush()
     .then(() => {
@@ -2004,9 +2001,7 @@ function _flush(input, channel, userName) {
 
 function _shuffle(input, channel, userName) {
   _logUserAction(userName, 'shuffle');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .setPlayMode('SHUFFLE')
     .then(() => {
@@ -2019,9 +2014,7 @@ function _shuffle(input, channel, userName) {
 
 function _normal(input, channel, userName) {
   _logUserAction(userName, 'normal');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .setPlayMode('NORMAL')
     .then(() => {
@@ -2033,9 +2026,7 @@ function _normal(input, channel, userName) {
 }
 
 function _removeTrack(input, channel) {
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   if (!input || input.length < 2) {
     _slackMessage('🔢 You must provide the track number to remove! Use `remove <number>` 🎯', channel);
     return;
@@ -2058,9 +2049,7 @@ function _removeTrack(input, channel) {
 }
 
 function _purgeHalfQueue(input, channel) {
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .getQueue()
     .then((result) => {
@@ -2101,12 +2090,27 @@ function _status(channel, cb) {
 
 function _help(input, channel) {
   try {
-    let helpFile = channel === global.adminChannel ? 'helpTextAdmin.txt' : 'helpText.txt';
-    let message = fs.readFileSync(helpFile, 'utf8');
+    // Determine admin status platform-aware
+    const isAdminUser = currentPlatform === 'discord' ? currentIsAdmin : (channel === global.adminChannel);
+    
+    let messages = [];
+    
+    // For Discord admins, show both regular + admin help (split into multiple messages due to 2000 char limit)
+    if (currentPlatform === 'discord' && isAdminUser) {
+      const regularHelp = fs.readFileSync('helpText.txt', 'utf8');
+      const adminHelp = fs.readFileSync('helpTextAdmin.txt', 'utf8');
+      
+      messages.push(regularHelp);
+      messages.push('━━━━━━━━━━━━━━━━━━━━━\n**🎛️ ADMIN COMMANDS** (DJ/Admin role)\n━━━━━━━━━━━━━━━━━━━━━\n\n' + adminHelp);
+    } else {
+      // Slack or non-admin: show appropriate single help file
+      const helpFile = isAdminUser ? 'helpTextAdmin.txt' : 'helpText.txt';
+      messages.push(fs.readFileSync(helpFile, 'utf8'));
+    }
 
     // Generate config values list for admin help
     let configList = '';
-    if (channel === global.adminChannel) {
+    if (isAdminUser) {
       configList = `
         • \`gongLimit\`: ${gongLimit}
         • \`voteLimit\`: ${voteLimit}
@@ -2117,16 +2121,25 @@ function _help(input, channel) {
         • \`voteTimeLimitMinutes\`: ${voteTimeLimitMinutes}`;
     }
 
-    // Replace template variables with actual values
-    message = message
+    // Replace template variables in all messages
+    messages = messages.map(msg => msg
       .replace(/{{gongLimit}}/g, gongLimit)
       .replace(/{{voteImmuneLimit}}/g, voteImmuneLimit)
       .replace(/{{voteLimit}}/g, voteLimit)
       .replace(/{{flushVoteLimit}}/g, flushVoteLimit)
       .replace(/{{searchLimit}}/g, searchLimit)
-      .replace(/{{configValues}}/g, configList);
+      .replace(/{{configValues}}/g, configList));
 
-    _slackMessage(message, channel);
+    // Send messages (Discord: multiple if needed; Slack: single combined)
+    if (currentPlatform === 'discord') {
+      // Send each message separately for Discord to avoid 2000 char limit
+      for (const msg of messages) {
+        _slackMessage(msg, channel);
+      }
+    } else {
+      // Slack can handle longer messages
+      _slackMessage(messages.join('\n\n'), channel);
+    }
   } catch (err) {
     logger.error('Error reading help file: ' + err.message);
     _slackMessage('🚨 Error loading help text. Please contact an admin! 📞', channel);
@@ -2135,9 +2148,7 @@ function _help(input, channel) {
 
 function _blacklist(input, channel, userName) {
   _logUserAction(userName, 'blacklist');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   if (!input || input.length < 2) {
     if (blacklist.length === 0) {
       _slackMessage('The blacklist is currently empty. Everyone is behaving! 😇', channel);
@@ -2173,9 +2184,7 @@ function _blacklist(input, channel, userName) {
 
 function _setconfig(input, channel, userName) {
   _logUserAction(userName, 'setconfig');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
 
   // Usage: setconfig <key> <value>
   if (!input || input.length < 3) {
@@ -2342,16 +2351,12 @@ async function _append(input, channel, userName) {
 }
 
 function _addToSpotifyPlaylist(input, channel) {
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   _slackMessage('🚧 This feature is still under construction! Check back later! 🛠️', channel);
 }
 
 async function _tts(input, channel) {
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   const text = input.slice(1).join(' ');
   if (!text) {
     _slackMessage('💬 You must provide a message for the bot to say! Use `say <message>` 🔊', channel);
@@ -2407,9 +2412,7 @@ async function _tts(input, channel) {
 
 function _moveTrackAdmin(input, channel, userName) {
   _logUserAction(userName, 'move');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   if (input.length < 3) {
     _slackMessage('📍 Please provide both the source and destination track numbers! Use `move [from] [to]` 🎯', channel);
     return;

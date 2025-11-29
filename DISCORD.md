@@ -51,9 +51,16 @@ Add to your `config/config.json`:
 ```json
 {
   "discordToken": "YOUR_BOT_TOKEN_HERE",
-  "discordChannels": ["CHANNEL_ID_1", "CHANNEL_ID_2"]
+  "discordChannels": ["CHANNEL_ID_1", "CHANNEL_ID_2"],
+  "discordAdminRoles": ["DJ", "Music Admin", "Admin"]
 }
 ```
+
+**Admin Permissions:**
+- `discordChannels`: Channels where bot responds to commands
+- `discordAdminRoles`: Role names or IDs that can use admin commands (setvolume, flush, etc.)
+- Users with these roles can use admin commands in ANY allowed channel
+- Discord uses **role-based permissions** (more flexible than Slack's channel-based approach)
 
 ### 5. Start the Bot
 
@@ -75,15 +82,24 @@ You should see:
 
 All commands work the same as in Slack:
 
+**Regular Commands** (anyone):
 ```
 add bohemian rhapsody
 bestof queen
-pause
-play
-volume 50
 gong
 vote
 list
+current
+```
+
+**Admin Commands** (requires role in `discordAdminRoles`):
+```
+pause
+play
+setvolume 50
+flush
+next
+remove
 ```
 
 ### Mentions
