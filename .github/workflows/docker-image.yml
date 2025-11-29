@@ -8,8 +8,39 @@ on:
       - 'build.txt'  # Exclude build.txt from triggering the workflow
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [20.x, 22.x, 23.x, 25.x]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+    
+    - name: Install dependencies
+      run: npm install
+    
+    - name: Create config file
+      run: |
+        if [ ! -f config/config.json ]; then
+          cp config/config.json.example config/config.json
+        fi
+    
+    - name: Run tests
+      run: npm test
+      env:
+        NODE_ENV: test
+
   build:
     runs-on: ubuntu-latest
+    needs: test  # Only run if tests pass
 
     steps:
     - name: Checkout the repository
