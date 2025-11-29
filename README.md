@@ -3,8 +3,9 @@
 
 
 # SlackONOS
-**Slack / Sonos / Spotify / Node.js - Control Sonos through #Slack**
+**Slack / Discord / Sonos / Spotify / Node.js - Control Sonos through Slack & Discord**
 
+Now supports both **Slack** and **Discord**! Run them simultaneously or use Discord-only mode.
 
 *Screenshot*
 
@@ -16,13 +17,22 @@
 
 **What is it?**
 
-It´s a #slack-bot that control Sonos (and spotify). Highly democratic bot :)
-Uses https://github.com/bencevans/node-sonos to controll Sonos.
+A chat bot that controls Sonos speakers (with Spotify integration) through **Slack** and **Discord**. Highly democratic bot with community voting features!
+
+Uses https://github.com/bencevans/node-sonos to control Sonos.
+
+**Platforms:**
+- ✅ **Slack** - Full Socket Mode support with channel-based admin permissions
+- ✅ **Discord** - Full support with role-based admin permissions  
+- 🎵 **Shared Queue** - Both platforms control the same Sonos speaker
+- 🗳️ **Democratic Controls** - Gong and vote systems work across platforms
+
+📖 **[Discord Setup Guide](DISCORD.md)** - Complete setup instructions for Discord integration
 
 **What do I need in order to get it to work?**
 
 1: A Sonos player (configured with Spotify).  
-2: A slack-bot configured in #Slack  
+2: A Slack bot configured in #Slack **OR** a Discord bot  
 3: A server running node.js  
 4: Know the IP of your Sonos. Preferably a static one.  
 5: A valid spotify account with Client ID & Client Secret. Head over to:   https://developer.spotify.com/dashboard/applications to set it up. Enter the data in the config.json file.  

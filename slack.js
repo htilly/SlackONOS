@@ -93,6 +93,12 @@ module.exports = function SlackSystem({ botToken, appToken, logger, onCommand })
         web,
         // Helper to send messages
         sendMessage: async (text, channelId, options = {}) => {
+            // Basic heuristic: Slack channel IDs usually start with C, D, G, or W etc.
+            // Discord channel IDs are long numeric strings. Skip if looks like Discord.
+            if (/^[0-9]{17,22}$/.test(channelId)) {
+                logger.debug(`Skipping Slack send for non-Slack channel id: ${channelId}`);
+                return;
+            }
             try {
                 await web.chat.postMessage({
                     channel: channelId,

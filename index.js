@@ -182,24 +182,74 @@ let trackVoteCount = {}; // Initialize vote count object
 let trackVoteUsers = {}; // Track users who have voted for each track
 
 const SlackSystem = require('./slack');
+const DiscordSystem = require('./discord');
 
-// Initialize Slack System
-const slack = SlackSystem({
-  botToken: slackBotToken,
-  appToken: slackAppToken,
-  logger: logger,
-  onCommand: processInput
-});
+// Initialize Slack System (optional - only if tokens configured)
+let slack = null;
+if (slackBotToken && slackAppToken) {
+  slack = SlackSystem({
+    botToken: slackBotToken,
+    appToken: slackAppToken,
+    logger: logger,
+    onCommand: processInput
+  });
+}
 
-// Start Slack - Moved to async startup sequence below
+// Initialize Discord (optional - only if token configured)
+let discord = null;
 
-// Helper function wrapper for backward compatibility
+// Thread-local context for tracking current platform
+let currentPlatform = 'slack';
+let currentChannel = null;
+let currentIsAdmin = false;
+
+// Helper function wrapper for backward compatibility (Slack)
 async function _slackMessage(message, channel_id, options = {}) {
-  await slack.sendMessage(message, channel_id, options);
+  const platform = currentPlatform;
+  const targetChannel = channel_id || currentChannel;
+
+  // If current context is Discord: never try Slack first.
+  if (platform === 'discord') {
+    try {
+      await DiscordSystem.sendDiscordMessage(targetChannel, message);
+      return;
+    } catch (e) {
+      logger.warn(`Discord send failed: ${e.message || e}. Message not delivered.`);
+      return; // Do NOT fall back to Slack; channel IDs incompatible
+    }
+  }
+
+  // Slack context normal path
+  try {
+    if (slack) {
+      await slack.sendMessage(message, targetChannel, options);
+    } else {
+      logger.warn('Slack not initialized - cannot send message');
+    }
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    logger.error(`Error sending Slack message: ${msg}`);
+  }
+}
+
+// Helper function for Discord messages
+async function _discordMessage(message, channel_id) {
+  if (discord) {
+    await DiscordSystem.sendDiscordMessage(channel_id, message);
+  }
+}
+
+// Unified message sender - works for both platforms
+async function _sendMessage(message, channel_id, platform = 'slack') {
+  if (platform === 'discord') {
+    await _discordMessage(message, channel_id);
+  } else if (slack) {
+    await slack.sendMessage(message, channel_id);
+  }
 }
 
 // Global web client for other functions that might need it (like _checkUser)
-const web = slack.web;
+const web = slack ? slack.web : null;
 let botUserId; // This is handled internally in slack.js now, but kept if referenced elsewhere (though it shouldn't be)
 
 function delay(ms) {
@@ -330,21 +380,60 @@ async function _checkSystemHealth() {
   try {
     logger.info('Starting SlackONOS...');
 
-    // 1. Validate Slack Tokens (Critical)
-    if (!slackBotToken || !slackAppToken) {
-      throw new Error(`Missing Slack API Keys. Cannot start.`);
+    // Check that at least one platform is configured
+    const hasSlack = slackBotToken && slackAppToken;
+    const hasDiscord = config.get('discordToken');
+    
+    if (!hasSlack && !hasDiscord) {
+      throw new Error('No platform configured! Provide either Slack tokens (slackAppToken + token) or Discord token (discordToken)');
     }
 
-    // 2. Initialize Slack
-    try {
-      await slack.init();
-      logger.info('✅ Slack connection established.');
-    } catch (slackErr) {
-      throw new Error(`Failed to connect to Slack API: ${slackErr.message}`);
+    // 2. Initialize Slack (if configured)
+    if (hasSlack) {
+      try {
+        await slack.init();
+        logger.info('✅ Slack connection established.');
+      } catch (slackErr) {
+        logger.error(`Failed to connect to Slack API: ${slackErr.message}`);
+        if (!hasDiscord) {
+          throw new Error('Slack initialization failed and no Discord fallback configured');
+        }
+        logger.warn('Continuing with Discord-only mode...');
+      }
+    } else {
+      logger.info('ℹ️  Slack tokens not configured - running in Discord-only mode');
     }
 
-    // 3. Lookup Channels
-    await _lookupChannelID();
+    // 2b. Initialize Discord (if configured)
+    if (hasDiscord) {
+      try {
+        discord = await DiscordSystem.initializeDiscord({
+          discordToken: config.get('discordToken'),
+          discordChannels: config.get('discordChannels') || [],
+          discordAdminRoles: config.get('discordAdminRoles') || [],
+          logLevel: config.get('logLevel') || 'info'
+        }, processInput, logger);
+        if (discord) {
+          logger.info('✅ Discord connection established.');
+        } else {
+          logger.warn('Discord returned null (token maybe invalid). Running Slack-only.');
+        }
+      } catch (discordErr) {
+        logger.warn(`Discord initialization failed: ${discordErr.message}. Continuing with Slack only.`);
+      }
+    } else {
+      logger.info('ℹ️  Discord token not configured');
+    }
+
+    // 3. Lookup Slack Channels (only if Slack is initialized)
+    if (slack) {
+      await _lookupChannelID();
+    } else {
+      logger.info('Skipping Slack channel lookup (Discord-only mode)');
+      // Set dummy globals for Discord-only mode
+      global.adminChannel = null;
+      global.standardChannel = null;
+    }
 
     // 4. Validate System Health
     const health = await _checkSystemHealth();
@@ -503,7 +592,12 @@ for (const [cmd, meta] of commandRegistry) {
   aliases.forEach(a => aliasMap.set(a.toLowerCase(), cmd));
 }
 
-async function processInput(text, channel, userName) {
+async function processInput(text, channel, userName, platform = 'slack', isAdmin = false) {
+  // Set platform context for message routing
+  currentPlatform = platform;
+  currentChannel = channel;
+  currentIsAdmin = isAdmin;
+  
   if (!text || typeof text !== 'string') {
     logger.warn('processInput called without text');
     return;
@@ -524,7 +618,7 @@ async function processInput(text, channel, userName) {
 
   if (!cmdKey) {
     // Unknown command — ignore or optionally respond
-    logger.info(`Unknown command "${rawTerm}" from ${userName} in ${channel}`);
+    logger.info(`Unknown command "${rawTerm}" from ${userName} in ${channel} [${platform}]`);
     return;
   }
 
@@ -534,13 +628,23 @@ async function processInput(text, channel, userName) {
     return;
   }
 
-  // Admin check
+  // Admin check - platform aware
   const isAdminCmd = Boolean(cmdMeta.admin);
-  if (isAdminCmd && channel !== global.adminChannel) {
-    logger.info(`Unauthorized admin cmd attempt: ${cmdKey} by ${userName} in ${channel}`);
-    // Silent ignore or notify
-    _slackMessage('🚫 Nice try! That\'s an admin-only command. This incident will be reported to... well, nobody cares. 😏', channel);
-    return;
+  if (isAdminCmd) {
+    let authorized = false;
+    if (platform === 'discord') {
+      // Discord uses role-based permissions
+      authorized = isAdmin;
+    } else {
+      // Slack uses channel-based permissions
+      authorized = (channel === global.adminChannel);
+    }
+    
+    if (!authorized) {
+      logger.info(`Unauthorized admin cmd attempt: ${cmdKey} by ${userName} in ${channel} (platform: ${platform})`);
+      _slackMessage('🚫 Nice try! That\'s an admin-only command. This incident will be reported to... well, nobody cares. 😏', channel);
+      return;
+    }
   }
 
   // Prepare sanitized user identifier (string maybe <@U123>)
@@ -578,21 +682,18 @@ async function processInput(text, channel, userName) {
   }
 }
 
-async function _slackMessage(message, channel_id) {
-  try {
-    await web.chat.postMessage({
-      channel: channel_id,
-      text: message,
-    });
-  } catch (error) {
-    logger.error('Error sending message to Slack: ' + error);
-  }
-}
+// Removed duplicate _slackMessage definition (platform-aware version earlier in file is authoritative)
 
 const userCache = {};
 
 async function _checkUser(userId) {
   try {
+    // Discord users come as plain usernames, Slack users as <@U123>
+    if (!web) {
+      // Discord-only mode: just return the username as-is
+      return userId;
+    }
+    
     // Clean the userId if wrapped in <@...>
     userId = userId.replace(/[<@>]/g, '');
 
@@ -634,9 +735,7 @@ function _getVolume(channel) {
 
 function _setVolume(input, channel, userName) {
   _logUserAction(userName, 'setVolume');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
 
   const vol = Number(input[1]);
 
@@ -1842,9 +1941,7 @@ async function _gongplay(command, channel) {
 
 function _nextTrack(channel, userName) {
   _logUserAction(userName, 'next');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .next()
     .then(() => {
@@ -1857,9 +1954,7 @@ function _nextTrack(channel, userName) {
 
 function _previous(input, channel, userName) {
   _logUserAction(userName, 'previous');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .previous()
     .then(() => {
@@ -1872,9 +1967,7 @@ function _previous(input, channel, userName) {
 
 function _stop(input, channel, userName) {
   _logUserAction(userName, 'stop');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .stop()
     .then(() => {
@@ -1887,9 +1980,7 @@ function _stop(input, channel, userName) {
 
 function _play(input, channel, userName) {
   _logUserAction(userName, 'play');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .play()
     .then(() => {
@@ -1902,9 +1993,7 @@ function _play(input, channel, userName) {
 
 function _pause(input, channel, userName) {
   _logUserAction(userName, 'pause');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .pause()
     .then(() => {
@@ -1917,9 +2006,7 @@ function _pause(input, channel, userName) {
 
 function _resume(input, channel, userName) {
   _logUserAction(userName, 'resume');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .play()
     .then(() => {
@@ -1932,9 +2019,7 @@ function _resume(input, channel, userName) {
 
 function _flush(input, channel, userName) {
   _logUserAction(userName, 'flush');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .flush()
     .then(() => {
@@ -1947,9 +2032,7 @@ function _flush(input, channel, userName) {
 
 function _shuffle(input, channel, userName) {
   _logUserAction(userName, 'shuffle');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .setPlayMode('SHUFFLE')
     .then(() => {
@@ -1962,9 +2045,7 @@ function _shuffle(input, channel, userName) {
 
 function _normal(input, channel, userName) {
   _logUserAction(userName, 'normal');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .setPlayMode('NORMAL')
     .then(() => {
@@ -1976,9 +2057,7 @@ function _normal(input, channel, userName) {
 }
 
 function _removeTrack(input, channel) {
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   if (!input || input.length < 2) {
     _slackMessage('🔢 You must provide the track number to remove! Use `remove <number>` 🎯', channel);
     return;
@@ -2001,9 +2080,7 @@ function _removeTrack(input, channel) {
 }
 
 function _purgeHalfQueue(input, channel) {
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   sonos
     .getQueue()
     .then((result) => {
@@ -2044,12 +2121,27 @@ function _status(channel, cb) {
 
 function _help(input, channel) {
   try {
-    let helpFile = channel === global.adminChannel ? 'helpTextAdmin.txt' : 'helpText.txt';
-    let message = fs.readFileSync(helpFile, 'utf8');
+    // Determine admin status platform-aware
+    const isAdminUser = currentPlatform === 'discord' ? currentIsAdmin : (channel === global.adminChannel);
+    
+    let messages = [];
+    
+    // For Discord admins, show both regular + admin help (split into multiple messages due to 2000 char limit)
+    if (currentPlatform === 'discord' && isAdminUser) {
+      const regularHelp = fs.readFileSync('helpText.txt', 'utf8');
+      const adminHelp = fs.readFileSync('helpTextAdmin.txt', 'utf8');
+      
+      messages.push(regularHelp);
+      messages.push('━━━━━━━━━━━━━━━━━━━━━\n**🎛️ ADMIN COMMANDS** (DJ/Admin role)\n━━━━━━━━━━━━━━━━━━━━━\n\n' + adminHelp);
+    } else {
+      // Slack or non-admin: show appropriate single help file
+      const helpFile = isAdminUser ? 'helpTextAdmin.txt' : 'helpText.txt';
+      messages.push(fs.readFileSync(helpFile, 'utf8'));
+    }
 
     // Generate config values list for admin help
     let configList = '';
-    if (channel === global.adminChannel) {
+    if (isAdminUser) {
       configList = `
         • \`gongLimit\`: ${gongLimit}
         • \`voteLimit\`: ${voteLimit}
@@ -2060,16 +2152,25 @@ function _help(input, channel) {
         • \`voteTimeLimitMinutes\`: ${voteTimeLimitMinutes}`;
     }
 
-    // Replace template variables with actual values
-    message = message
+    // Replace template variables in all messages
+    messages = messages.map(msg => msg
       .replace(/{{gongLimit}}/g, gongLimit)
       .replace(/{{voteImmuneLimit}}/g, voteImmuneLimit)
       .replace(/{{voteLimit}}/g, voteLimit)
       .replace(/{{flushVoteLimit}}/g, flushVoteLimit)
       .replace(/{{searchLimit}}/g, searchLimit)
-      .replace(/{{configValues}}/g, configList);
+      .replace(/{{configValues}}/g, configList));
 
-    _slackMessage(message, channel);
+    // Send messages (Discord: multiple if needed; Slack: single combined)
+    if (currentPlatform === 'discord') {
+      // Send each message separately for Discord to avoid 2000 char limit
+      for (const msg of messages) {
+        _slackMessage(msg, channel);
+      }
+    } else {
+      // Slack can handle longer messages
+      _slackMessage(messages.join('\n\n'), channel);
+    }
   } catch (err) {
     logger.error('Error reading help file: ' + err.message);
     _slackMessage('🚨 Error loading help text. Please contact an admin! 📞', channel);
@@ -2078,9 +2179,7 @@ function _help(input, channel) {
 
 function _blacklist(input, channel, userName) {
   _logUserAction(userName, 'blacklist');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   if (!input || input.length < 2) {
     if (blacklist.length === 0) {
       _slackMessage('The blacklist is currently empty. Everyone is behaving! 😇', channel);
@@ -2116,9 +2215,7 @@ function _blacklist(input, channel, userName) {
 
 function _setconfig(input, channel, userName) {
   _logUserAction(userName, 'setconfig');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
 
   // Usage: setconfig <key> <value>
   if (!input || input.length < 3) {
@@ -2285,16 +2382,12 @@ async function _append(input, channel, userName) {
 }
 
 function _addToSpotifyPlaylist(input, channel) {
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   _slackMessage('🚧 This feature is still under construction! Check back later! 🛠️', channel);
 }
 
 async function _tts(input, channel) {
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   const text = input.slice(1).join(' ');
   if (!text) {
     _slackMessage('💬 You must provide a message for the bot to say! Use `say <message>` 🔊', channel);
@@ -2350,9 +2443,7 @@ async function _tts(input, channel) {
 
 function _moveTrackAdmin(input, channel, userName) {
   _logUserAction(userName, 'move');
-  if (channel !== global.adminChannel) {
-    return;
-  }
+  // Admin check now handled in processInput (platform-aware)
   if (input.length < 3) {
     _slackMessage('📍 Please provide both the source and destination track numbers! Use `move [from] [to]` 🎯', channel);
     return;
