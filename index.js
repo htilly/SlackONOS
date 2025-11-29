@@ -160,7 +160,7 @@ const spotify = Spotify({
 });
 
 /* Initialize AI Handler */
-AIHandler.initialize();
+AIHandler.initialize(logger);
 if (AIHandler.isAIEnabled()) {
   logger.info('🤖 AI natural language parsing is ENABLED');
 } else {

@@ -1,5 +1,4 @@
 const OpenAI = require('openai');
-const logger = require('./logger.js');
 const nconf = require('nconf');
 
 /**
@@ -9,11 +8,15 @@ const nconf = require('nconf');
 
 let openai = null;
 let isEnabled = false;
+let logger = null;
 
 /**
  * Initialize OpenAI client
+ * @param {Object} loggerInstance - Winston logger instance from index.js
  */
-function initialize() {
+function initialize(loggerInstance) {
+  logger = loggerInstance;
+  
   const apiKey = nconf.get('openaiApiKey');
   
   if (!apiKey) {
