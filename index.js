@@ -2644,8 +2644,8 @@ function _help(input, channel) {
         _slackMessage(msg, channel);
       }
     } else {
-      // Slack can handle longer messages
-      _slackMessage(messages.join('\n\n'), channel);
+      // Slack can handle longer messages - disable link previews
+      _slackMessage(messages.join('\n\n'), channel, { unfurl_links: false, unfurl_media: false });
     }
   } catch (err) {
     logger.error('Error reading help file: ' + err.message);

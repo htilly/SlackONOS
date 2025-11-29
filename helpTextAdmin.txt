@@ -27,3 +27,5 @@
 
 *🗣️ Fun & Extras:*
 > `tts [message]` (or `say`) - Make Sonos speak a message aloud.
+
+💡 _Suggestions or bugs? <https://github.com/htilly/SlackONOS|GitHub>_
