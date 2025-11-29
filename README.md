@@ -13,6 +13,7 @@ A democratic music bot for Discord and Slack that lets teams control Sonos speak
 🎵 **Perfect for:** Offices, shared spaces, gaming communities, Discord servers, and music lovers who want fair queue control
 
 ✨ **Key Features:**
+- 🤖 **AI Natural Language** - Talk naturally! "@bot play the best songs by Queen" (NEW!)
 - 🗳️ **Democratic Voting** - Community decides what plays next with vote-to-play system
 - 🔔 **Gong System** - Skip tracks democratically when enough users vote to gong
 - 🎮 **Discord Support** - Full emoji reaction voting (🎵 to vote, 🔔 to gong)
@@ -49,9 +50,6 @@ services:
 
 📖 **[Complete Discord Setup Guide](DISCORD.md)** - Step-by-step Discord bot configuration
 
----
-
-(&#x1F534;) *** config.json MUST be moved to config folder.*** (&#x1F534;)
 ---
 
 ## How It Works
@@ -134,6 +132,78 @@ SlackONOS v2.0 includes significant architectural improvements:
 
 **What can it do?**
 
+### 🤖 AI Natural Language (NEW!)
+
+**Talk to the bot naturally** by mentioning it in Slack or Discord! No need to remember exact commands.
+
+**Examples:**
+- `@SlackONOS play the best songs by U2` → Queues U2's top tracks
+- `@bot add Forever Young` → Adds the song to queue
+- `@SlackONOS what's playing?` → Shows current track
+- `@bot skip this terrible song` → Gongs the current track
+- `@SlackONOS show me the queue` → Lists all queued tracks
+
+**🎉 Batch Add with Smart Themes (NEW!):**
+- `@SlackONOS add some christmas music` → Adds 5 holiday tracks
+- `@bot play a few summer hits` → Queues summer beach songs
+- `@SlackONOS give me 10 80s classics` → Adds ten 80s hits
+- `@bot spela lite partylåtar` → Queues party music (works in Swedish!)
+
+**Quantity Words:**
+| Phrase | Tracks Added |
+|--------|--------------|
+| "a couple", "ett par" | 2 |
+| "a few", "några" | 3-4 |
+| "some", "lite", "several" | 5 |
+| "many", "lots", "massa" | 8 |
+| "10", "fifteen", etc. | Exact number |
+
+**Smart Theme Boosters:**
+The AI automatically enhances searches based on detected themes:
+
+| Theme | Triggers | Search Enhancement |
+|-------|----------|-------------------|
+| 🎄 Christmas | `jul`, `xmas`, `christmas` | +christmas holiday |
+| 🎉 Party | `party`, `fest`, `dansband` | +party upbeat |
+| 😌 Chill | `chill`, `relax`, `lugn`, `mysig` | +chill mellow |
+| 💪 Workout | `workout`, `gym`, `träning` | +workout energetic |
+| ☀️ Summer | `sommar`, `summer`, `beach` | +summer beach hits |
+| 📼 80s | `80s`, `80-tal`, `eighties` | +80s classic hits |
+| 💿 90s | `90s`, `90-tal`, `nineties` | +90s classic hits |
+| 🎸 Rock | `rock`, `metal` | +rock classic |
+| 🎵 Pop | `pop`, `hits` | +pop hits |
+| 🕺 Disco | `disco`, `funk` | +disco dance funk |
+| 💕 Ballads | `ballad`, `kärleks`, `love` | +ballad love romantic |
+| 🎤 Hip-hop | `hip hop`, `rap`, `hiphop` | +hip hop rap hits |
+| 🤠 Country | `country`, `nashville` | +country hits |
+| 🎷 Jazz | `jazz`, `blues` | +jazz blues classic |
+| 🎻 Classical | `klassisk`, `classical`, `opera` | +classical orchestra |
+| 🌴 Reggae | `reggae`, `ska`, `caribbean` | +reggae caribbean |
+| 🎧 Indie | `indie`, `alternative` | +indie alternative |
+| 🔊 EDM | `edm`, `electro`, `house`, `techno` | +electronic dance |
+| 💃 Latin | `latin`, `salsa`, `bachata` | +latin dance |
+| 🇸🇪 Swedish | `svensk`, `swedish` | +swedish svenska |
+| 👶 Kids | `barnlåt`, `kids`, `children` | +children kids |
+
+**Auto-Play Behavior:**
+- If music is **playing**: New tracks are added to the queue
+- If music is **stopped**: Queue is cleared, tracks added, and playback starts automatically
+
+**How it works:**
+- Powered by OpenAI GPT-4o-mini for accurate command parsing
+- Understands natural language in multiple languages (Swedish, English, etc.)
+- Falls back to regular commands if AI is disabled
+- Optional feature - works without AI if no API key is provided
+
+**Setup:**
+1. Get an OpenAI API key from https://platform.openai.com/api-keys
+2. Add to `config.json`: `"openaiApiKey": "sk-proj-..."`
+3. That's it! Start mentioning the bot naturally
+
+**Note:** AI parsing only activates when you @mention the bot with text that doesn't start with a known command. Regular commands (like `add song name`) still work instantly without AI.
+
+---
+
 ### Democratic Music Control
 
 **Community Queue Management:**
@@ -177,6 +247,8 @@ The bot queues song requests and plays them in order. If enough people dislike t
 * `blacklist add <@user>` - Prevent user from adding songs
 * `blacklist remove <@user>` - Restore user permissions
 * `blacklist list` - Show blacklisted users
+* `configdump` - Show all current configuration values
+* `aiunparsed [N]` - Show last N unparsed AI commands (default: 10)
     
 ---
 
@@ -209,6 +281,38 @@ Contributions are welcome! Please feel free to submit pull requests, report bugs
 - Run tests: `npm test`
 - Docker build: `docker build -t slackonos .`
 - See [TESTING.md](TESTING.md) for test workflow information
+
+---
+
+## OpenAI Debugging
+
+Use this section to quickly diagnose AI-related issues.
+
+- **Enable/Disable AI:** Set `openaiApiKey` in `config/config.json`. Remove it to disable AI (direct commands still work).
+- **Startup Validation:** On boot, the bot validates the API key by sending a tiny request.
+  - ✅ `AI natural language parsing enabled with OpenAI (API key validated)`
+  - ❌ `Invalid OpenAI API key format - must start with "sk-"`
+  - ❌ `OpenAI API key is invalid or unauthorized (401)`
+  - ❌ `OpenAI API quota exceeded (429)` → Check billing: https://platform.openai.com/account/billing
+  - ❌ `Cannot connect to OpenAI API` → Network/connectivity
+- **Runtime Errors:**
+  - `AI parsing error: 429 ... quota exceeded` → AI disabled automatically; bot continues with direct commands
+  - `AI parsing returned null` → Low confidence or API failure; try clearer phrasing or use direct command
+- **Logs to look for:**
+  - `Incoming MENTION from ...` → Message routed to AI parser
+  - `✨ AI parsed: "..." → add [...]/bestof [...] (95%)` → Parsed successfully
+  - `AI add: applied boosters [christmas holiday] → query "..."` → Theme detected and search enhanced
+  - `AI add: deduplicated 50 → 32 unique, selecting top 5` → Duplicates filtered out
+  - `AI add: current state = stopped` → Auto-play mode activated
+  - `AI disabled, falling back to standard processing` → No key or validation failed
+- **Admin Commands:**
+  - `aiunparsed` - View recent commands that AI couldn't parse (useful for training/debugging)
+  - `configdump` - View all current config values including AI settings
+- **Common Pitfalls:**
+  - Duplicate handling in Slack: we ignore `message` events containing `<@bot>` and only process `app_mention` to prevent doubles.
+  - Natural language like `"One med U2"` is sanitized to `"One U2"` to improve Spotify matching.
+  - Batch-add deduplicates tracks by normalized name (removes "- Single Edit", "Remaster", etc.)
+- **Cost Notes:** Uses GPT-4o-mini; typical requests are very cheap (~$0.0001/request). Direct commands never call AI.
 
 ---
 

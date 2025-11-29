@@ -10,6 +10,7 @@ const utils = require('./utils');
 const process = require('process');
 const parseString = require('xml2js').parseString;
 const http = require('http');
+const AIHandler = require('./ai-handler');
 const gongMessage = fs.readFileSync('gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('vote.txt', 'utf8').split('\n').filter(Boolean);
 const ttsMessage = fs.readFileSync('tts.txt', 'utf8').split('\n').filter(Boolean);
@@ -19,6 +20,7 @@ const gongBannedTracks = {};
 const SLACK_API_URL_LIST = 'https://slack.com/api/conversations.list';
 const userActionsFile = path.join(__dirname, 'config/userActions.json');
 const blacklistFile = path.join(__dirname, 'config/blacklist.json');
+const aiUnparsedFile = path.join(__dirname, 'config/ai-unparsed.log');
 const WinstonWrapper = require('./logger');
 
 // Helper to load blacklist
@@ -158,6 +160,11 @@ const spotify = Spotify({
   logger: logger,
 });
 
+/* Initialize AI Handler */
+(async () => {
+  await AIHandler.initialize(logger);
+})();
+
 let gongCounter = 0;
 let gongScore = {};
 const gongLimitPerUser = 1;
@@ -184,6 +191,13 @@ let trackVoteUsers = {}; // Track users who have voted for each track
 const SlackSystem = require('./slack');
 const DiscordSystem = require('./discord');
 
+// Command router stub - will be properly defined after commandRegistry
+// This allows us to pass it to Slack/Discord initialization
+let routeCommand = async (text, channel, userName, platform = 'slack', isAdmin = false, isMention = false) => {
+  // Temporary stub - will be replaced after commandRegistry is defined
+  logger.warn('routeCommand called before initialization');
+};
+
 // Initialize Slack System (optional - only if tokens configured)
 let slack = null;
 if (slackBotToken && slackAppToken) {
@@ -191,7 +205,7 @@ if (slackBotToken && slackAppToken) {
     botToken: slackBotToken,
     appToken: slackAppToken,
     logger: logger,
-    onCommand: processInput
+    onCommand: (...args) => routeCommand(...args)  // Closure ensures we get updated function
   });
 }
 
@@ -330,6 +344,46 @@ async function _lookupChannelID() {
   }
 }
 
+// Ensure required configuration keys exist; write defaults if missing
+function ensureConfigDefaults() {
+  const defaults = {
+    // Core behavior
+    gongLimit: 3,
+    voteLimit: 6,
+    voteImmuneLimit: 6,
+    flushVoteLimit: 6,
+    searchLimit: 10,
+    voteTimeLimitMinutes: 2,
+    maxVolume: 75,
+    market: 'US',
+    useLegacyBot: false,
+    logLevel: 'info',
+    // AI summary style
+    aiPrompt: 'You are a funny, upbeat DJ for a Slack music bot controlling Sonos. Reply with a super short, playful one-liner that confirms what you\'ll do, using casual humor and emojis when appropriate.'
+  };
+  const applied = [];
+  for (const [key, val] of Object.entries(defaults)) {
+    if (typeof config.get(key) === 'undefined') {
+      config.set(key, val);
+      applied.push({ key, value: val });
+    }
+  }
+  if (applied.length > 0) {
+    try {
+      config.save((err) => {
+        if (err) {
+          logger.error('Failed to write default config values: ' + err.message);
+        } else {
+          logger.info('Wrote missing config defaults: ' + applied.map(a => a.key).join(', '));
+        }
+      });
+    } catch (e) {
+      logger.error('Error saving defaults: ' + e.message);
+    }
+  }
+  return applied;
+}
+
 // Validate critical configuration and report to Admin channel
 // Check system health and return a report
 async function _checkSystemHealth() {
@@ -412,7 +466,7 @@ async function _checkSystemHealth() {
           discordChannels: config.get('discordChannels') || [],
           discordAdminRoles: config.get('discordAdminRoles') || [],
           logLevel: config.get('logLevel') || 'info'
-        }, processInput, logger);
+        }, (...args) => routeCommand(...args), logger);  // Use closure for AI parsing support
         if (discord) {
           logger.info('✅ Discord connection established.');
           
@@ -471,6 +525,14 @@ async function _checkSystemHealth() {
       // Set dummy globals for Discord-only mode
       global.adminChannel = null;
       global.standardChannel = null;
+    }
+
+    // 3.5 Apply config defaults and announce
+    const appliedDefaults = ensureConfigDefaults();
+    if (appliedDefaults.length && global.adminChannel) {
+      const lines = appliedDefaults.map(a => `• ${a.key} → \`${String(a.value).slice(0,80)}\``).join('\n');
+      const msg = `*🔧 Missing config values were added with defaults:*\n${lines}\n\nYou can change these via \`setconfig\`. Type \`help\` for more information.`;
+      await _slackMessage(msg, global.adminChannel);
     }
 
     // 4. Validate System Health
@@ -620,6 +682,8 @@ const commandRegistry = new Map([
   ['tts', { fn: (args, ch, u) => _tts(args, ch), admin: true, aliases: ['say'] }],
   ['move', { fn: _moveTrackAdmin, admin: true, aliases: ['mv'] }],
   ['stats', { fn: _stats, admin: true }],
+  ['configdump', { fn: _configdump, admin: true, aliases: ['cfgdump', 'confdump'] }],
+  ['aiunparsed', { fn: _aiUnparsed, admin: true, aliases: ['aiun', 'aiunknown'] }],
   ['test', { fn: (args, ch, u) => _addToSpotifyPlaylist(args, ch), admin: true }]
 ]);
 
@@ -629,6 +693,322 @@ for (const [cmd, meta] of commandRegistry) {
   const aliases = meta.aliases || [];
   aliases.forEach(a => aliasMap.set(a.toLowerCase(), cmd));
 }
+
+function _appendAIUnparsed(entry) {
+  try {
+    const line = JSON.stringify(entry) + "\n";
+    fs.appendFileSync(aiUnparsedFile, line, { encoding: 'utf8' });
+  } catch (e) {
+    logger.warn('Failed to write ai-unparsed log: ' + e.message);
+  }
+}
+
+async function _aiUnparsed(input, channel, userName) {
+  if (channel !== global.adminChannel) {
+    _slackMessage("❌ Admin only. Use this in the admin channel.", channel);
+    return;
+  }
+  const countArg = parseInt(input[1] || '20', 10);
+  const count = isNaN(countArg) ? 20 : Math.max(1, Math.min(200, countArg));
+  try {
+    if (!fs.existsSync(aiUnparsedFile)) {
+      _slackMessage('📄 No AI-unparsed log found yet.', channel);
+      return;
+    }
+    const data = fs.readFileSync(aiUnparsedFile, 'utf8').split('\n').filter(Boolean);
+    const slice = data.slice(-count);
+    const rows = slice.map(l => {
+      try {
+        const o = JSON.parse(l);
+        const ts = o.ts || new Date().toISOString();
+        const reason = o.reason || 'unknown';
+        const u = o.user || 'unknown';
+        const text = (o.text || '').replace(/[`\n]/g, ' ').slice(0, 200);
+        const conf = o.parsed && typeof o.parsed.confidence === 'number' ? o.parsed.confidence.toFixed(2) : '-';
+        const cmd = o.parsed && o.parsed.command ? o.parsed.command : '-';
+        return `• ${ts} | ${reason} | user:${u} | cmd:${cmd} | conf:${conf} | "${text}"`;
+      } catch (e) {
+        return `• (bad line) ${l.slice(0, 200)}`;
+      }
+    });
+    const header = `AI Unparsed (last ${rows.length} entries)\n`;
+    const body = rows.join('\n');
+    _slackMessage('```' + header + body + '```', channel);
+  } catch (e) {
+    logger.error('Failed to read ai-unparsed log: ' + e.message);
+    _slackMessage('❌ Failed to read ai-unparsed log: ' + e.message, channel);
+  }
+}
+
+async function _configdump(input, channel, userName) {
+  if (channel !== global.adminChannel) {
+    _slackMessage("❌ Admin only. Use this in the admin channel.", channel);
+    return;
+  }
+  try {
+    const store = (config && config.stores && config.stores.file && config.stores.file.store) || {};
+    const entries = Object.entries(store);
+    if (!entries.length) {
+      _slackMessage('📄 Config file appears empty or not loaded.', channel);
+      return;
+    }
+    const lines = entries.map(([k, v]) => {
+      let val = typeof v === 'string' ? v : JSON.stringify(v);
+      if (k.toLowerCase().includes('token') || k.toLowerCase().includes('secret') || k.toLowerCase().includes('apikey') || k.toLowerCase().includes('clientid')) {
+        val = (val || '').toString();
+        if (val.length > 6) val = val.slice(0, 3) + '…' + val.slice(-3);
+      }
+      return `${k}: ${val}`;
+    });
+    const msg = '```' + lines.join('\n') + '```';
+    _slackMessage(msg, channel);
+  } catch (e) {
+    logger.error('Failed to dump config: ' + e.message);
+    _slackMessage('❌ Failed to dump config: ' + e.message, channel);
+  }
+}
+
+/**
+ * Handle natural language @mention messages with AI parsing
+ * Falls back to standard command processing if AI is disabled or parsing fails
+ */
+async function handleNaturalLanguage(text, channel, userName, platform = 'slack', isAdmin = false) {
+  logger.info(`>>> handleNaturalLanguage called with: "${text}"`);
+  // Remove @bot mention
+  const cleanText = text.replace(/<@[^>]+>/g, '').trim();
+  logger.info(`>>> cleanText after stripping mention: "${cleanText}"`);
+  
+  // If it starts with a known command, check if it looks like natural language
+  const firstWord = cleanText.split(/\s+/)[0].toLowerCase();
+  const restOfText = cleanText.slice(firstWord.length).trim().toLowerCase();
+  
+  // Natural language indicators that should go through AI even if starting with a command
+  const naturalLangPattern = /\b(some|couple|few|several|good|best|nice|great|top|tunes|songs|music|tracks|for a|for the)\b/i;
+  const looksLikeNaturalLang = naturalLangPattern.test(restOfText);
+  logger.info(`>>> firstWord="${firstWord}", looksLikeNaturalLang=${looksLikeNaturalLang}`);
+  
+  if ((commandRegistry.has(firstWord) || aliasMap.has(firstWord)) && !looksLikeNaturalLang) {
+    logger.info(`>>> Skipping AI - known command "${firstWord}" without natural language`);
+    return processInput(cleanText, channel, userName, platform, isAdmin);
+  }
+  
+  // Log if we're proceeding to AI despite starting with a command
+  if (commandRegistry.has(firstWord) || aliasMap.has(firstWord)) {
+    logger.info(`>>> Proceeding to AI despite command "${firstWord}" because it looks like natural language`);
+  }
+  
+  // Try AI parsing
+  if (!AIHandler.isAIEnabled()) {
+    logger.debug('AI disabled, falling back to standard processing');
+    _slackMessage('🤔 I didn\'t understand that. Try: `add <song>`, `bestof <artist>`, `gong`, `current`, or `help`', channel);
+    _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, reason: 'ai_disabled' });
+    return;
+  }
+  
+  try {
+    const parsed = await AIHandler.parseNaturalLanguage(cleanText, userName);
+    
+    if (!parsed) {
+      logger.warn(`AI parsing returned null for: "${cleanText}"`);
+      _slackMessage('🤖 Sorry, I couldn\'t understand that. Try `help` to see available commands!', channel);
+      _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, reasoning: 'none', reason: 'parse_null' });
+      return;
+    }
+    
+    // Check confidence threshold
+    if (parsed.confidence < 0.5) {
+      logger.info(`Low confidence (${parsed.confidence}) for: "${cleanText}" → ${parsed.command}`);
+      _slackMessage(`🤔 Not sure I understood. Did you mean: \`${parsed.command} ${parsed.args.join(' ')}\`?\nTry \`help\` for available commands.`, channel);
+      _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, parsed, reasoning: parsed.reasoning, reason: 'low_confidence' });
+      return;
+    }
+    
+    // Log successful AI parse
+    logger.info(`✨ AI parsed: "${cleanText}" → ${parsed.command} [${parsed.args.join(', ')}] (${(parsed.confidence * 100).toFixed(0)}%)`);
+    // Send short DJ-style summary before executing
+    if (parsed.summary) {
+      _slackMessage(parsed.summary, channel);
+    }
+    
+    // Sanitize arguments for better Spotify matching
+    let finalArgs = parsed.args;
+    if (parsed.command === 'add' && finalArgs.length > 0) {
+      let term = finalArgs[0];
+      // Normalize common natural language patterns: "<song> med <artist>" (svenska), "<song> by <artist>"
+      term = term.replace(/\s+med\s+/i, ' ');
+      term = term.replace(/\s+by\s+/i, ' ');
+      term = term.replace(/[!]+$/, '');
+      finalArgs[0] = term.trim();
+      logger.info(`Track to add: ${finalArgs[0]}`);
+    }
+    
+    // Construct command text and process it
+    // If AI gave a single arg, try to extract a leading number (e.g., "5 good tunes ...")
+    if (parsed.command === 'add' && finalArgs.length === 1) {
+      const m = finalArgs[0].match(/^\s*(\d{1,2})\s+(.+)$/);
+      if (m) {
+        finalArgs = [m[2].replace(/[!]+$/, '').trim(), m[1]];
+        logger.info(`AI add: extracted leading count ${m[1]} and query "${finalArgs[0]}"`);
+      } else {
+        const qtyHint = /(some|couple|few|several)/i;
+        if (qtyHint.test(cleanText)) {
+          finalArgs.push('5');
+          logger.info('AI add: vague quantity detected → defaulting to count 5');
+        }
+      }
+    }
+
+    // If AI indicates a count for add (e.g., "add <query> 5"), batch-add top N tracks
+    if (parsed.command === 'add' && finalArgs.length >= 2) {
+      const maybeCount = parseInt(finalArgs[finalArgs.length - 1], 10);
+      if (!isNaN(maybeCount) && maybeCount > 1 && maybeCount <= 20) {
+        let query = finalArgs.slice(0, -1).join(' ');
+        // Simple mood/theme boosters
+        const qLower = query.toLowerCase();
+        const boosters = [
+          { match: /(xmas|christmas|jul)/, add: ' christmas holiday' },
+          { match: /(party|fest|dansband)/, add: ' party upbeat' },
+          { match: /(chill|relax|lugn|mysig)/, add: ' chill mellow' },
+          { match: /(workout|gym|träning)/, add: ' workout energetic' },
+          { match: /(sommar|summer|beach)/, add: ' summer beach hits' },
+          { match: /(80s|80-tal|eighties)/, add: ' 80s classic hits' },
+          { match: /(90s|90-tal|nineties)/, add: ' 90s classic hits' },
+          { match: /(rock|metal)/, add: ' rock classic' },
+          { match: /(pop|hits)/, add: ' pop hits' },
+          { match: /(disco|funk)/, add: ' disco dance funk' },
+          { match: /(ballad|kärleks|love|romantic)/, add: ' ballad love romantic' },
+          { match: /(hip.?hop|rap|hiphop)/, add: ' hip hop rap hits' },
+          { match: /(country|nashville)/, add: ' country hits' },
+          { match: /(jazz|blues)/, add: ' jazz blues classic' },
+          { match: /(klassisk|classical|opera)/, add: ' classical orchestra' },
+          { match: /(reggae|ska|caribbean)/, add: ' reggae caribbean' },
+          { match: /(indie|alternative)/, add: ' indie alternative' },
+          { match: /(edm|electro|house|techno)/, add: ' electronic dance' },
+          { match: /(latin|salsa|bachata|reggaeton)/, add: ' latin dance' },
+          { match: /(svensk|swedish)/, add: ' swedish svenska' },
+          { match: /(barnlåt|kids|children|barn)/, add: ' children kids' }
+        ];
+        let appliedBoosts = [];
+        boosters.forEach(b => { if (b.match.test(qLower)) { query += b.add; appliedBoosts.push(b.add.trim()); } });
+        if (appliedBoosts.length) {
+          logger.info(`AI add: applied boosters [${appliedBoosts.join(', ')}] → query "${query}"`);
+        } else {
+          logger.info(`AI add: no boosters applied → query "${query}"`);
+        }
+        try {
+          const results = await spotify.searchTrackList(query, 50);
+          logger.info(`AI add: search returned ${results ? results.length : 0} results for "${query}"`);
+          
+          // Deduplicate by normalized track name (remove suffixes like "- Single Edit", "Remaster", etc.)
+          const normalize = (name) => name.toLowerCase()
+            .replace(/\s*[-–]\s*(single|edit|remaster|remix|radio|version|mix|live|acoustic|cover).*$/i, '')
+            .replace(/\s*\(.*\)$/i, '')  // Remove parenthetical suffixes
+            .trim();
+          
+          const seen = new Set();
+          const unique = (results || [])
+            .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
+            .filter(t => {
+              const key = normalize(t.name);
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
+          
+          const top = unique.slice(0, maybeCount);
+          logger.info(`AI add: deduplicated ${results?.length || 0} → ${unique.length} unique, selecting top ${maybeCount} → queuing ${top.length}`);
+          if (!top.length) {
+            _slackMessage(`🤷 I couldn't find tracks for "${query}". Try a different search!`, channel);
+            return;
+          }
+          
+          // Check current state - if stopped, flush queue first
+          let wasPlaying = false;
+          try {
+            const state = await sonos.getCurrentState();
+            logger.info(`AI add: current state = ${state}`);
+            wasPlaying = (state === 'playing' || state === 'transitioning');
+            if (!wasPlaying) {
+              logger.info('AI add: player stopped - flushing queue first');
+              await sonos.flush();
+            }
+          } catch (stateErr) {
+            logger.warn('AI add: could not check state: ' + stateErr.message);
+          }
+          
+          let added = 0;
+          for (const t of top) {
+            try {
+              await sonos.queue(t.uri);
+              added++;
+            } catch (e) {
+              logger.warn('Queue failed: ' + e.message);
+            }
+          }
+          
+          // If wasn't playing, start playback
+          if (!wasPlaying && added > 0) {
+            try {
+              await new Promise(resolve => setTimeout(resolve, 500));
+              await sonos.play();
+              logger.info('AI add: started playback');
+            } catch (playErr) {
+              logger.warn('AI add: could not start playback: ' + playErr.message);
+            }
+          }
+          
+          const actionMsg = wasPlaying ? 'Added' : 'Started fresh with';
+          _slackMessage(`🎵 ${actionMsg} ${added} tracks for "${query}" 🎄`, channel);
+          return;
+        } catch (e) {
+          logger.error('Multi-add failed: ' + e.message);
+          _slackMessage('❌ Sorry, failed to add multiple tracks.', channel);
+          return;
+        }
+      }
+        logger.info(`AI add: count argument not valid → ${finalArgs[finalArgs.length - 1]}`);
+    }
+
+    const commandText = finalArgs.length > 0
+      ? `${parsed.command} ${finalArgs.join(' ')}`
+      : parsed.command;
+    await processInput(commandText, channel, userName, platform, isAdmin);
+    
+  } catch (err) {
+    logger.error(`Error in AI natural language handler: ${err.message}`);
+    _slackMessage('❌ Oops, something went wrong processing your request. Try using a command directly!', channel);
+    _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, error: err.message, reason: 'handler_error' });
+  }
+}
+
+/**
+ * Command router - detects if message needs AI parsing or standard processing
+ * Routes @mentions and natural language to AI, commands directly to processInput
+ * Replaces the stub defined earlier
+ */
+routeCommand = async function(text, channel, userName, platform = 'slack', isAdmin = false, isMention = false) {
+  logger.info(`>>> routeCommand: text="${text}", isMention=${isMention}`);
+  
+  // Check if this looks like a natural language request (not starting with a command)
+  const trimmed = text.replace(/<@[^>]+>/g, '').trim();
+  const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
+  
+  // If it's a mention, ALWAYS go through AI (even if it starts with a command like "add")
+  if (isMention) {
+    logger.info(`>>> Mention detected, routing to handleNaturalLanguage`);
+    return handleNaturalLanguage(text, channel, userName, platform, isAdmin);
+  }
+  
+  // For non-mentions: if it starts with a known command, process normally
+  if (commandRegistry.has(firstWord) || aliasMap.has(firstWord)) {
+    return processInput(text, channel, userName, platform, isAdmin);
+  }
+  
+  // Unknown command for non-mention - ignore
+  logger.debug(`Ignoring unknown command from non-mention: "${firstWord}"`);
+};
+
+logger.info('✅ Command router initialized with AI support');
 
 async function processInput(text, channel, userName, platform = 'slack', isAdmin = false) {
   // Set platform context for message routing
@@ -1103,7 +1483,21 @@ async function _bestof(input, channel, userName) {
     return;
   }
 
-  const artistName = input.slice(1).join(' ');
+  const tokens = input.slice(1);
+  const wordToNum = {
+    'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+    'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10
+  };
+  let desiredCount = 10;
+  if (tokens.length >= 2) {
+    const last = tokens[tokens.length - 1].toLowerCase();
+    const num = /^[0-9]+$/.test(last) ? parseInt(last, 10) : wordToNum[last];
+    if (num && num > 0 && num <= 20) {
+      desiredCount = num;
+      tokens.pop();
+    }
+  }
+  const artistName = tokens.join(' ');
   logger.info(`BESTOF request for artist: ${artistName}`);
 
   try {
@@ -1138,7 +1532,7 @@ async function _bestof(input, channel, userName) {
     const tracksByArtist = searchResults
       .filter(t => t.artists[0].name.toLowerCase() === bestArtist.toLowerCase())
       .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
-      .slice(0, 10); // top 10 tracks
+      .slice(0, desiredCount); // top N tracks
 
     if (tracksByArtist.length === 0) {
       _slackMessage(`🤔 Couldn't determine top tracks for *${bestArtist}*. Try being more specific! 🎵`, channel);
@@ -1516,7 +1910,20 @@ async function _debug(channel, userName) {
       `${healthStatus}\n\n` +
 
       `*⚙️ Configuration:*\n` +
-      `${configValues}`;
+      `${configValues}\n\n` +
+
+      `*🤖 OpenAI:*\n` +
+      (() => {
+        const ai = AIHandler.getAIDebugInfo();
+        return (
+          `> Enabled: ${ai.enabled ? 'true' : 'false'}\n` +
+          `> Key Present: ${config.get('openaiApiKey') ? 'true' : 'false'}\n` +
+          `> Model: ${ai.model}\n` +
+          `> Last Success: ${ai.lastSuccessTS || 'n/a'}\n` +
+          `> Last Error: ${ai.lastErrorTS || 'n/a'}\n` +
+          (ai.lastErrorMessage ? `> Last Error Msg: ${ai.lastErrorMessage}\n` : '')
+        );
+      })();
 
     _slackMessage(message, channel);
   } catch (err) {
@@ -2177,17 +2584,35 @@ function _help(input, channel) {
     
     let messages = [];
     
+    // AI help section (only shown if OpenAI is enabled)
+    let aiHelpSection = '';
+    if (AIHandler.isAIEnabled()) {
+      aiHelpSection = `*🤖 AI Natural Language (just @mention me!)*
+> Talk to me naturally! Examples:
+> • \`@SlackONOS play some christmas music\` → Adds holiday tracks
+> • \`@SlackONOS add a few 80s hits\` → Queues 80s classics
+> • \`@SlackONOS what's playing?\` → Shows current track
+> • \`@SlackONOS skip this\` → Votes to gong
+> 
+> _Quantity words: "a couple" (2), "a few" (3-4), "some" (5), "many" (8)_
+> _Themes: christmas, party, chill, workout, summer, 80s, 90s, rock, pop, disco, hip-hop, latin, swedish..._
+
+━━━━━━━━━━━━━━━━━━━━━
+
+`;
+    }
+    
     // For Discord admins, show both regular + admin help (split into multiple messages due to 2000 char limit)
     if (currentPlatform === 'discord' && isAdminUser) {
       const regularHelp = fs.readFileSync('helpText.txt', 'utf8');
       const adminHelp = fs.readFileSync('helpTextAdmin.txt', 'utf8');
       
-      messages.push(regularHelp);
+      messages.push(aiHelpSection + regularHelp);
       messages.push('━━━━━━━━━━━━━━━━━━━━━\n**🎛️ ADMIN COMMANDS** (DJ/Admin role)\n━━━━━━━━━━━━━━━━━━━━━\n\n' + adminHelp);
     } else {
       // Slack or non-admin: show appropriate single help file
       const helpFile = isAdminUser ? 'helpTextAdmin.txt' : 'helpText.txt';
-      messages.push(fs.readFileSync(helpFile, 'utf8'));
+      messages.push(aiHelpSection + fs.readFileSync(helpFile, 'utf8'));
     }
 
     // Generate config values list for admin help
@@ -2219,8 +2644,8 @@ function _help(input, channel) {
         _slackMessage(msg, channel);
       }
     } else {
-      // Slack can handle longer messages
-      _slackMessage(messages.join('\n\n'), channel);
+      // Slack can handle longer messages - disable link previews
+      _slackMessage(messages.join('\n\n'), channel, { unfurl_links: false, unfurl_media: false });
     }
   } catch (err) {
     logger.error('Error reading help file: ' + err.message);
@@ -2279,6 +2704,7 @@ function _setconfig(input, channel, userName) {
 > \`maxVolume\`: ${maxVolume}
 > \`searchLimit\`: ${searchLimit}
 > \`voteTimeLimitMinutes\`: ${voteTimeLimitMinutes}
+> \`aiPrompt\`: ${(config.get('aiPrompt') || '').slice(0,80)}${(config.get('aiPrompt')||'').length>80?'…':''}
 
 *Usage:* \`setconfig <key> <value>\`
 *Example:* \`setconfig gongLimit 5\`
@@ -2298,7 +2724,8 @@ function _setconfig(input, channel, userName) {
     flushVoteLimit: { type: 'number', min: 1, max: 20 },
     maxVolume: { type: 'number', min: 0, max: 100 },
     searchLimit: { type: 'number', min: 1, max: 50 },
-    voteTimeLimitMinutes: { type: 'number', min: 1, max: 60 }
+    voteTimeLimitMinutes: { type: 'number', min: 1, max: 60 },
+    aiPrompt: { type: 'string', minLen: 1, maxLen: 500 }
   };
 
   if (!allowedConfigs[key]) {
@@ -2356,6 +2783,22 @@ function _setconfig(input, channel, userName) {
         return;
       }
       _slackMessage(`✅ Successfully updated \`${key}\` from \`${oldValue}\` to \`${numValue}\` and saved to config.`, channel);
+    });
+  } else if (configDef.type === 'string') {
+    const newValue = input.slice(2).join(' ').trim();
+    if (newValue.length < (configDef.minLen || 1) || newValue.length > (configDef.maxLen || 500)) {
+      _slackMessage(`📝 Value length for \`${key}\` must be between ${configDef.minLen} and ${configDef.maxLen} characters.`, channel);
+      return;
+    }
+    const oldValue = config.get(key) || '';
+    config.set(key, newValue);
+    config.save(function (err) {
+      if (err) {
+        logger.error('Error saving config: ' + err);
+        _slackMessage(`⚠️ Updated \`${key}\` in memory, but failed to save to disk!`, channel);
+        return;
+      }
+      _slackMessage(`✅ Successfully updated \`${key}\` and saved to config.\nOld: \`${oldValue.slice(0,80)}${oldValue.length>80?'…':''}\`\nNew: \`${newValue.slice(0,80)}${newValue.length>80?'…':''}\``, channel);
     });
   }
 }

@@ -16,9 +16,16 @@
 *⚙️ System & Config:*
 > `setconfig [key] [value]` (or `getconfig`) - View/change bot settings.
 {{configValues}}
+> `configdump` (or `cfgdump`) - Print all current config values (tokens/secrets masked).
 > `debug` - Show build number and system info.
 > `stats` - Show usage statistics for all users.
 > `stats [user]` - Show usage statistics for a specific user.
 
+*🤖 AI Settings:*
+> `setconfig aiPrompt <text>` - Set the DJ-style summary prompt used by AI.
+> `aiunparsed [N]` - Show the last N misunderstood AI inputs.
+
 *🗣️ Fun & Extras:*
 > `tts [message]` (or `say`) - Make Sonos speak a message aloud.
+
+💡 _Suggestions or bugs? <https://github.com/htilly/SlackONOS|GitHub>_
