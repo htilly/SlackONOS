@@ -1900,6 +1900,18 @@ function _currentTrack(channel, cb) {
     .then((track) => {
       if (track) {
         let message = `Currently playing: *${track.title}* by _${track.artist}_`;
+        
+        // Add time information if available
+        if (track.duration && track.position) {
+          const remaining = track.duration - track.position;
+          const remainingMin = Math.floor(remaining / 60);
+          const remainingSec = Math.floor(remaining % 60);
+          const durationMin = Math.floor(track.duration / 60);
+          const durationSec = Math.floor(track.duration % 60);
+          
+          message += `\n⏱️ ${remainingMin}:${remainingSec.toString().padStart(2, '0')} remaining (${durationMin}:${durationSec.toString().padStart(2, '0')} total)`;
+        }
+        
         if (_isTrackGongBanned(track.title)) {
           message += ' :lock: (Immune to GONG)';
         }
