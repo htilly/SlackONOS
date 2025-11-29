@@ -211,11 +211,11 @@ async function _slackMessage(message, channel_id, options = {}) {
   // If current context is Discord: never try Slack first.
   if (platform === 'discord') {
     try {
-      await DiscordSystem.sendDiscordMessage(targetChannel, message);
+      await DiscordSystem.sendDiscordMessage(targetChannel, message, options);
       return;
     } catch (e) {
       logger.warn(`Discord send failed: ${e.message || e}. Message not delivered.`);
-      return; // Do NOT fall back to Slack; channel IDs incompatible
+      return; // DO NOT fall back to Slack; channel IDs incompatible
     }
   }
 
@@ -415,6 +415,44 @@ async function _checkSystemHealth() {
         }, processInput, logger);
         if (discord) {
           logger.info('✅ Discord connection established.');
+          
+          // Set up reaction handler for Discord
+          DiscordSystem.setReactionHandler(async (action, trackName, channelId, userName, platform) => {
+            logger.info(`[DISCORD] Reaction ${action} from ${userName} for track: ${trackName}`);
+            
+            // Set platform context
+            currentPlatform = platform;
+            currentChannel = channelId;
+            
+            // For reactions, we vote/gong the track that was just added (most recent in queue)
+            // This is more intuitive than requiring a queue position number
+            
+            if (action === 'vote') {
+              // Reaction vote is for making the track play sooner
+              // We'll get the queue and find the track by name, then call _vote with its position
+              try {
+                const queue = await sonos.getQueue();
+                if (queue && queue.items) {
+                  // Find the track by name (case-insensitive, partial match)
+                  const trackIndex = queue.items.findIndex(item => 
+                    item.title.toLowerCase().includes(trackName.toLowerCase())
+                  );
+                  
+                  if (trackIndex >= 0) {
+                    // Convert to queue position (0-based index matches Sonos internal)
+                    await _vote(['vote', trackIndex.toString()], channelId, userName);
+                  } else {
+                    logger.warn(`Track "${trackName}" not found in queue for reaction vote`);
+                  }
+                }
+              } catch (err) {
+                logger.error(`Error processing vote reaction: ${err.message}`);
+              }
+            } else if (action === 'gong') {
+              // Gong always targets the currently playing track
+              await _gong(channelId, userName);
+            }
+          });
         } else {
           logger.warn('Discord returned null (token maybe invalid). Running Slack-only.');
         }
@@ -1145,7 +1183,10 @@ async function _bestof(input, channel, userName) {
       msg += `> ${i + 1}. *${t.name}*\n`;
     });
 
-    _slackMessage(msg, channel);
+    _slackMessage(msg, channel, {
+      trackName: tracksByArtist[0]?.name || bestArtist,
+      addReactions: currentPlatform === 'discord'
+    });
 
   } catch (err) {
     logger.error(`BESTOF error: ${err.stack || err}`);
@@ -1172,15 +1213,11 @@ function _vote(input, channel, userName) {
   _logUserAction(userName, 'vote');
 
   var randomMessage = voteMessage[Math.floor(Math.random() * voteMessage.length)];
-  logger.info('voteMessage: ' + randomMessage);
-
   var voteNb = Number(input[1]); // Use the input number directly
-  logger.info('voteNb: ' + voteNb);
 
   sonos
     .getQueue()
     .then((result) => {
-      logger.info('Current queue: ' + JSON.stringify(result, null, 2));
       let trackFound = false;
       let voteTrackName = null;
 
@@ -1216,8 +1253,6 @@ function _vote(input, channel, userName) {
               trackVoteCount[voteNb] = 0;
             }
             trackVoteCount[voteNb] += 1;
-
-            logger.info('Track ' + voteTrackName + ' has received ' + trackVoteCount[voteNb] + ' votes.');
 
             _slackMessage('🗳️ This is VOTE *' + trackVoteCount[voteNb] + '/' + voteLimit + '* for *' + voteTrackName + '* - Almost there! 🎵', channel);
             if (trackVoteCount[voteNb] >= voteLimit) {
@@ -1529,7 +1564,8 @@ async function _add(input, channel, userName) {
 
       _slackMessage(
         'Started fresh! Added ' + '*' + result.name + '*' + ' by ' + result.artist + ' and began playback. :notes:',
-        channel
+        channel,
+        { trackName: result.name, addReactions: currentPlatform === 'discord' }
       );
       return;
     }
@@ -1576,7 +1612,10 @@ async function _add(input, channel, userName) {
       }
     }
 
-    _slackMessage(msg, channel);
+    _slackMessage(msg, channel, { 
+      trackName: result.name, 
+      addReactions: currentPlatform === 'discord' 
+    });
   } catch (err) {
     logger.error('Error adding track: ' + err.message);
     _slackMessage('🤷 Couldn\'t find that track or hit an error adding it. Try being more specific with the song name! 🎵', channel);

@@ -11,6 +11,8 @@ const WinstonWrapper = require('./logger.js');
 let discordClient = null;
 let botUserId = null;
 let discordLogger = null; // module-level logger reference
+let reactionHandler = null; // handler for reaction events
+const trackMessages = new Map(); // Map message IDs to track info for reactions
 
 // We accept an injected logger (recommended). If not provided we create a minimal one.
 async function initializeDiscord(config, messageHandler, injectedLogger) {
@@ -122,6 +124,78 @@ async function initializeDiscord(config, messageHandler, injectedLogger) {
             logger.error(`[DISCORD] Client error: ${error.message || error}`);
         });
 
+        // Reaction events - handle vote and gong reactions
+        discordClient.on(Events.MessageReactionAdd, async (reaction, user) => {
+            try {
+                // Ignore bot's own reactions
+                if (user.bot) return;
+
+                // Fetch partial data if needed
+                if (reaction.partial) {
+                    await reaction.fetch();
+                }
+                if (reaction.message.partial) {
+                    await reaction.message.fetch();
+                }
+
+                const message = reaction.message;
+                const emoji = reaction.emoji.name;
+
+                // Only process reactions on bot's own messages
+                if (message.author.id !== botUserId) return;
+
+                // Check if this message is tracked (added via add/bestof)
+                const trackInfo = trackMessages.get(message.id);
+                if (!trackInfo) return;
+
+                logger.info(`[DISCORD] Reaction ${emoji} from ${user.username} on message ${message.id}`);
+
+                // Handle vote reaction (🎵 or 🎶)
+                if (emoji === '🎵' || emoji === '🎶') {
+                    if (reactionHandler) {
+                        await reactionHandler('vote', trackInfo.trackName, message.channel.id, user.username, 'discord');
+                    }
+                }
+                // Handle gong reaction (🔔)
+                else if (emoji === '🔔') {
+                    if (reactionHandler) {
+                        await reactionHandler('gong', trackInfo.trackName, message.channel.id, user.username, 'discord');
+                    }
+                }
+            } catch (error) {
+                logger.error(`[DISCORD] Error handling reaction: ${error.message || error}`);
+            }
+        });
+
+        // Handle reaction removal (undo vote/gong)
+        discordClient.on(Events.MessageReactionRemove, async (reaction, user) => {
+            try {
+                if (user.bot) return;
+
+                if (reaction.partial) {
+                    await reaction.fetch();
+                }
+                if (reaction.message.partial) {
+                    await reaction.message.fetch();
+                }
+
+                const message = reaction.message;
+                const emoji = reaction.emoji.name;
+
+                if (message.author.id !== botUserId) return;
+
+                const trackInfo = trackMessages.get(message.id);
+                if (!trackInfo) return;
+
+                logger.info(`[DISCORD] Reaction ${emoji} removed by ${user.username} on message ${message.id}`);
+
+                // Handle undo (could implement vote/gong removal here if desired)
+                // For now, we'll just log it
+            } catch (error) {
+                logger.error(`[DISCORD] Error handling reaction removal: ${error.message || error}`);
+            }
+        });
+
         // Login to Discord
         await discordClient.login(config.discordToken);
         logger.info('🎮 Discord client connecting...');
@@ -134,25 +208,50 @@ async function initializeDiscord(config, messageHandler, injectedLogger) {
     }
 }
 
-async function sendDiscordMessage(channelId, text) {
+async function sendDiscordMessage(channelId, text, options = {}) {
     if (!discordClient) {
         if (discordLogger) discordLogger.warn('Discord client not initialized');
-        return;
+        return null;
     }
     try {
         const channel = await discordClient.channels.fetch(channelId);
         if (!channel) {
             if (discordLogger) discordLogger.warn(`[DISCORD] Cannot find channel ${channelId} to send message`);
-            return;
+            return null;
         }
         if (channel.isTextBased && channel.isTextBased()) {
-            await channel.send(text);
+            const message = await channel.send(text);
             if (discordLogger) discordLogger.debug(`[DISCORD] Sent message to channel ${channelId}`);
+            
+            // Auto-add reactions if requested (for track additions)
+            if (options.addReactions && message) {
+                try {
+                    await message.react('🎵');
+                    await message.react('🔔');
+                    if (discordLogger) discordLogger.debug(`[DISCORD] Added reactions to message ${message.id}`);
+                } catch (err) {
+                    if (discordLogger) discordLogger.warn(`[DISCORD] Failed to add reactions: ${err.message}`);
+                }
+            }
+            
+            // Track message for reactions if trackName provided
+            if (options.trackName && message) {
+                trackMessages.set(message.id, {
+                    trackName: options.trackName,
+                    channelId: channelId,
+                    timestamp: Date.now()
+                });
+                if (discordLogger) discordLogger.debug(`[DISCORD] Tracking message ${message.id} for track: ${options.trackName}`);
+            }
+            
+            return message;
         } else {
             if (discordLogger) discordLogger.warn(`[DISCORD] Channel ${channelId} is not text-based`);
+            return null;
         }
     } catch (error) {
         if (discordLogger) discordLogger.error(`Failed to send Discord message to ${channelId}: ${error.message || error}`);
+        return null;
     }
 }
 
@@ -164,9 +263,14 @@ function getDiscordBotUserId() {
     return botUserId;
 }
 
+function setReactionHandler(handler) {
+    reactionHandler = handler;
+}
+
 module.exports = {
     initializeDiscord,
     sendDiscordMessage,
     getDiscordClient,
-    getDiscordBotUserId
+    getDiscordBotUserId,
+    setReactionHandler
 };
