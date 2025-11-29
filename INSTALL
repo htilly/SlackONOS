@@ -39,10 +39,11 @@ Follow these steps to create and configure your Slack app:
 1. Go to **"OAuth & Permissions"** (under Features)
 2. Scroll to **"Scopes"** → **"Bot Token Scopes"**
 3. Add the following scopes:
-   * `app_mentions:read`
-   * `channels:history`
-   * `chat:write`
-   * `users:read`
+   * `app_mentions:read` - To receive @mentions
+   * `channels:history` - To read messages in public channels
+   * `chat:write` - To send messages
+   * `users:read` - To look up user information
+   * `im:history` - (Optional) To receive direct messages
 4. Scroll to the top and click **"Install to Workspace"**
 5. Authorize the app
 6. **IMPORTANT**: Copy the **"Bot User OAuth Token"** (starts with `xoxb-`). This is your `token`
@@ -52,9 +53,9 @@ Follow these steps to create and configure your Slack app:
 1. Go to **"Event Subscriptions"** (under Features)
 2. Toggle **"Enable Events"** to ON
 3. Under **"Subscribe to bot events"**, add:
-   * `app_mention`
-   * `message.channels`
-   * `message.im`
+   * `app_mention` - When someone @mentions the bot
+   * `message.channels` - Messages in public channels (bot must be invited)
+   * `message.im` - (Optional) Direct messages to the bot
 4. Click **"Save Changes"**
 
 ### 5. Invite Bot to Channels
