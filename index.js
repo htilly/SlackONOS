@@ -684,9 +684,21 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
     // Log successful AI parse
     logger.info(`✨ AI parsed: "${cleanText}" → ${parsed.command} [${parsed.args.join(', ')}] (${(parsed.confidence * 100).toFixed(0)}%)`);
     
+    // Sanitize arguments for better Spotify matching
+    let finalArgs = parsed.args;
+    if (parsed.command === 'add' && finalArgs.length > 0) {
+      let term = finalArgs[0];
+      // Normalize common natural language patterns: "<song> med <artist>" (svenska), "<song> by <artist>"
+      term = term.replace(/\s+med\s+/i, ' ');
+      term = term.replace(/\s+by\s+/i, ' ');
+      term = term.replace(/[!]+$/, '');
+      finalArgs[0] = term.trim();
+      logger.info(`Track to add: ${finalArgs[0]}`);
+    }
+    
     // Construct command text and process it
-    const commandText = parsed.args.length > 0 
-      ? `${parsed.command} ${parsed.args.join(' ')}`
+    const commandText = finalArgs.length > 0 
+      ? `${parsed.command} ${finalArgs.join(' ')}`
       : parsed.command;
     
     await processInput(commandText, channel, userName, platform, isAdmin);

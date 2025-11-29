@@ -66,6 +66,11 @@ module.exports = function SlackSystem({ botToken, appToken, logger, onCommand })
                     }
 
                     if (e.text) {
+                        // If the message contains a direct mention to the bot, skip here
+                        // App mentions will be handled by the dedicated handler below
+                        if (botUserId && e.text.includes(`<@${botUserId}>`)) {
+                            return;
+                        }
                         logger.info(`Incoming MESSAGE from ${e.user}: ${e.text}`);
                         onCommand(e.text, e.channel, `<@${e.user}>`);
                     }
