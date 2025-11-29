@@ -1616,7 +1616,12 @@ async function _debug(channel, userName) {
       `${healthStatus}\n\n` +
 
       `*⚙️ Configuration:*\n` +
-      `${configValues}`;
+      `${configValues}\n\n` +
+
+      `*🤖 OpenAI:*\n` +
+      `> Enabled: ${AIHandler.isAIEnabled() ? 'true' : 'false'}\n` +
+      `> Key Present: ${config.get('openaiApiKey') ? 'true' : 'false'}\n` +
+      `> Model: gpt-4o-mini\n`;
 
     _slackMessage(message, channel);
   } catch (err) {

@@ -239,6 +239,31 @@ Contributions are welcome! Please feel free to submit pull requests, report bugs
 
 ---
 
+## OpenAI Debugging
+
+Use this section to quickly diagnose AI-related issues.
+
+- **Enable/Disable AI:** Set `openaiApiKey` in `config/config.json`. Remove it to disable AI (direct commands still work).
+- **Startup Validation:** On boot, the bot validates the API key by sending a tiny request.
+  - ✅ `AI natural language parsing enabled with OpenAI (API key validated)`
+  - ❌ `Invalid OpenAI API key format - must start with "sk-"`
+  - ❌ `OpenAI API key is invalid or unauthorized (401)`
+  - ❌ `OpenAI API quota exceeded (429)` → Check billing: https://platform.openai.com/account/billing
+  - ❌ `Cannot connect to OpenAI API` → Network/connectivity
+- **Runtime Errors:**
+  - `AI parsing error: 429 ... quota exceeded` → AI disabled automatically; bot continues with direct commands
+  - `AI parsing returned null` → Low confidence or API failure; try clearer phrasing or use direct command
+- **Logs to look for:**
+  - `Incoming MENTION from ...` → Message routed to AI parser
+  - `✨ AI parsed: "..." → add [...]/bestof [...] (95%)` → Parsed successfully
+  - `AI disabled, falling back to standard processing` → No key or validation failed
+- **Common Pitfalls:**
+  - Duplicate handling in Slack: we ignore `message` events containing `<@bot>` and only process `app_mention` to prevent doubles.
+  - Natural language like `"One med U2"` is sanitized to `"One U2"` to improve Spotify matching.
+- **Cost Notes:** Uses GPT-4o-mini; typical requests are very cheap. Direct commands never call AI.
+
+---
+
 ## Keywords
 
 Discord music bot, Slack music bot, Sonos Discord integration, democratic music voting, office music bot, Spotify Discord controller, Sonos Slack bot, community music control, democratic skip, vote-to-play, gaming server music, shared speaker control
