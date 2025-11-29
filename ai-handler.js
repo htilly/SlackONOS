@@ -14,7 +14,7 @@ let logger = null;
  * Initialize OpenAI client
  * @param {Object} loggerInstance - Winston logger instance from index.js
  */
-function initialize(loggerInstance) {
+async function initialize(loggerInstance) {
   logger = loggerInstance;
   
   const apiKey = nconf.get('openaiApiKey');
@@ -25,13 +25,47 @@ function initialize(loggerInstance) {
     return;
   }
   
+  // Validate API key format
+  if (!apiKey.startsWith('sk-')) {
+    logger.error('Invalid OpenAI API key format - must start with "sk-"');
+    isEnabled = false;
+    return;
+  }
+  
   try {
     openai = new OpenAI({ apiKey });
-    isEnabled = true;
-    logger.info('AI natural language parsing enabled with OpenAI');
+    
+    // Test the API key with a minimal request
+    logger.info('Testing OpenAI API key...');
+    const testResponse = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: 'test' }],
+      max_tokens: 5
+    });
+    
+    if (testResponse && testResponse.choices) {
+      isEnabled = true;
+      logger.info('✅ AI natural language parsing enabled with OpenAI (API key validated)');
+    } else {
+      throw new Error('Invalid response from OpenAI API');
+    }
+    
   } catch (err) {
-    logger.error('Failed to initialize OpenAI client: ' + err.message);
     isEnabled = false;
+    
+    // Handle different error types
+    if (err.status === 401) {
+      logger.error('❌ OpenAI API key is invalid or unauthorized. Please check your API key.');
+    } else if (err.status === 429) {
+      logger.error('❌ OpenAI API quota exceeded. Please check your plan and billing at https://platform.openai.com/account/billing');
+      logger.error('   AI parsing will be DISABLED. Direct commands still work.');
+    } else if (err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED') {
+      logger.error('❌ Cannot connect to OpenAI API. Check your internet connection.');
+    } else {
+      logger.error('❌ Failed to initialize OpenAI client: ' + err.message);
+    }
+    
+    logger.warn('🔧 AI parsing disabled. You can still use direct commands (e.g., "add song name")');
   }
 }
 

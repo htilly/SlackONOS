@@ -160,12 +160,9 @@ const spotify = Spotify({
 });
 
 /* Initialize AI Handler */
-AIHandler.initialize(logger);
-if (AIHandler.isAIEnabled()) {
-  logger.info('🤖 AI natural language parsing is ENABLED');
-} else {
-  logger.info('AI natural language parsing is disabled (no API key)');
-}
+(async () => {
+  await AIHandler.initialize(logger);
+})();
 
 let gongCounter = 0;
 let gongScore = {};
