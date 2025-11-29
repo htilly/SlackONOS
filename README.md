@@ -1,5 +1,5 @@
-[![Build Status](https://github.com/htilly/zenmusic/workflows/Node.js%20CI/badge.svg)](https://github.com/htilly/zenmusic/actions?query=workflow%3A%22Node.js+CI%22)
-[![Known Vulnerabilities](https://snyk.io/test/github/htilly/zenmusic/badge.svg)](https://snyk.io/test/github/htilly/zenmusic)
+[![Build Status](https://github.com/htilly/SlackONOS/workflows/Node.js%20CI/badge.svg)](https://github.com/htilly/SlackONOS/actions?query=workflow%3A%22Node.js+CI%22)
+[![Known Vulnerabilities](https://snyk.io/test/github/htilly/SlackONOS/badge.svg)](https://snyk.io/test/github/htilly/SlackONOS)
 
 
 # SlackONOS
