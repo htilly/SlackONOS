@@ -61,12 +61,36 @@ Dynamic config updates use `_setconfig()` command (admin-only):
 ```javascript
 setconfig gongLimit 5        // Updates gongLimit at runtime
 setconfig voteTimeLimitMinutes 10
+setconfig defaultTheme lounge   // Set venue theme
+setconfig themePercentage 30    // 30% of bulk requests match venue theme
 ```
 
 **Config files:**
 - `config/config.json` (gitignored) – must contain both `slackAppToken` (xapp-) and `token` (xoxb-)
 - `config/userActions.json` – persisted user action logs
 - `config/blacklist.json` – persisted user blacklist (migrated from config.json array)
+
+## AI Features
+
+### Seasonal Awareness
+`ai-handler.js` includes `getSeasonalContext()` which returns current season info:
+- `season` - Current season (Winter/Holiday, Halloween, Summer, Spring, Valentine's, Autumn, Winter)
+- `month` - Month name
+- `themes` - Array of music themes for the season
+- `suggestion` - DJ suggestion for seasonal music
+
+### Venue/Default Theme
+Configure a default music theme via config:
+- `defaultTheme` - Base style (e.g., "lounge", "club", "office")
+- `themePercentage` - Percentage (0-100) of tracks matching venue theme
+
+When users request bulk music, the AI mixes in venue-themed tracks.
+
+### User Context Memory
+`ai-handler.js` maintains per-user context for follow-up responses:
+- `setUserContext(userName, lastSuggestion, context)` - Store suggestion
+- `getUserContext(userName)` - Retrieve (expires after 5 minutes)
+- Used when admin commands are blocked to suggest alternatives
 
 ## Slack Integration (Socket Mode v2.0+)
 

@@ -199,6 +199,45 @@ The AI automatically enhances searches based on detected themes:
 - If music is **playing**: New tracks are added to the queue
 - If music is **stopped**: Queue is cleared, tracks added, and playback starts automatically
 
+### 🌟 Seasonal & Venue Themes (NEW!)
+
+The AI automatically knows the current season and can suggest themed music!
+
+**Seasonal Awareness:**
+The bot detects the current month and adjusts music suggestions:
+
+| Season | Period | Themes |
+|--------|--------|--------|
+| 🎄 Winter/Holiday | December - Jan 6 | Christmas, holiday classics |
+| 🎃 Halloween | Oct 15-31 | Spooky, horror soundtracks |
+| ☀️ Summer | June - August | Beach vibes, feel-good hits |
+| 🌸 Spring | March - May | Uplifting, fresh vibes |
+| 💕 Valentine's | Feb 10-14 | Love songs, romantic ballads |
+| 🍂 Autumn | Sept - Nov (early) | Cozy, acoustic, nostalgic |
+| ❄️ Winter | Jan 7+, Feb | Cozy, chill, warming |
+
+**Example:** In December, asking for "add some seasonal music" will automatically queue Christmas tracks!
+
+**Venue/Default Theme:**
+Configure a default theme for your venue that subtly influences all bulk music requests:
+
+```
+setconfig defaultTheme lounge
+setconfig themePercentage 30
+```
+
+| Setting | Values | Description |
+|---------|--------|-------------|
+| `defaultTheme` | `lounge`, `club`, `office`, `cafe`, etc. | Base music style for your venue |
+| `themePercentage` | 0-100 | Percentage of tracks matching venue theme |
+
+**How it works:**
+When you request "100 christmas songs" with `defaultTheme: lounge` and `themePercentage: 30`:
+- ~70 christmas songs (what you asked for)
+- ~30 lounge-style tracks (venue atmosphere)
+
+This ensures your venue's vibe is always maintained, even during themed requests!
+
 **How it works:**
 - Powered by OpenAI GPT-4o-mini for accurate command parsing
 - Understands natural language in multiple languages (Swedish, English, etc.)
@@ -257,7 +296,8 @@ The bot queues song requests and plays them in order. If enough people dislike t
 * `blacklist add <@user>` - Prevent user from adding songs
 * `blacklist remove <@user>` - Restore user permissions
 * `blacklist list` - Show blacklisted users
-* `configdump` - Show all current configuration values
+* `setconfig` - View/change runtime settings (gongLimit, voteLimit, defaultTheme, etc.)
+* `configdump` - Show all current configuration values including AI theme context
 * `aiunparsed [N]` - Show last N unparsed AI commands (default: 10)
     
 ---

@@ -12,6 +12,9 @@ SlackONOS now supports natural language commands powered by OpenAI GPT-4o-mini. 
 - ⚡ **Smart Routing** - Direct commands bypass AI for instant response
 - 🔄 **Graceful Fallback** - Works without AI if no API key is provided
 - 📊 **Confidence Scoring** - Only executes commands with high confidence (>50%)
+- 🎄 **Seasonal Awareness** - Knows current season and suggests themed music
+- 🏢 **Venue Themes** - Configure default music style for your environment
+- 💬 **Context Memory** - Remembers suggestions for follow-up responses
 
 ### Examples
 
@@ -22,6 +25,8 @@ SlackONOS now supports natural language commands powered by OpenAI GPT-4o-mini. 
 @SlackONOS what's playing right now?
 @bot skip this terrible song
 @SlackONOS show me the current queue
+@bot add some christmas music
+@SlackONOS lägg till lite säsongsmusik
 ```
 
 **Direct Commands (no AI needed):**
@@ -32,6 +37,79 @@ current
 gong
 list
 ```
+
+## Seasonal Awareness
+
+The AI automatically knows the current date and season, enabling themed music suggestions.
+
+### Seasons
+
+| Season | Period | Themes |
+|--------|--------|--------|
+| 🎄 Winter/Holiday | December - Jan 6 | Christmas songs, holiday classics |
+| 🎃 Halloween | Oct 15-31 | Spooky music, horror soundtracks |
+| ☀️ Summer | June - August | Beach vibes, feel-good hits |
+| 🌸 Spring | March - May | Uplifting, fresh vibes |
+| 💕 Valentine's | Feb 10-14 | Love songs, romantic ballads |
+| 🍂 Autumn | Sept - Nov (early) | Cozy, acoustic, nostalgic |
+| ❄️ Winter | Jan 7+, Feb | Cozy, chill, warming |
+
+### Examples
+
+In December:
+- `@bot add some seasonal music` → Queues Christmas tracks
+- `@bot spela nåt passande för årstiden` → Holiday music
+
+In July:
+- `@bot add seasonal vibes` → Summer beach hits
+
+## Venue/Default Theme
+
+Configure a default music theme that subtly influences all bulk requests.
+
+### Configuration
+
+```
+setconfig defaultTheme lounge
+setconfig themePercentage 30
+```
+
+| Setting | Values | Description |
+|---------|--------|-------------|
+| `defaultTheme` | `lounge`, `club`, `office`, `cafe`, etc. | Base music style |
+| `themePercentage` | 0-100 | Percentage matching venue theme |
+
+### How It Works
+
+When requesting "100 christmas songs" with:
+- `defaultTheme: lounge`
+- `themePercentage: 30`
+
+Result:
+- ~70 christmas songs (requested)
+- ~30 lounge-style tracks (venue atmosphere)
+
+### Use Cases
+
+| Venue | Theme | Percentage |
+|-------|-------|------------|
+| Hotel Lobby | `lounge` | 30-40% |
+| Nightclub | `club music` | 20-30% |
+| Office | `focus music` | 25% |
+| Café | `acoustic coffee shop` | 35% |
+
+## Context Memory
+
+The AI remembers recent suggestions for follow-up responses.
+
+### Example Flow
+
+1. User: `flush` (non-admin)
+2. Bot: "❌ Admin only. Did you mean `flushvote`?"
+3. User: `@bot ok, do it` or `@bot ja`
+4. Bot: Executes `flushvote` (remembered from context)
+
+Context expires after 5 minutes of inactivity.
 
 ## Implementation Details
 
