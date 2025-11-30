@@ -1001,6 +1001,19 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
 routeCommand = async function(text, channel, userName, platform = 'slack', isAdmin = false, isMention = false) {
   logger.info(`>>> routeCommand: text="${text}", isMention=${isMention}`);
   
+  // Clean up copy-pasted text from Slack formatting FIRST
+  // Remove leading quote marker ("> " or "&gt; ")
+  text = text.replace(/^(&gt;|>)\s*/, '');
+  // Decode HTML entities
+  text = text.replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&');
+  // Remove Slack formatting markers (* for bold, _ for italic)
+  text = text.replace(/\*([^*]+)\*/g, '$1').replace(/_([^_]+)_/g, '$1');
+  // Remove leading numbers from search results (e.g., "1. " -> "")
+  text = text.replace(/^\d+\.\s*/, '');
+  text = text.trim();
+  
+  logger.info(`>>> routeCommand: cleaned text="${text}"`);
+  
   // Check if this looks like a natural language request (not starting with a command)
   const trimmed = text.replace(/<@[^>]+>/g, '').trim();
   const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
@@ -1072,7 +1085,18 @@ async function processInput(text, channel, userName, platform = 'slack', isAdmin
     
     if (!authorized) {
       logger.info(`Unauthorized admin cmd attempt: ${cmdKey} by ${userName} in ${channel} (platform: ${platform})`);
-      _slackMessage('🚫 Nice try! That\'s an admin-only command. This incident will be reported to... well, nobody cares. 😏', channel);
+      
+      // Suggest alternatives for common admin commands and set context for follow-up
+      if (cmdKey === 'flush') {
+        _slackMessage('🚫 That\'s an admin-only command! But you can use `flushvote` to start a democratic vote to clear the queue. 🗳️', channel);
+        // Set context so AI can understand follow-up like "ok, do it"
+        AIHandler.setUserContext(userName, 'flushvote', 'flush is admin-only, suggested flushvote');
+      } else if (cmdKey === 'next') {
+        _slackMessage('🚫 That\'s an admin-only command! But you can use `gong` to vote for skipping the current track. 🔔', channel);
+        AIHandler.setUserContext(userName, 'gong', 'next is admin-only, suggested gong');
+      } else {
+        _slackMessage('🚫 Nice try! That\'s an admin-only command. This incident will be reported to... well, nobody cares. 😏', channel);
+      }
       return;
     }
   }
@@ -1239,7 +1263,7 @@ async function _showQueue(channel) {
         const isCurrentTrack = track && (i + 1) === track.queuePosition;
         
         // Check if track is gong banned (immune)
-        if (_isTrackGongBanned(item.title)) {
+        if (voting.isTrackGongBanned(item.title)) {
           prefix = ':lock: ';
           trackTitle = item.title;
         } else if (track && item.title === track.title) {
@@ -2005,7 +2029,7 @@ function _currentTrack(channel, cb) {
           message += `\n⏱️ ${remainingMin}:${remainingSec.toString().padStart(2, '0')} remaining (${durationMin}:${durationSec.toString().padStart(2, '0')} total)`;
         }
         
-        if (_isTrackGongBanned(track.title)) {
+        if (voting.isTrackGongBanned(track.title)) {
           message += ' :lock: (Immune to GONG)';
         }
         _slackMessage(message, channel);
@@ -2316,6 +2340,7 @@ function _help(input, channel) {
       .replace(/{{voteImmuneLimit}}/g, voteImmuneLimit)
       .replace(/{{voteLimit}}/g, voteLimit)
       .replace(/{{flushVoteLimit}}/g, flushVoteLimit)
+      .replace(/{{voteTimeLimitMinutes}}/g, voteTimeLimitMinutes)
       .replace(/{{searchLimit}}/g, searchLimit)
       .replace(/{{configValues}}/g, configList));
 
@@ -2457,6 +2482,15 @@ function _setconfig(input, channel, userName) {
         voteTimeLimitMinutes = numValue;
         break;
     }
+
+    // Sync voting module config
+    voting.setConfig({
+      gongLimit,
+      voteLimit,
+      voteImmuneLimit,
+      flushVoteLimit,
+      voteTimeLimitMinutes,
+    });
 
     // Persist to config file
     config.set(key, numValue);

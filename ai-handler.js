@@ -13,6 +13,11 @@ let lastSuccessTS = null;
 let lastErrorTS = null;
 let lastErrorMessage = null;
 
+// User conversation context - keeps last suggestion for follow-ups
+// Format: { userName: { lastSuggestion: 'command', timestamp: Date, context: 'string' } }
+const userContext = {};
+const CONTEXT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Initialize OpenAI client
  * @param {Object} loggerInstance - Winston logger instance from index.js
@@ -73,6 +78,47 @@ async function initialize(loggerInstance) {
 }
 
 /**
+ * Set user context for follow-up questions
+ * @param {string} userName - Username
+ * @param {string} suggestion - Suggested command
+ * @param {string} context - Context description
+ */
+function setUserContext(userName, suggestion, context) {
+  userContext[userName] = {
+    lastSuggestion: suggestion,
+    timestamp: Date.now(),
+    context: context
+  };
+  logger.debug(`Set context for ${userName}: ${suggestion} - ${context}`);
+}
+
+/**
+ * Get user context if still valid
+ * @param {string} userName - Username
+ * @returns {Object|null} - Context or null if expired
+ */
+function getUserContext(userName) {
+  const ctx = userContext[userName];
+  if (!ctx) return null;
+  
+  // Check if context has expired
+  if (Date.now() - ctx.timestamp > CONTEXT_TIMEOUT_MS) {
+    delete userContext[userName];
+    return null;
+  }
+  
+  return ctx;
+}
+
+/**
+ * Clear user context
+ * @param {string} userName - Username
+ */
+function clearUserContext(userName) {
+  delete userContext[userName];
+}
+
+/**
  * Parse natural language message into structured command
  * @param {string} userMessage - The user's message (with @mention removed)
  * @param {string} userName - Username for context
@@ -82,6 +128,14 @@ async function parseNaturalLanguage(userMessage, userName) {
   if (!isEnabled || !openai) {
     logger.debug('AI parsing skipped - not enabled');
     return null;
+  }
+  
+  // Check for follow-up context
+  const ctx = getUserContext(userName);
+  let contextInfo = '';
+  if (ctx) {
+    contextInfo = `\n\nIMPORTANT CONTEXT: The user's previous request was blocked because "${ctx.context}". They were suggested to use "${ctx.lastSuggestion}" instead. If the user says something like "ok", "yes", "do it", "sure", "gör det", "ja", "ok gör det", "kör", etc., they likely want to execute the suggested command "${ctx.lastSuggestion}".`;
+    logger.debug(`Using context for ${userName}: ${ctx.lastSuggestion}`);
   }
   
   const systemPrompt = `You are a music bot command parser for SlackONOS. Convert natural language requests into structured commands.
@@ -129,7 +183,7 @@ User: "lägg till Forever Young" → {"command": "add", "args": ["Forever Young"
 User: "skippa den här skiten" → {"command": "gong", "args": [], "confidence": 0.88, "reasoning": "Slang for skipping track"}
 User: "vad spelas nu?" → {"command": "current", "args": [], "confidence": 0.95, "reasoning": "Asking for current track"}
 User: "hur är vädret?" → {"command": "help", "args": [], "confidence": 0.3, "reasoning": "Not music-related, suggesting help"}
-User: "play the best three songs by Foo Fighters" → {"command": "bestof", "args": ["Foo Fighters", "3"], "confidence": 0.95, "reasoning": "Top-N request for artist"}`
+User: "play the best three songs by Foo Fighters" → {"command": "bestof", "args": ["Foo Fighters", "3"], "confidence": 0.95, "reasoning": "Top-N request for artist"}${contextInfo}`
 
   const userPrompt = `User: ${userName}
 Message: "${userMessage}"
@@ -174,6 +228,12 @@ Parse this into a command.`;
     } else {
       parsed.summary = parsed.summary.slice(0, 160);
     }
+    
+    // Clear context after successful parsing (user has moved on)
+    if (parsed.confidence > 0.5) {
+      clearUserContext(userName);
+    }
+    
     return parsed;
     
   } catch (err) {
@@ -208,5 +268,8 @@ module.exports = {
   initialize,
   parseNaturalLanguage,
   isAIEnabled,
-  getAIDebugInfo
+  getAIDebugInfo,
+  setUserContext,
+  getUserContext,
+  clearUserContext
 };

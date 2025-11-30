@@ -148,7 +148,14 @@ async function gong(channel, userName, onGongSuccess) {
     }
     
     logger.info('_gong > track: ' + track);
-    gongTrack = track;
+    
+    // Reset gong state if track changed
+    if (track !== gongTrack) {
+      logger.info('Track changed from "' + gongTrack + '" to "' + track + '", resetting gong state');
+      gongCounter = 0;
+      gongScore = {};
+      gongTrack = track;
+    }
 
     if (isTrackGongBanned(track)) {
       logger.info('Track is gongBanned: ' + track);
@@ -475,11 +482,11 @@ async function flushvote(channel, userName) {
     }, currentVoteTimeLimit);
     
     await sendMessage(
-      "Voting period started for a flush of the queue... You have " +
+      "Voting period started for a flush of the queue... You have *" +
       voteTimeLimitMinutes +
-      " minutes to gather " +
+      " minutes* to gather *" +
       flushVoteLimit +
-      " votes !!",
+      " votes*!!",
       channel
     );
     logger.info('Voting period started!!');

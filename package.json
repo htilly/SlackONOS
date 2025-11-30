@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "chai": "6.2.0",
-    "mocha": "^11.7.3",
+    "mocha": "^11.7.5",
     "sinon": "^19.0.2"
   },
   "author": "",
