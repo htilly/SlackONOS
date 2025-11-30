@@ -27,6 +27,16 @@ A democratic music bot for Discord and Slack that lets teams control Sonos speak
 
 ![ScreenShot](http://raw.github.com/htilly/zenmusic/master/doc/images/Screenshot.png)
 
+## License & Commercial Use
+
+SlackONOS is licensed under the **GNU Affero General Public License v3 (AGPL-3.0-or-later)**.
+
+- You may use, modify and redistribute this software under the terms of the AGPL-3.0 license.
+- If you run a modified version as a network service, you must make the corresponding source code available to users.
+- Commercial entities that wish to use SlackONOS without AGPL obligations (e.g. closed-source forks or proprietary integrations) may contact the author to discuss **separate commercial licensing**.
+
+See the `LICENSE` file for full details.
+
 ## Quick Start
 
 **What You Need:**
