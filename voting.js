@@ -236,13 +236,14 @@ function resetGongState() {
 
 /**
  * Vote for a track to be played next
- * @param {number} trackNb - Track number in queue
+ * @param {Array} input - Command input array [command, trackNb, ...]
  * @param {string} channel - Channel ID
  * @param {string} userName - User who voted
  */
-async function vote(trackNb, channel, userName) {
+async function vote(input, channel, userName) {
   await logUserAction(userName, 'vote');
   
+  const trackNb = Number(input[1]);
   const randomMessage = voteMessages[Math.floor(Math.random() * voteMessages.length)];
 
   try {
@@ -350,11 +351,12 @@ async function votecheck(channel) {
 
 /**
  * Vote to make a track immune from gong
- * @param {number} trackNb - Track number in queue
+ * @param {Array} input - Command input array [command, trackNb, ...]
  * @param {string} channel - Channel ID
  * @param {string} userName - User who voted
  */
-async function voteImmune(trackNb, channel, userName) {
+async function voteImmune(input, channel, userName) {
+  const trackNb = Number(input[1]);
   logger.info('voteImmune for track: ' + trackNb);
 
   try {
