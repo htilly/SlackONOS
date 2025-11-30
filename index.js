@@ -12,6 +12,7 @@ const parseString = require('xml2js').parseString;
 const http = require('http');
 const AIHandler = require('./ai-handler');
 const voting = require('./voting');
+const musicHelper = require('./music-helper');
 const gongMessage = fs.readFileSync('gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('vote.txt', 'utf8').split('\n').filter(Boolean);
 const ttsMessage = fs.readFileSync('tts.txt', 'utf8').split('\n').filter(Boolean);
@@ -164,6 +165,9 @@ const spotify = Spotify({
 (async () => {
   await AIHandler.initialize(logger);
 })();
+
+/* Initialize Music Helper */
+musicHelper.initialize(spotify, logger);
 
 const SlackSystem = require('./slack');
 const DiscordSystem = require('./discord');
@@ -916,200 +920,25 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
           }
         }
         
-        let query = finalArgs.slice(0, -1).join(' ');
-        // Simple mood/theme boosters
-        const qLower = query.toLowerCase();
-        const boosters = [
-          { match: /(xmas|christmas|jul)/, add: ' christmas holiday' },
-          { match: /(party|fest|dansband)/, add: ' party upbeat' },
-          { match: /(chill|relax|lugn|mysig|cozy)/, add: ' chill mellow' },
-          { match: /(workout|gym|träning)/, add: ' workout energetic' },
-          { match: /(sommar|summer|beach)/, add: ' summer beach hits' },
-          { match: /(80s|80-tal|eighties)/, add: ' 80s classic hits' },
-          { match: /(90s|90-tal|nineties)/, add: ' 90s classic hits' },
-          { match: /(rock|metal)/, add: ' rock classic' },
-          { match: /(pop|hits)/, add: ' pop hits' },
-          { match: /(disco|funk)/, add: ' disco dance funk' },
-          { match: /(ballad|kärleks|love|romantic)/, add: ' ballad love romantic' },
-          { match: /(hip.?hop|rap|hiphop)/, add: ' hip hop rap hits' },
-          { match: /(country|nashville)/, add: ' country hits' },
-          { match: /(jazz|blues)/, add: ' jazz blues classic' },
-          { match: /(klassisk|classical|opera)/, add: ' classical orchestra' },
-          { match: /(reggae|ska|caribbean)/, add: ' reggae caribbean' },
-          { match: /(indie|alternative)/, add: ' indie alternative' },
-          { match: /(edm|electro|house|techno)/, add: ' electronic dance' },
-          { match: /(latin|salsa|bachata|reggaeton)/, add: ' latin dance' },
-          { match: /(svensk|swedish)/, add: ' swedish svenska' },
-          { match: /(lounge|elevator|hiss)/, add: ' lounge smooth jazz' },
-          { match: /(club|dance|dansmusik)/, add: ' club dance hits' },
-          { match: /(season|säsong|winter|vinter|autumn|höst)/, add: ' cozy winter' },
-          { match: /(barnlåt|kids|children|barn)/, add: ' children kids' }
-        ];
-        let appliedBoosts = [];
-        boosters.forEach(b => { if (b.match.test(qLower)) { query += b.add; appliedBoosts.push(b.add.trim()); } });
-        if (appliedBoosts.length) {
-          logger.info(`AI add: applied boosters [${appliedBoosts.join(', ')}] → query "${query}"`);
-        } else {
-          logger.info(`AI add: no boosters applied → query "${query}"`);
-        }
+        const query = finalArgs.slice(0, -1).join(' ');
         
         try {
-          // Check for defaultTheme and themePercentage
-          const defaultTheme = config.get('defaultTheme') || '';
-          const themePercentage = parseInt(config.get('themePercentage'), 10) || 0;
+          // Only use theme mixing in admin channel
+          const result = await musicHelper.searchAndQueue(sonos, query, maybeCount, {
+            useTheme: isAdminChannel
+          });
           
-          // Calculate how many tracks should be theme-based vs requested
-          let themeCount = 0;
-          let mainCount = maybeCount;
-          if (defaultTheme && themePercentage > 0) {
-            themeCount = Math.round(maybeCount * (themePercentage / 100));
-            mainCount = maybeCount - themeCount;
-            logger.info(`AI add: splitting ${maybeCount} tracks → ${mainCount} main + ${themeCount} theme ("${defaultTheme}")`);
-          }
-          
-          // Multiple searches to get enough tracks
-          let allResults = [];
-          const searchVariants = [
-            query,
-            query + ' 2024',
-            query + ' 2023',
-            query + ' classic',
-            query + ' best'
-          ];
-          
-          for (let i = 0; i < searchVariants.length && allResults.length < mainCount * 2; i++) {
-            try {
-              const results = await spotify.searchTrackList(searchVariants[i], 50);
-              if (results && results.length) {
-                allResults = allResults.concat(results);
-                logger.info(`AI add: search "${searchVariants[i]}" returned ${results.length} results (total: ${allResults.length})`);
-              }
-            } catch (searchErr) {
-              logger.warn(`AI add: search variant failed: ${searchErr.message}`);
-            }
-          }
-          
-          // Search for theme tracks if configured
-          let themeResults = [];
-          if (themeCount > 0 && defaultTheme) {
-            const themeVariants = [
-              defaultTheme,
-              defaultTheme + ' music',
-              defaultTheme + ' hits',
-              defaultTheme + ' playlist'
-            ];
-            for (let i = 0; i < themeVariants.length && themeResults.length < themeCount * 2; i++) {
-              try {
-                const results = await spotify.searchTrackList(themeVariants[i], 50);
-                if (results && results.length) {
-                  themeResults = themeResults.concat(results);
-                  logger.info(`AI add: theme search "${themeVariants[i]}" returned ${results.length} results (total: ${themeResults.length})`);
-                }
-              } catch (searchErr) {
-                logger.warn(`AI add: theme search failed: ${searchErr.message}`);
-              }
-            }
-          }
-          
-          logger.info(`AI add: total ${allResults.length} main + ${themeResults.length} theme results`);
-          
-          // Deduplicate helper
-          const normalize = (name) => name.toLowerCase()
-            .replace(/\s*[-–]\s*(single|edit|remaster|remix|radio|version|mix|live|acoustic|cover).*$/i, '')
-            .replace(/\s*\(.*\)$/i, '')
-            .trim();
-          
-          // Deduplicate main results
-          const seenMain = new Set();
-          const uniqueMain = (allResults || [])
-            .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
-            .filter(t => {
-              const key = normalize(t.name) + '|' + (t.artist || '').toLowerCase();
-              if (seenMain.has(key)) return false;
-              seenMain.add(key);
-              return true;
-            });
-          
-          // Deduplicate theme results
-          const uniqueTheme = (themeResults || [])
-            .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
-            .filter(t => {
-              const key = normalize(t.name) + '|' + (t.artist || '').toLowerCase();
-              if (seenMain.has(key)) return false;
-              seenMain.add(key);
-              return true;
-            });
-          
-          // Take requested counts
-          const mainTracks = uniqueMain.slice(0, mainCount);
-          const themeTracks = uniqueTheme.slice(0, themeCount);
-          
-          // Mix them together
-          let top = [];
-          if (themeTracks.length > 0) {
-            const interval = Math.max(1, Math.floor(mainCount / (themeCount + 1)));
-            let mainIdx = 0, themeIdx = 0;
-            
-            while (top.length < maybeCount && (mainIdx < mainTracks.length || themeIdx < themeTracks.length)) {
-              for (let i = 0; i < interval && mainIdx < mainTracks.length && top.length < maybeCount; i++) {
-                top.push(mainTracks[mainIdx++]);
-              }
-              if (themeIdx < themeTracks.length && top.length < maybeCount) {
-                top.push(themeTracks[themeIdx++]);
-              }
-            }
-            logger.info(`AI add: mixed ${mainTracks.length} main + ${themeTracks.length} theme → ${top.length} total`);
-          } else {
-            top = uniqueMain.slice(0, maybeCount);
-          }
-          
-          logger.info(`AI add: queuing ${top.length} tracks`);
-          
-          if (!top.length) {
+          if (!result.added) {
             _slackMessage(`🤷 I couldn't find tracks for "${query}". Try a different search!`, channel);
             return;
           }
           
-          // Check current state - if stopped, flush queue first
-          let wasPlaying = false;
-          try {
-            const state = await sonos.getCurrentState();
-            logger.info(`AI add: current state = ${state}`);
-            wasPlaying = (state === 'playing' || state === 'transitioning');
-            if (!wasPlaying) {
-              logger.info('AI add: player stopped - flushing queue first');
-              await sonos.flush();
-            }
-          } catch (stateErr) {
-            logger.warn('AI add: could not check state: ' + stateErr.message);
-          }
-          
-          let added = 0;
-          for (const t of top) {
-            try {
-              await sonos.queue(t.uri);
-              added++;
-            } catch (e) {
-              logger.warn('Queue failed: ' + e.message);
-            }
-          }
-          
-          // If wasn't playing, start playback
-          if (!wasPlaying && added > 0) {
-            try {
-              await new Promise(resolve => setTimeout(resolve, 500));
-              await sonos.play();
-              logger.info('AI add: started playback');
-            } catch (playErr) {
-              logger.warn('AI add: could not start playback: ' + playErr.message);
-            }
-          }
-          
           // Build informative message
-          const actionMsg = wasPlaying ? 'Added' : 'Started fresh with';
-          let msg = `🎵 ${actionMsg} ${added} tracks`;
-          if (themeTracks.length > 0 && defaultTheme) {
-            msg += ` (${mainTracks.length} "${query}" + ${themeTracks.length} "${defaultTheme}")`;
+          const actionMsg = result.wasPlaying ? 'Added' : 'Started fresh with';
+          let msg = `🎵 ${actionMsg} ${result.added} tracks`;
+          if (result.themeCount > 0) {
+            const defaultTheme = config.get('defaultTheme') || '';
+            msg += ` (${result.mainCount} "${query}" + ${result.themeCount} "${defaultTheme}")`;
           } else {
             msg += ` for "${query}"`;
           }
@@ -1167,185 +996,26 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
             }
           }
           
-          let query = followUpArgs.slice(0, -1).join(' ') || 'popular hits';
-          
-          // Apply the same boosters as main add
-          const qLower = query.toLowerCase();
-          const boosters = [
-            { match: /(xmas|christmas|jul)/, add: ' christmas holiday' },
-            { match: /(party|fest|dansband)/, add: ' party upbeat' },
-            { match: /(chill|relax|lugn|mysig)/, add: ' chill mellow' },
-            { match: /(workout|gym|träning)/, add: ' workout energetic' },
-            { match: /(sommar|summer|beach)/, add: ' summer beach hits' },
-            { match: /(80s|80-tal|eighties)/, add: ' 80s classic hits' },
-            { match: /(90s|90-tal|nineties)/, add: ' 90s classic hits' },
-            { match: /(rock|metal)/, add: ' rock classic' },
-            { match: /(pop|hits)/, add: ' pop hits' },
-            { match: /(disco|funk)/, add: ' disco dance funk' },
-            { match: /(ballad|kärleks|love|romantic)/, add: ' ballad love romantic' },
-            { match: /(hip.?hop|rap|hiphop)/, add: ' hip hop rap hits' },
-            { match: /(country|nashville)/, add: ' country hits' },
-            { match: /(jazz|blues)/, add: ' jazz blues classic' },
-            { match: /(klassisk|classical|opera)/, add: ' classical orchestra' },
-            { match: /(reggae|ska|caribbean)/, add: ' reggae caribbean' },
-            { match: /(indie|alternative)/, add: ' indie alternative' },
-            { match: /(edm|electro|house|techno)/, add: ' electronic dance' },
-            { match: /(latin|salsa|bachata|reggaeton)/, add: ' latin dance' },
-            { match: /(svensk|swedish)/, add: ' swedish svenska' },
-            { match: /(lounge|elevator|hiss)/, add: ' lounge smooth jazz' },
-            { match: /(club|dance|dansmusik)/, add: ' club dance hits' },
-            { match: /(barnlåt|kids|children|barn)/, add: ' children kids' }
-          ];
-          boosters.forEach(b => { if (b.match.test(qLower)) { query += b.add; } });
-          
-          logger.info(`FollowUp add: searching for "${query}" with count ${maybeCount}`);
+          // Use defaultTheme from config as fallback if no query specified
+          const defaultTheme = config.get('defaultTheme') || 'popular hits';
+          const query = followUpArgs.slice(0, -1).join(' ') || defaultTheme;
           
           try {
-            // Check for defaultTheme and themePercentage
-            const defaultTheme = config.get('defaultTheme') || '';
-            const themePercentage = parseInt(config.get('themePercentage'), 10) || 0;
+            // Only use theme mixing in admin channel
+            const result = await musicHelper.searchAndQueue(sonos, query, maybeCount, {
+              useTheme: isAdminChannel
+            });
             
-            // Calculate how many tracks should be theme-based vs requested
-            let themeCount = 0;
-            let mainCount = maybeCount;
-            if (defaultTheme && themePercentage > 0) {
-              themeCount = Math.round(maybeCount * (themePercentage / 100));
-              mainCount = maybeCount - themeCount;
-              logger.info(`FollowUp add: splitting ${maybeCount} tracks → ${mainCount} main + ${themeCount} theme ("${defaultTheme}")`);
-            }
-            
-            // Spotify API limits to 50 results per search, so we need multiple searches for large counts
-            let allResults = [];
-            const searchVariants = [
-              query,
-              query + ' 2024',
-              query + ' 2023',
-              query + ' classic',
-              query + ' best'
-            ];
-            
-            // Do multiple searches to get enough tracks for main query
-            for (let i = 0; i < searchVariants.length && allResults.length < mainCount * 2; i++) {
-              try {
-                const results = await spotify.searchTrackList(searchVariants[i], 50);
-                if (results && results.length) {
-                  allResults = allResults.concat(results);
-                  logger.info(`FollowUp add: search "${searchVariants[i]}" returned ${results.length} results (total: ${allResults.length})`);
-                }
-              } catch (searchErr) {
-                logger.warn(`FollowUp search variant failed: ${searchErr.message}`);
-              }
-            }
-            
-            // If we have a theme, search for theme tracks too
-            let themeResults = [];
-            if (themeCount > 0 && defaultTheme) {
-              const themeVariants = [
-                defaultTheme,
-                defaultTheme + ' music',
-                defaultTheme + ' hits',
-                defaultTheme + ' playlist'
-              ];
-              for (let i = 0; i < themeVariants.length && themeResults.length < themeCount * 2; i++) {
-                try {
-                  const results = await spotify.searchTrackList(themeVariants[i], 50);
-                  if (results && results.length) {
-                    themeResults = themeResults.concat(results);
-                    logger.info(`FollowUp add: theme search "${themeVariants[i]}" returned ${results.length} results (total: ${themeResults.length})`);
-                  }
-                } catch (searchErr) {
-                  logger.warn(`FollowUp theme search failed: ${searchErr.message}`);
-                }
-              }
-            }
-            
-            logger.info(`FollowUp add: total search returned ${allResults.length} main + ${themeResults.length} theme results`);
-            
-            // Deduplicate helper
-            const normalize = (name) => name.toLowerCase()
-              .replace(/\s*[-–]\s*(single|edit|remaster|remix|radio|version|mix|live|acoustic|cover).*$/i, '')
-              .replace(/\s*\(.*\)$/i, '')
-              .trim();
-            
-            // Deduplicate main results
-            const seenMain = new Set();
-            const uniqueMain = (allResults || [])
-              .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
-              .filter(t => {
-                const key = normalize(t.name) + '|' + (t.artist || '').toLowerCase();
-                if (seenMain.has(key)) return false;
-                seenMain.add(key);
-                return true;
-              });
-            
-            // Deduplicate theme results (excluding any already in main)
-            const uniqueTheme = (themeResults || [])
-              .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
-              .filter(t => {
-                const key = normalize(t.name) + '|' + (t.artist || '').toLowerCase();
-                if (seenMain.has(key)) return false;
-                seenMain.add(key);
-                return true;
-              });
-            
-            // Take the requested counts from each
-            const mainTracks = uniqueMain.slice(0, mainCount);
-            const themeTracks = uniqueTheme.slice(0, themeCount);
-            
-            // Mix them together - interleave theme tracks throughout
-            let top = [];
-            if (themeTracks.length > 0) {
-              // Calculate how often to insert a theme track
-              const interval = Math.max(1, Math.floor(mainCount / (themeCount + 1)));
-              let mainIdx = 0, themeIdx = 0;
-              
-              while (top.length < maybeCount && (mainIdx < mainTracks.length || themeIdx < themeTracks.length)) {
-                // Add main tracks
-                for (let i = 0; i < interval && mainIdx < mainTracks.length && top.length < maybeCount; i++) {
-                  top.push(mainTracks[mainIdx++]);
-                }
-                // Add a theme track
-                if (themeIdx < themeTracks.length && top.length < maybeCount) {
-                  top.push(themeTracks[themeIdx++]);
-                }
-              }
-              logger.info(`FollowUp add: mixed ${mainTracks.length} main + ${themeTracks.length} theme → ${top.length} total`);
-            } else {
-              top = uniqueMain.slice(0, maybeCount);
-            }
-            
-            logger.info(`FollowUp add: deduplicated and mixed → queuing ${top.length} tracks`);
-            
-            if (!top.length) {
+            if (!result.added) {
               _slackMessage(`🤷 Couldn't find tracks for "${query}" in followUp.`, channel);
               return;
             }
             
-            let added = 0;
-            for (const t of top) {
-              try {
-                await sonos.queue(t.uri);
-                added++;
-              } catch (e) {
-                logger.warn('FollowUp queue failed: ' + e.message);
-              }
-            }
-            
-            // Start playback if not playing
-            try {
-              const state = await sonos.getCurrentState();
-              if (state !== 'playing' && state !== 'transitioning' && added > 0) {
-                await sonos.play();
-                logger.info('FollowUp: started playback');
-              }
-            } catch (playErr) {
-              logger.warn('FollowUp: could not check/start playback: ' + playErr.message);
-            }
-            
             // Build informative message
-            let msg = `🎵 Added ${added} tracks`;
-            if (themeTracks.length > 0 && defaultTheme) {
-              msg += ` (${mainTracks.length} "${query}" + ${themeTracks.length} "${defaultTheme}")`;
+            let msg = `🎵 Added ${result.added} tracks`;
+            if (result.themeCount > 0) {
+              const defaultTheme = config.get('defaultTheme') || '';
+              msg += ` (${result.mainCount} "${query}" + ${result.themeCount} "${defaultTheme}")`;
             } else {
               msg += ` for "${query}"`;
             }

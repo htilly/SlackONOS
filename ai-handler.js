@@ -308,8 +308,8 @@ IMPORTANT - MULTI-STEP REQUESTS: When user asks to do TWO things (like "clear AN
   "summary": "Clearing the decks! Let's make room for fresh beats!",
   "followUp": {
     "command": "add",
-    "args": ["popular hits", "100"],
-    "reasoning": "Second part: add 100 songs after flush"
+    "args": ["mixed hits", "100"],
+    "reasoning": "Second part: add 100 songs after flush - use venue theme or mixed music"
   }
 }
 
@@ -338,7 +338,7 @@ User: "who is the best president?" → {"command": "chat", "args": [], "confiden
 User: "hej, vem är du?" → {"command": "chat", "args": [], "confidence": 0.95, "reasoning": "Identity question", "followUp": null, "response": "Hej! 👋 I'm SlackONOS - your friendly office DJ! Ask me to play music, show the queue, or vote to skip tracks. Type 'help' for all commands!"}
 User: "play the best three songs by Foo Fighters" → {"command": "bestof", "args": ["Foo Fighters", "3"], "confidence": 0.95, "reasoning": "Top-N request for artist", "followUp": null, "response": null}
 User: "lägg till lite säsongsmusik" → {"command": "add", "args": ["[seasonal theme based on current month]", "5"], "confidence": 0.9, "reasoning": "Seasonal music request, using current season theme", "followUp": null, "response": null}
-User: "rensa listan och lägg till 100 låtar" → {"command": "flush", "args": [], "confidence": 0.95, "reasoning": "Clear queue first", "summary": "Clearing the decks!", "followUp": {"command": "add", "args": ["popular hits", "100"], "reasoning": "Then add 100 songs"}, "response": null}
+User: "rensa listan och lägg till 100 låtar" → {"command": "flush", "args": [], "confidence": 0.95, "reasoning": "Clear queue first", "summary": "Clearing the decks!", "followUp": {"command": "add", "args": ["mixed hits", "100"], "reasoning": "Then add 100 songs using venue theme"}, "response": null}
 User: "töm kön och fyll på med jullåtar" → {"command": "flush", "args": [], "confidence": 0.95, "reasoning": "Clear queue first", "summary": "Out with the old!", "followUp": {"command": "add", "args": ["christmas songs", "50"], "reasoning": "Then add christmas music"}, "response": null}${seasonalInfo}${contextInfo}`
 
   const userPrompt = `User: ${userName}

@@ -1,13 +1,26 @@
 name: Build and Push Multi-Platform Docker Image
 
 on:
+  # Build on releases (recommended for production)
+  release:
+    types: [published]
+  
+  # Also allow develop branch for testing
   push:
     branches:
-      - master  # Production builds → :latest
       - develop # Dev builds → :develop
-      - 'feature/**'  # Feature branches → :feature-*
     paths-ignore:
-      - 'build.txt'  # Exclude build.txt from triggering the workflow
+      - 'build.txt'
+      - 'CHANGELOG.md'
+      - '*.md'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Docker tag (e.g., v1.5.0 or latest)'
+        required: true
+        default: 'manual'
 
 jobs:
   test:
@@ -56,41 +69,49 @@ jobs:
     - name: Determine Docker tags
       id: docker_tags
       run: |
-        BRANCH_NAME="${GITHUB_REF#refs/heads/}"
         SHORT_SHA="${GITHUB_SHA::7}"
         
-        if [ "$BRANCH_NAME" = "master" ]; then
-          # Master branch: increment build number and tag as latest
-          BUILD_NUMBER=$(cat build.txt)
-          BUILD_NUMBER=$((BUILD_NUMBER + 1))
-          echo $BUILD_NUMBER > build.txt
-          echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:latest,${{ secrets.DOCKERHUB_USERNAME }}/slackonos:build-${BUILD_NUMBER}" >> $GITHUB_OUTPUT
-          echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
-          echo "is_master=true" >> $GITHUB_OUTPUT
-        elif [ "$BRANCH_NAME" = "develop" ]; then
-          # Develop branch: tag as develop
-          echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:develop,${{ secrets.DOCKERHUB_USERNAME }}/slackonos:develop-${SHORT_SHA}" >> $GITHUB_OUTPUT
-          echo "is_master=false" >> $GITHUB_OUTPUT
+        if [ "${{ github.event_name }}" = "release" ]; then
+          # Release: tag with version and latest
+          VERSION="${{ github.event.release.tag_name }}"
+          # Remove 'v' prefix if present for semver tag
+          SEMVER="${VERSION#v}"
+          echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:latest,${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${VERSION},${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${SEMVER}" >> $GITHUB_OUTPUT
+          echo "is_release=true" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          # Manual trigger
+          TAG="${{ github.event.inputs.tag }}"
+          echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${TAG},${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${TAG}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "is_release=false" >> $GITHUB_OUTPUT
         else
-          # Feature branches: tag with sanitized branch name
-          SAFE_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
-          echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${SAFE_BRANCH},${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${SAFE_BRANCH}-${SHORT_SHA}" >> $GITHUB_OUTPUT
-          echo "is_master=false" >> $GITHUB_OUTPUT
+          # Develop branch
+          echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:develop,${{ secrets.DOCKERHUB_USERNAME }}/slackonos:develop-${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "is_release=false" >> $GITHUB_OUTPUT
         fi
 
     - name: Build and push multi-platform Docker image
-      run: |
-        docker buildx build --platform linux/amd64,linux/arm64 --push \
-          -t $(echo "${{ steps.docker_tags.outputs.tags }}" | sed 's/,/ -t /g') .
+      uses: docker/build-push-action@v6.7.0
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.docker_tags.outputs.tags }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
 
     - name: Verify the platforms
       run: docker buildx inspect --bootstrap
 
-    - name: Commit and push updated build.txt (master only)
-      if: steps.docker_tags.outputs.is_master == 'true'
+    - name: Create GitHub Release Summary
+      if: github.event_name == 'release'
       run: |
-        git config --local user.name "github-actions[bot]"
-        git config --local user.email "github-actions[bot]@users.noreply.github.com"
-        git add build.txt
-        git commit -m "Build ${{ steps.docker_tags.outputs.build_number }}"
-        git push
+        echo "## 🐳 Docker Image Published" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Version:** ${{ github.event.release.tag_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Pull commands:**" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+        echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/slackonos:latest" >> $GITHUB_STEP_SUMMARY
+        echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${{ github.event.release.tag_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
