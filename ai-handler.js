@@ -190,8 +190,23 @@ async function parseNaturalLanguage(userMessage, userName) {
   const ctx = getUserContext(userName);
   let contextInfo = '';
   if (ctx) {
-    contextInfo = `\n\nIMPORTANT CONTEXT: The user's previous request was blocked because "${ctx.context}". They were suggested to use "${ctx.lastSuggestion}" instead. If the user says something like "ok", "yes", "do it", "sure", "gör det", "ja", "ok gör det", "kör", etc., they likely want to execute the suggested command "${ctx.lastSuggestion}".`;
-    logger.debug(`Using context for ${userName}: ${ctx.lastSuggestion}`);
+    contextInfo = `\n\nIMPORTANT FOLLOW-UP CONTEXT: The user's previous interaction context: "${ctx.context}". 
+The suggested command was: "${ctx.lastSuggestion}".
+
+CRITICAL: If the user now says ANYTHING that sounds like agreement or confirmation such as:
+- "ok", "yes", "do it", "sure", "yeah", "yep", "please", "go ahead", "play it"
+- "gör det", "ja", "ok gör det", "kör", "varsågod", "snälla", "spela"
+- Or ANY short affirmative response
+
+Then IMMEDIATELY execute the suggested command! Return:
+{
+  "command": "${ctx.lastSuggestion.split(' ')[0]}",
+  "args": [${ctx.lastSuggestion.split(' ').slice(1).map(a => `"${a}"`).join(', ')}],
+  "confidence": 0.95,
+  "reasoning": "User confirmed previous suggestion",
+  "summary": "You got it! Playing those tunes now! 🎵"
+}`;
+    logger.info(`Using follow-up context for ${userName}: "${ctx.lastSuggestion}" (${ctx.context})`);
   }
   
   // Get seasonal context
@@ -239,8 +254,50 @@ Parse the user's message and respond ONLY with valid JSON in this exact format:
   "confidence": 0.95,
   "reasoning": "Brief explanation of parsing",
   "summary": "Short, funny DJ-style one-liner confirming the action",
-  "followUp": null
+  "followUp": null,
+  "response": null
 }
+
+IMPORTANT - DIRECT RESPONSES: For simple questions or greetings that are NOT music commands but can be answered directly (like "what month is it?", "what's the date?", "hello", "who are you?", "what's the season?"), use the special command "chat" with a response:
+{
+  "command": "chat",
+  "args": [],
+  "confidence": 0.95,
+  "reasoning": "User asking a simple question",
+  "summary": "",
+  "followUp": null,
+  "response": "Your friendly answer here"
+}
+
+The "chat" command is for:
+- Greetings: "hello", "hi", "hej", "tjena"
+- Questions about time/date: "what month is it?", "what's the date?", "what season?"
+- Bot identity: "who are you?", "what are you?", "vem är du?"
+- Simple chitchat that doesn't require music commands
+
+For "chat" responses, be friendly, brief, and if relevant mention that you're a music bot. Use the seasonal context to answer date/time questions accurately.
+
+IMPORTANT - CHAT WITH MUSIC SUGGESTIONS: When responding to chitchat and you mention or offer to play music (like "I could play some X for you!", "I can play some tunes", etc.), you MUST ALWAYS include a "suggestedAction" field. This allows the user to say "yes" or "do it" to trigger the music:
+{
+  "command": "chat",
+  "args": [],
+  "confidence": 0.95,
+  "reasoning": "User asked about presidents, suggesting patriotic music",
+  "response": "That's a tough one! I'm just here to spin tunes. But I can play some presidential-worthy anthems!",
+  "suggestedAction": {
+    "command": "add",
+    "args": ["patriotic anthems USA", "10"],
+    "description": "presidential anthems"
+  }
+}
+
+CRITICAL: If your chat response mentions playing music, tunes, songs, tracks, or anthems - you MUST include suggestedAction!
+Examples of responses that REQUIRE suggestedAction:
+- "I can play some ice-cool tunes" → MUST have suggestedAction with hockey/sports/rock music
+- "I could spin some tracks for you" → MUST have suggestedAction
+- "Want me to play something?" → MUST have suggestedAction with contextual music
+
+This allows follow-up responses like "yes do it" to trigger the suggested action.
 
 IMPORTANT - MULTI-STEP REQUESTS: When user asks to do TWO things (like "clear AND add", "rensa OCH lägg till", "flush then play"), you MUST use the followUp field:
 {
@@ -266,19 +323,23 @@ Rules:
 - Always use lowercase command names
 - If request is unclear or not music-related, return low confidence (<0.4)
 - Use followUp for multi-step requests like "clear queue and add songs" or "rensa och fyll på"
+- Use suggestedAction in chat responses when you offer to play music
 
 Examples:
 User: "spela de bästa låtarna med U2" → {"command": "bestof", "args": ["U2"], "confidence": 0.95, "reasoning": "Clear request for artist's best tracks", "followUp": null}
 User: "add some great songs of Foo Fighters" → {"command": "add", "args": ["Foo Fighters", "5"], "confidence": 0.95, "reasoning": "Request for multiple tracks by artist, using default count 5", "followUp": null}
 User: "play some Queen" → {"command": "add", "args": ["Queen", "5"], "confidence": 0.92, "reasoning": "Vague quantity, defaulting to 5 tracks", "followUp": null}
 User: "lägg till Forever Young" → {"command": "add", "args": ["Forever Young"], "confidence": 0.92, "reasoning": "Add single track", "followUp": null}
-User: "skippa den här skiten" → {"command": "gong", "args": [], "confidence": 0.88, "reasoning": "Slang for skipping track", "followUp": null}
-User: "vad spelas nu?" → {"command": "current", "args": [], "confidence": 0.95, "reasoning": "Asking for current track", "followUp": null}
-User: "hur är vädret?" → {"command": "help", "args": [], "confidence": 0.3, "reasoning": "Not music-related, suggesting help", "followUp": null}
-User: "play the best three songs by Foo Fighters" → {"command": "bestof", "args": ["Foo Fighters", "3"], "confidence": 0.95, "reasoning": "Top-N request for artist", "followUp": null}
-User: "lägg till lite säsongsmusik" → {"command": "add", "args": ["[seasonal theme based on current month]", "5"], "confidence": 0.9, "reasoning": "Seasonal music request, using current season theme", "followUp": null}
-User: "rensa listan och lägg till 100 låtar" → {"command": "flush", "args": [], "confidence": 0.95, "reasoning": "Clear queue first", "summary": "Clearing the decks!", "followUp": {"command": "add", "args": ["popular hits", "100"], "reasoning": "Then add 100 songs"}}
-User: "töm kön och fyll på med jullåtar" → {"command": "flush", "args": [], "confidence": 0.95, "reasoning": "Clear queue first", "summary": "Out with the old!", "followUp": {"command": "add", "args": ["christmas songs", "50"], "reasoning": "Then add christmas music"}}${seasonalInfo}${contextInfo}`
+User: "skippa den här skiten" → {"command": "gong", "args": [], "confidence": 0.88, "reasoning": "Slang for skipping track", "followUp": null, "response": null}
+User: "vad spelas nu?" → {"command": "current", "args": [], "confidence": 0.95, "reasoning": "Asking for current track", "followUp": null, "response": null}
+User: "hur är vädret?" → {"command": "chat", "args": [], "confidence": 0.9, "reasoning": "Off-topic but can suggest music", "followUp": null, "response": "I'm a DJ, not a weather forecaster! ☀️ But I can play some sunny beach tunes!", "suggestedAction": {"command": "add", "args": ["summer beach hits", "10"], "description": "sunny beach tunes"}}
+User: "what month is it?" → {"command": "chat", "args": [], "confidence": 0.95, "reasoning": "Date question, using seasonal context", "followUp": null, "response": "It's [CURRENT_MONTH]! Perfect time for some [SEASONAL_THEME] music! 🎶"}
+User: "who is the best president?" → {"command": "chat", "args": [], "confidence": 0.95, "reasoning": "Political question, deflect but offer music", "followUp": null, "response": "That's above my pay grade! 🎩 I'm just a DJ. But I can play some epic presidential anthems!", "suggestedAction": {"command": "add", "args": ["patriotic anthems american", "10"], "description": "presidential anthems"}}
+User: "hej, vem är du?" → {"command": "chat", "args": [], "confidence": 0.95, "reasoning": "Identity question", "followUp": null, "response": "Hej! 👋 I'm SlackONOS - your friendly office DJ! Ask me to play music, show the queue, or vote to skip tracks. Type 'help' for all commands!"}
+User: "play the best three songs by Foo Fighters" → {"command": "bestof", "args": ["Foo Fighters", "3"], "confidence": 0.95, "reasoning": "Top-N request for artist", "followUp": null, "response": null}
+User: "lägg till lite säsongsmusik" → {"command": "add", "args": ["[seasonal theme based on current month]", "5"], "confidence": 0.9, "reasoning": "Seasonal music request, using current season theme", "followUp": null, "response": null}
+User: "rensa listan och lägg till 100 låtar" → {"command": "flush", "args": [], "confidence": 0.95, "reasoning": "Clear queue first", "summary": "Clearing the decks!", "followUp": {"command": "add", "args": ["popular hits", "100"], "reasoning": "Then add 100 songs"}, "response": null}
+User: "töm kön och fyll på med jullåtar" → {"command": "flush", "args": [], "confidence": 0.95, "reasoning": "Clear queue first", "summary": "Out with the old!", "followUp": {"command": "add", "args": ["christmas songs", "50"], "reasoning": "Then add christmas music"}, "response": null}${seasonalInfo}${contextInfo}`
 
   const userPrompt = `User: ${userName}
 Message: "${userMessage}"

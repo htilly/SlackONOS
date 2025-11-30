@@ -839,7 +839,23 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
       return;
     }
     
-    // Check confidence threshold
+    // Handle "chat" command FIRST - direct responses to simple questions/greetings
+    // This bypasses confidence check since chat responses are always valid
+    if (parsed.command === 'chat' && parsed.response) {
+      logger.info(`AI chat response: "${cleanText}" → "${parsed.response}"`);
+      _slackMessage(parsed.response, channel);
+      
+      // If chat includes a music suggestion, save it for follow-up
+      if (parsed.suggestedAction && parsed.suggestedAction.command) {
+        const suggestion = `${parsed.suggestedAction.command} ${parsed.suggestedAction.args.join(' ')}`;
+        const description = parsed.suggestedAction.description || suggestion;
+        AIHandler.setUserContext(userName, suggestion, `offered to play ${description}`);
+        logger.info(`Chat suggestion saved for ${userName}: "${suggestion}" (${description})`);
+      }
+      return;
+    }
+    
+    // Check confidence threshold (only for non-chat commands)
     if (parsed.confidence < 0.5) {
       logger.info(`Low confidence (${parsed.confidence}) for: "${cleanText}" → ${parsed.command}`);
       _slackMessage(`🤔 Not sure I understood. Did you mean: \`${parsed.command} ${parsed.args.join(' ')}\`?\nTry \`help\` for available commands.`, channel);
@@ -884,8 +900,22 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
 
     // If AI indicates a count for add (e.g., "add <query> 5"), batch-add top N tracks
     if (parsed.command === 'add' && finalArgs.length >= 2) {
-      const maybeCount = parseInt(finalArgs[finalArgs.length - 1], 10);
-      if (!isNaN(maybeCount) && maybeCount > 1 && maybeCount <= 200) {
+      let maybeCount = parseInt(finalArgs[finalArgs.length - 1], 10);
+      
+      // Apply limits based on channel: admin channel = 200, regular = 20
+      const isAdminChannel = (channel === global.adminChannel);
+      const maxTracks = isAdminChannel ? 200 : 20;
+      
+      if (!isNaN(maybeCount) && maybeCount > 1) {
+        // Enforce limit and notify if capped
+        if (maybeCount > maxTracks) {
+          logger.info(`AI add: requested ${maybeCount} tracks, capping to ${maxTracks} (admin=${isAdminChannel})`);
+          maybeCount = maxTracks;
+          if (!isAdminChannel) {
+            _slackMessage(`📝 Note: Limited to ${maxTracks} tracks in this channel. Use admin channel for larger requests.`, channel);
+          }
+        }
+        
         let query = finalArgs.slice(0, -1).join(' ');
         // Simple mood/theme boosters
         const qLower = query.toLowerCase();
@@ -1121,8 +1151,22 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
       
       if (followUpParsed.command === 'add' && followUpArgs.length >= 1) {
         // Check if there's a count argument
-        const maybeCount = parseInt(followUpArgs[followUpArgs.length - 1], 10);
-        if (!isNaN(maybeCount) && maybeCount > 1 && maybeCount <= 200) {
+        let maybeCount = parseInt(followUpArgs[followUpArgs.length - 1], 10);
+        
+        // Apply limits based on channel: admin channel = 200, regular = 20
+        const isAdminChannel = (channel === global.adminChannel);
+        const maxTracks = isAdminChannel ? 200 : 20;
+        
+        if (!isNaN(maybeCount) && maybeCount > 1) {
+          // Enforce limit and notify if capped
+          if (maybeCount > maxTracks) {
+            logger.info(`FollowUp add: requested ${maybeCount} tracks, capping to ${maxTracks} (admin=${isAdminChannel})`);
+            maybeCount = maxTracks;
+            if (!isAdminChannel) {
+              _slackMessage(`📝 Note: Limited to ${maxTracks} tracks in this channel. Use admin channel for larger requests.`, channel);
+            }
+          }
+          
           let query = followUpArgs.slice(0, -1).join(' ') || 'popular hits';
           
           // Apply the same boosters as main add
@@ -1431,6 +1475,17 @@ async function processInput(text, channel, userName, platform = 'slack', isAdmin
       } else if (cmdKey === 'next') {
         _slackMessage('🚫 That\'s an admin-only command! But you can use `gong` to vote for skipping the current track. 🔔', channel);
         AIHandler.setUserContext(userName, 'gong', 'next is admin-only, suggested gong');
+      } else if (cmdKey === 'play') {
+        // Check if user is trying to play a specific track number
+        const trackMatch = rawTerm.match(/(?:track\s*)?(\d+)/i) || args.find(a => /^\d+$/.test(a));
+        const trackNum = trackMatch ? (Array.isArray(trackMatch) ? trackMatch[1] : trackMatch) : null;
+        
+        if (trackNum) {
+          _slackMessage(`🚫 That's an admin-only command! But you can use \`vote ${trackNum}\` to vote for that track to play sooner. 🗳️`, channel);
+          AIHandler.setUserContext(userName, `vote ${trackNum}`, `play track ${trackNum} is admin-only, suggested vote`);
+        } else {
+          _slackMessage('🚫 That\'s an admin-only command! But you can use `vote <track#>` to vote for a queued track. 🗳️', channel);
+        }
       } else {
         _slackMessage('🚫 Nice try! That\'s an admin-only command. This incident will be reported to... well, nobody cares. 😏', channel);
       }
