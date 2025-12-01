@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Channel ID Support** - Use Slack channel IDs directly in config to avoid rate limits in large workspaces (100+ channels)
+- **Auto-save Channel IDs** - After first successful lookup by name, IDs are automatically saved to config.json for instant future startups
+- **Smart Channel Lookup** - Detects if config uses IDs vs names; warns when scanning all channels
+
+### Changed
+- Channel lookup now skips API pagination if IDs are used directly
+- Config file auto-updates with discovered IDs after first successful name-based lookup
+- Added helpful warnings and tips for large workspace optimization
+
 ## [1.5.0] - 2025-11-30
 
 ### Added

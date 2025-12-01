@@ -1,6 +1,7 @@
 {
     "adminChannel" : "music-admin",
     "standardChannel" : "music",
+    "_comment_channels": "TIP: For large workspaces (100+ channels), use channel IDs instead of names to avoid rate limits. Example: 'C01ABC123XY' instead of 'music-admin'. Find IDs via Slack web: right-click channel > View channel details > copy ID from bottom.",
     "gongLimit": 3,
     "voteImmuneLimit": 6,
     "voteLimit": 6,

@@ -251,14 +251,39 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Function to fetch the channel IDs
-async function _lookupChannelID() {
-  let allChannels = [];
-  let nextCursor;
-  let retryAfter = 0;
-  let backoff = 1; // Exponential backoff starts at 1 second
+// Helper: Check if a string is a Slack channel ID (format: C followed by alphanumeric)
+function isChannelId(str) {
+  return /^C[A-Z0-9]{8,}$/i.test(str);
+}
 
+// Function to fetch the channel IDs - optimized to avoid full workspace scan
+async function _lookupChannelID() {
   try {
+    const adminChannelConfig = config.get('adminChannel').replace('#', '');
+    const standardChannelConfig = config.get('standardChannel').replace('#', '');
+
+    logger.info('Admin channel (in config): ' + adminChannelConfig);
+    logger.info('Standard channel (in config): ' + standardChannelConfig);
+
+    // Check if both are already IDs - no API call needed!
+    if (isChannelId(adminChannelConfig) && isChannelId(standardChannelConfig)) {
+      global.adminChannel = adminChannelConfig;
+      global.standardChannel = standardChannelConfig;
+      logger.info('Using channel IDs directly from config (no lookup needed)');
+      logger.info('Admin channelID: ' + global.adminChannel);
+      logger.info('Standard channelID: ' + global.standardChannel);
+      return;
+    }
+
+    // Otherwise, we need to lookup by name (inefficient for large workspaces)
+    logger.warn('Channel names detected in config - performing lookup (slow in large workspaces)');
+    logger.warn('Consider using channel IDs directly in config to avoid rate limits');
+
+    let allChannels = [];
+    let nextCursor;
+    let retryAfter = 0;
+    let backoff = 1; // Exponential backoff starts at 1 second
+
     do {
       // Wait if rate limited
       if (retryAfter > 0) {
@@ -299,20 +324,13 @@ async function _lookupChannelID() {
       backoff = 1;
     } while (nextCursor);
 
-    logger.info('Fetched channels: ' + allChannels.map((channel) => channel.name).join(', '));
+    logger.info(`Fetched ${allChannels.length} channels total`);
 
-    // Fetch Admin and Standard channel IDs
-    const adminChannelName = config.get('adminChannel').replace('#', '');
-    const standardChannelName = config.get('standardChannel').replace('#', '');
+    const adminChannelInfo = allChannels.find((channel) => channel.name === adminChannelConfig);
+    if (!adminChannelInfo) throw new Error(`Admin channel "${adminChannelConfig}" not found`);
 
-    logger.info('Admin channel (in config): ' + adminChannelName);
-    logger.info('Standard channel (in config): ' + standardChannelName);
-
-    const adminChannelInfo = allChannels.find((channel) => channel.name === adminChannelName);
-    if (!adminChannelInfo) throw new Error(`Admin channel "${adminChannelName}" not found`);
-
-    const standardChannelInfo = allChannels.find((channel) => channel.name === standardChannelName);
-    if (!standardChannelInfo) throw new Error(`Standard channel "${standardChannelName}" not found`);
+    const standardChannelInfo = allChannels.find((channel) => channel.name === standardChannelConfig);
+    if (!standardChannelInfo) throw new Error(`Standard channel "${standardChannelConfig}" not found`);
 
     // Set the global variables
     global.adminChannel = adminChannelInfo.id;
@@ -320,8 +338,48 @@ async function _lookupChannelID() {
 
     logger.info('Admin channelID: ' + global.adminChannel);
     logger.info('Standard channelID: ' + global.standardChannel);
+
+    // Auto-save IDs back to config to avoid future lookups
+    await _saveChannelIDsToConfig(adminChannelInfo.id, standardChannelInfo.id);
   } catch (error) {
     logger.error(`Error fetching channels: ${error.message}`);
+    throw error;
+  }
+}
+
+// Save channel IDs back to config.json to avoid future lookups
+async function _saveChannelIDsToConfig(adminChannelId, standardChannelId) {
+  try {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    
+    const configPath = path.join(process.cwd(), 'config', 'config.json');
+    
+    // Read current config file
+    const configData = await fs.readFile(configPath, 'utf8');
+    const configObj = JSON.parse(configData);
+    
+    // Update with IDs
+    const oldAdminChannel = configObj.adminChannel;
+    const oldStandardChannel = configObj.standardChannel;
+    
+    configObj.adminChannel = adminChannelId;
+    configObj.standardChannel = standardChannelId;
+    
+    // Write back to file with pretty formatting
+    await fs.writeFile(configPath, JSON.stringify(configObj, null, 4) + '\n', 'utf8');
+    
+    // Also update nconf in-memory so we don't need restart
+    config.set('adminChannel', adminChannelId);
+    config.set('standardChannel', standardChannelId);
+    
+    logger.info('✅ Auto-saved channel IDs to config.json for faster future startups');
+    logger.info(`   Updated: "${oldAdminChannel}" → "${adminChannelId}"`);
+    logger.info(`   Updated: "${oldStandardChannel}" → "${standardChannelId}"`);
+    logger.info('   Next restart will be instant (no channel lookup needed)');
+  } catch (error) {
+    logger.warn(`Could not auto-save channel IDs to config: ${error.message}`);
+    logger.warn('Manual update recommended for faster startups');
   }
 }
 

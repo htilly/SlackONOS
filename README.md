@@ -94,6 +94,39 @@ legacySlackBotToken="MySlackBotToken" sonos="192.168.0.1" node index.js
 You can also provide any of the other variables from config.json.example as arguments or environment variables.
 The blacklist can be provided as either an array in config.json, or as a comma-separated string when using arguments or environment variables.
 
+**Channel Configuration (Important for Large Workspaces)**
+
+SlackONOS uses two channels: `adminChannel` (for admin commands) and `standardChannel` (for regular users).
+
+**For workspaces with 100+ channels:** Use channel IDs instead of channel names to avoid Slack API rate limits during startup.
+
+- **Channel names** (default): `"adminChannel": "music-admin"` → Bot scans all channels to find ID (slow, but **auto-upgrades to IDs after first run**)
+- **Channel IDs** (recommended): `"adminChannel": "C01ABC123XY"` → Direct lookup (instant)
+
+**🎉 NEW: Auto-save Feature**
+
+If you configure channel names, SlackONOS will automatically update your `config.json` with the discovered IDs after the first successful startup. This means:
+- **First startup**: Slow (1-3 minutes in large workspaces)
+- **All future startups**: Instant (uses saved IDs)
+
+**Manual Configuration (Optional)**
+
+You can also manually set channel IDs to skip the first slow startup.
+
+**How to find Channel IDs:**
+1. In Slack web/desktop, right-click the channel
+2. Select "View channel details"
+3. Scroll to bottom, copy the Channel ID (format: `C` + 9+ alphanumeric characters)
+
+Example config.json:
+```json
+{
+  "adminChannel": "C01ABC123XY",
+  "standardChannel": "C987DEF654",
+  ...
+}
+```
+
 Logo for the bot in #Slack can be found at "doc/images/ZenMusic.png
 
 **⚠️ BREAKING CHANGES (v2.0+)**
