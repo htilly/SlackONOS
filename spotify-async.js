@@ -203,6 +203,44 @@ module.exports = function (config) {
             };
         },
 
+        // Get all tracks from an album
+        getAlbumTracks: async function (albumUri) {
+            const albumId = albumUri.split(':')[2];
+            const data = await _search(`albums/${albumId}/tracks`, { 
+                market: config.market,
+                limit: 50 
+            });
+            
+            if (!data.items) {
+                return [];
+            }
+
+            return data.items.map(track => ({
+                name: track.name,
+                artist: track.artists[0].name,
+                uri: track.uri
+            }));
+        },
+
+        // Get all tracks from a playlist
+        getPlaylistTracks: async function (playlistUri) {
+            const playlistId = playlistUri.split(':')[2];
+            const data = await _search(`playlists/${playlistId}/tracks`, { 
+                market: config.market,
+                limit: 100
+            });
+            
+            if (!data.items) {
+                return [];
+            }
+
+            return data.items.map(item => ({
+                name: item.track.name,
+                artist: item.track.artists[0].name,
+                uri: item.track.uri
+            }));
+        },
+
         searchTrackList: async function (term, limit) {
             const data = await _search('search', {
                 q: term,

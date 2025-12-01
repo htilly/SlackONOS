@@ -42,11 +42,12 @@ const { execSync } = require('child_process');
 const SLACK_API_URL_LIST = 'https://slack.com/api/conversations.list';
 const userActionsFile = path.join(__dirname, 'config/userActions.json');
 const blacklistFile = path.join(__dirname, 'config/blacklist.json');
+const trackBlacklistFile = path.join(__dirname, 'config/track-blacklist.json');
 const aiUnparsedFile = path.join(__dirname, 'config/ai-unparsed.log');
 const WinstonWrapper = require('./logger');
 const Telemetry = require('./telemetry');
 
-// Helper to load blacklist
+// Helper to load user blacklist
 function loadBlacklist() {
   try {
     if (fs.existsSync(blacklistFile)) {
@@ -59,13 +60,46 @@ function loadBlacklist() {
   return [];
 }
 
-// Helper to save blacklist
+// Helper to save user blacklist
 function saveBlacklist(list) {
   try {
     fs.writeFileSync(blacklistFile, JSON.stringify(list, null, 2));
   } catch (err) {
     logger.error('Error saving blacklist:', err);
   }
+}
+
+// Helper to load track blacklist
+function loadTrackBlacklist() {
+  try {
+    if (fs.existsSync(trackBlacklistFile)) {
+      const data = fs.readFileSync(trackBlacklistFile, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.error('Error loading track blacklist:', err);
+  }
+  return [];
+}
+
+// Helper to save track blacklist
+function saveTrackBlacklist(list) {
+  try {
+    fs.writeFileSync(trackBlacklistFile, JSON.stringify(list, null, 2));
+  } catch (err) {
+    logger.error('Error saving track blacklist:', err);
+  }
+}
+
+// Helper to check if track is blacklisted (case-insensitive partial match)
+function isTrackBlacklisted(trackName, artistName) {
+  const trackBlacklist = loadTrackBlacklist();
+  const fullTrackName = `${trackName} ${artistName}`.toLowerCase();
+  
+  return trackBlacklist.some(banned => {
+    const bannedLower = banned.toLowerCase();
+    return fullTrackName.includes(bannedLower) || trackName.toLowerCase().includes(bannedLower);
+  });
 }
 
 
@@ -221,8 +255,8 @@ if (config.get('soundcraftEnabled')) {
   await AIHandler.initialize(logger);
 })();
 
-/* Initialize Music Helper */
-musicHelper.initialize(spotify, logger);
+/* Initialize Music Helper with blacklist checker */
+musicHelper.initialize(spotify, logger, isTrackBlacklisted);
 
 const SlackSystem = require('./slack');
 const DiscordSystem = require('./discord');
@@ -870,6 +904,7 @@ const commandRegistry = new Map([
   ['setvolume', { fn: _setVolume, admin: true }],
   ['setconfig', { fn: _setconfig, admin: true, aliases: ['getconfig', 'config'] }],
   ['blacklist', { fn: _blacklist, admin: true }],
+  ['trackblacklist', { fn: _trackblacklist, admin: true, aliases: ['songblacklist', 'bantrack', 'bansong'] }],
   ['remove', { fn: (args, ch, u) => _removeTrack(args, ch), admin: true }],
   ['thanos', { fn: (args, ch, u) => _purgeHalfQueue(args, ch), admin: true, aliases: ['snap'] }],
   ['listimmune', { fn: (args, ch, u) => voting.listImmune(ch), admin: true }],
@@ -1127,6 +1162,14 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
             msg += ` for "${query}"`;
           }
           msg += ' 🎉';
+          
+          // Add warning about skipped tracks if any
+          if (result.skipped && result.skipped.length > 0) {
+            const skippedList = result.skipped.slice(0, 5).map(t => `*${t.name}*`).join(', ');
+            const moreText = result.skipped.length > 5 ? ` and ${result.skipped.length - 5} more` : '';
+            msg += `\n⚠️ Skipped ${result.skipped.length} blacklisted track(s): ${skippedList}${moreText}`;
+          }
+          
           _slackMessage(msg, channel);
           return;
         } catch (e) {
@@ -1204,6 +1247,14 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
               msg += ` for "${query}"`;
             }
             msg += ' 🎉';
+            
+            // Add warning about skipped tracks if any
+            if (result.skipped && result.skipped.length > 0) {
+              const skippedList = result.skipped.slice(0, 5).map(t => `*${t.name}*`).join(', ');
+              const moreText = result.skipped.length > 5 ? ` and ${result.skipped.length - 5} more` : '';
+              msg += `\n⚠️ Skipped ${result.skipped.length} blacklisted track(s): ${skippedList}${moreText}`;
+            }
+            
             _slackMessage(msg, channel);
             return;
           } catch (e) {
@@ -1237,14 +1288,21 @@ routeCommand = async function (text, channel, userName, platform = 'slack', isAd
   logger.info(`>>> routeCommand: text="${text}", isMention=${isMention}`);
 
   // Clean up copy-pasted text from Slack formatting FIRST
+  // Trim whitespace first
+  text = text.trim();
   // Remove leading quote marker ("> " or "&gt; ")
   text = text.replace(/^(&gt;|>)\s*/, '');
-  // Decode HTML entities
-  text = text.replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&');
-  // Remove Slack formatting markers (* for bold, _ for italic)
-  text = text.replace(/\*([^*]+)\*/g, '$1').replace(/_([^_]+)_/g, '$1');
+  // Decode HTML entities (including &quot; for quotes)
+  text = text.replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&').replace(/&quot;/g, '"');
+  // Remove Slack formatting markers (* for bold, _ for italic, ` for code)
+  text = text.replace(/\*([^*]+)\*/g, '$1').replace(/_([^_]+)_/g, '$1').replace(/`([^`]+)`/g, '$1');
+  // Also remove standalone backticks and underscores (from broken formatting)
+  text = text.replace(/[`_]/g, '');
   // Remove leading numbers from search results (e.g., "1. " -> "")
   text = text.replace(/^\d+\.\s*/, '');
+  // Remove any remaining leading > or &gt; after number removal
+  text = text.replace(/^(&gt;|>)\s*/, '');
+  // Final trim
   text = text.trim();
 
   logger.info(`>>> routeCommand: cleaned text="${text}"`);
@@ -2043,6 +2101,13 @@ async function _add(input, channel, userName) {
 
   try {
     const result = await spotify.getTrack(track);
+    
+    // Check if track is blacklisted
+    if (isTrackBlacklisted(result.name, result.artist)) {
+      logger.info(`Track blocked by blacklist: ${result.name} by ${result.artist}`);
+      _slackMessage(`🚫 Sorry, *${result.name}* by ${result.artist} is on the blacklist and cannot be added.`, channel);
+      return;
+    }
 
     // Get current player state
     const state = await sonos.getCurrentState();
@@ -2137,13 +2202,37 @@ async function _addalbum(input, channel, userName) {
 
   try {
     const result = await spotify.getAlbum(album);
+    
+    // Check for blacklisted tracks in the album
+    const albumTracks = await spotify.getAlbumTracks(result.uri);
+    const blacklistedTracks = albumTracks.filter(track => 
+      isTrackBlacklisted(track.name, track.artist)
+    );
+    
+    // If ALL tracks are blacklisted, don't add anything
+    if (blacklistedTracks.length > 0 && blacklistedTracks.length === albumTracks.length) {
+      _slackMessage(
+        `🚫 Cannot add album *${result.name}* - all ${albumTracks.length} tracks are blacklisted!`,
+        channel
+      );
+      return;
+    }
+    
+    let warningMessage = '';
+    if (blacklistedTracks.length > 0) {
+      const bannedList = blacklistedTracks.map(t => `*${t.name}*`).join(', ');
+      warningMessage = `\n⚠️ Skipped ${blacklistedTracks.length} blacklisted track(s): ${bannedList}`;
+      logger.info(`Filtering out ${blacklistedTracks.length} blacklisted tracks from album ${result.name}`);
+    }
 
     // Get current player state
     const state = await sonos.getCurrentState();
     logger.info('Current state for addalbum: ' + state);
+    
+    const isStopped = state === 'stopped';
 
     // If stopped, flush the queue to start fresh
-    if (state === 'stopped') {
+    if (isStopped) {
       logger.info('Player stopped - flushing queue and starting fresh');
       try {
         await sonos.flush();
@@ -2151,55 +2240,46 @@ async function _addalbum(input, channel, userName) {
       } catch (flushErr) {
         logger.warn('Could not flush queue: ' + flushErr.message);
       }
-
-      await sonos.queue(result.uri);
-      logger.info('Added album: ' + result.name);
-
-      // Wait a moment before starting playback
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      await sonos.play();
-
-      let text = 'Started fresh! Added album ' + '*' + result.name + '*' + ' by ' + result.artist + ' and began playback. :notes:';
-
-      if (result.coverUrl) {
-        _slackMessage(text, channel, {
-          blocks: [
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: text
-              },
-              accessory: {
-                type: "image",
-                image_url: result.coverUrl,
-                alt_text: result.name + " cover"
-              }
-            }
-          ]
-        });
-      } else {
-        _slackMessage(text, channel);
-      }
-      return;
     }
 
-    // For playing/paused/transitioning states, just add to queue
-    await sonos.queue(result.uri);
-    logger.info('Added album: ' + result.name);
+    // If we have blacklisted tracks, add individually; otherwise use album URI
+    if (blacklistedTracks.length > 0) {
+      const allowedTracks = albumTracks.filter(track => 
+        !isTrackBlacklisted(track.name, track.artist)
+      );
+      
+      // Add allowed tracks individually
+      for (const track of allowedTracks) {
+        await sonos.queue(track.uri);
+      }
+      logger.info(`Added ${allowedTracks.length} tracks from album (filtered ${blacklistedTracks.length})`);
+    } else {
+      // No blacklisted tracks, add entire album via URI (more efficient)
+      await sonos.queue(result.uri);
+      logger.info('Added album: ' + result.name);
+    }
 
-    let text = 'Added album ' + '*' + result.name + '*' + ' by ' + result.artist + ' to the queue.';
-
-    // Auto-play if player was paused or in another non-playing state
-    if (state !== 'playing' && state !== 'transitioning') {
+    // Start playback if needed
+    if (isStopped) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await sonos.play();
+    } else if (state !== 'playing' && state !== 'transitioning') {
       try {
         await sonos.play();
         logger.info('Player was not playing, started playback.');
-        text += ' Playback started! :notes:';
       } catch (playErr) {
         logger.warn('Failed to auto-play: ' + playErr.message);
       }
     }
+
+    const trackCountText = blacklistedTracks.length > 0 
+      ? `${albumTracks.length - blacklistedTracks.length} tracks from album` 
+      : 'album';
+    let text = isStopped 
+      ? `Started fresh! Added ${trackCountText} *${result.name}* by ${result.artist} and began playback. :notes:`
+      : `Added ${trackCountText} *${result.name}* by ${result.artist} to the queue.`;
+    
+    text += warningMessage;
 
     if (result.coverUrl) {
       _slackMessage(text, channel, {
@@ -2285,13 +2365,38 @@ async function _addplaylist(input, channel, userName) {
         throw new Error('Playlist not found');
       }
     }
+    
+    // Check for blacklisted tracks in the playlist
+    const playlistTracks = await spotify.getPlaylistTracks(result.uri);
+    const blacklistedTracks = playlistTracks.filter(track => 
+      isTrackBlacklisted(track.name, track.artist)
+    );
+    
+    // If ALL tracks are blacklisted, don't add anything
+    if (blacklistedTracks.length > 0 && blacklistedTracks.length === playlistTracks.length) {
+      _slackMessage(
+        `🚫 Cannot add playlist *${result.name}* - all ${playlistTracks.length} tracks are blacklisted!`,
+        channel
+      );
+      return;
+    }
+    
+    let warningMessage = '';
+    if (blacklistedTracks.length > 0) {
+      const bannedList = blacklistedTracks.slice(0, 5).map(t => `*${t.name}*`).join(', ');
+      const moreText = blacklistedTracks.length > 5 ? ` and ${blacklistedTracks.length - 5} more` : '';
+      warningMessage = `\n⚠️ Skipped ${blacklistedTracks.length} blacklisted track(s): ${bannedList}${moreText}`;
+      logger.info(`Filtering out ${blacklistedTracks.length} blacklisted tracks from playlist ${result.name}`);
+    }
 
     // Get current player state
     const state = await sonos.getCurrentState();
     logger.info('Current state for addplaylist: ' + state);
+    
+    const isStopped = state === 'stopped';
 
     // If stopped, flush the queue to start fresh
-    if (state === 'stopped') {
+    if (isStopped) {
       logger.info('Player stopped - flushing queue and starting fresh');
       try {
         await sonos.flush();
@@ -2299,39 +2404,48 @@ async function _addplaylist(input, channel, userName) {
       } catch (flushErr) {
         logger.warn('Could not flush queue: ' + flushErr.message);
       }
-
-      await sonos.queue(result.uri);
-      logger.info('Added playlist: ' + result.name);
-
-      // Wait a moment before starting playback
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      await sonos.play();
-
-      _slackMessage(
-        'Started fresh! Added playlist ' + '*' + result.name + '*' + ' by ' + result.owner + ' and began playback. :notes:',
-        channel
-      );
-      return;
     }
 
-    // For playing/paused/transitioning states, just add to queue
-    await sonos.queue(result.uri);
-    logger.info('Added playlist: ' + result.name);
+    // If we have blacklisted tracks, add individually; otherwise use playlist URI
+    if (blacklistedTracks.length > 0) {
+      const allowedTracks = playlistTracks.filter(track => 
+        !isTrackBlacklisted(track.name, track.artist)
+      );
+      
+      // Add allowed tracks individually
+      for (const track of allowedTracks) {
+        await sonos.queue(track.uri);
+      }
+      logger.info(`Added ${allowedTracks.length} tracks from playlist (filtered ${blacklistedTracks.length})`);
+    } else {
+      // No blacklisted tracks, add entire playlist via URI (more efficient)
+      await sonos.queue(result.uri);
+      logger.info('Added playlist: ' + result.name);
+    }
 
-    let msg = 'Added playlist ' + '*' + result.name + '*' + ' by ' + result.owner + ' to the queue.';
-
-    // Auto-play if player was paused or in another non-playing state
-    if (state !== 'playing' && state !== 'transitioning') {
+    // Start playback if needed
+    if (isStopped) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await sonos.play();
+    } else if (state !== 'playing' && state !== 'transitioning') {
       try {
         await sonos.play();
         logger.info('Player was not playing, started playback.');
-        msg += ' Playback started! :notes:';
       } catch (playErr) {
         logger.warn('Failed to auto-play: ' + playErr.message);
       }
     }
 
-    _slackMessage(msg, channel);
+    const trackCountText = blacklistedTracks.length > 0 
+      ? `${playlistTracks.length - blacklistedTracks.length} tracks from playlist` 
+      : 'playlist';
+    let text = isStopped 
+      ? `Started fresh! Added ${trackCountText} *${result.name}* by ${result.owner} and began playback. :notes:`
+      : `Added ${trackCountText} *${result.name}* by ${result.owner} to the queue.`;
+    
+    text += warningMessage;
+    logger.info(`Sending playlist confirmation message: ${text}`);
+    _slackMessage(text, channel);
   } catch (err) {
     logger.error('Error adding playlist: ' + err.message);
     _slackMessage('🔎 Couldn\'t find that playlist. Try a Spotify link, or use `searchplaylist <name>` to pick one. 🎵', channel);
@@ -2794,6 +2908,52 @@ function _blacklist(input, channel, userName) {
   }
 
   saveBlacklist(blacklist);
+}
+
+function _trackblacklist(input, channel, userName) {
+  _logUserAction(userName, 'trackblacklist');
+  // Admin check now handled in processInput (platform-aware)
+  
+  const trackBlacklist = loadTrackBlacklist();
+  
+  if (!input || input.length < 2) {
+    if (trackBlacklist.length === 0) {
+      _slackMessage('The track blacklist is currently empty. All songs are allowed! 🎵', channel);
+    } else {
+      const trackList = trackBlacklist.map((t, i) => `${i + 1}. ${t}`).join('\n');
+      _slackMessage(`*🚫 Blacklisted Tracks/Artists:*\n${trackList}\n\n_To add/remove, use \`trackblacklist add <name>\` or \`trackblacklist remove <name>\`_`, channel);
+    }
+    return;
+  }
+  
+  const action = input[1].toLowerCase();
+  const trackName = input.slice(2).join(' ').trim();
+  
+  if (!trackName && (action === 'add' || action === 'remove')) {
+    _slackMessage('🤔 Please specify a track or artist name! Example: `trackblacklist add Last Christmas`', channel);
+    return;
+  }
+  
+  if (action === 'add') {
+    if (trackBlacklist.some(t => t.toLowerCase() === trackName.toLowerCase())) {
+      _slackMessage(`"${trackName}" is already on the blacklist! 🚫`, channel);
+      return;
+    }
+    trackBlacklist.push(trackName);
+    saveTrackBlacklist(trackBlacklist);
+    _slackMessage(`✅ "${trackName}" has been added to the track blacklist! This track/artist can no longer be added. 🚫🎵`, channel);
+  } else if (action === 'remove') {
+    const index = trackBlacklist.findIndex(t => t.toLowerCase() === trackName.toLowerCase());
+    if (index === -1) {
+      _slackMessage(`"${trackName}" is not on the blacklist! 🤷`, channel);
+      return;
+    }
+    trackBlacklist.splice(index, 1);
+    saveTrackBlacklist(trackBlacklist);
+    _slackMessage(`✅ "${trackName}" has been removed from the track blacklist! This track/artist can now be added again. 🎉`, channel);
+  } else {
+    _slackMessage('Invalid action! Use `trackblacklist add <name>` or `trackblacklist remove <name>` 📝', channel);
+  }
 }
 
 function _setconfig(input, channel, userName) {

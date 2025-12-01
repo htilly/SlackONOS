@@ -13,6 +13,9 @@
 > `move [from] [to]` (or `mv`) - Move a track from one position to another.
 > `thanos` (or `snap`) - Randomly remove half the queue. 💀
 > `blacklist [user]` - Ban/unban a user. Run without args to list blocked users. 🚫
+> `trackblacklist` - List all blacklisted tracks/artists. 🎵🚫
+> `trackblacklist add <name>` - Block a track or artist (e.g., "Last Christmas").
+> `trackblacklist remove <name>` - Unblock a track or artist.
 > `listimmune` - List all tracks currently immune to GONG.
 
 *⚙️ System & Config:*
