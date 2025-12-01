@@ -398,7 +398,9 @@ function ensureConfigDefaults() {
     market: 'US',
     useLegacyBot: false,
     logLevel: 'info',
-    // AI summary style
+    // AI features
+    defaultTheme: '',
+    themePercentage: 0,
     aiPrompt: 'You are a funny, upbeat DJ for a Slack music bot controlling Sonos. Reply with a super short, playful one-liner that confirms what you\'ll do, using casual humor and emojis when appropriate.'
   };
   const applied = [];
