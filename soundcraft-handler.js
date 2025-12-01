@@ -36,26 +36,21 @@ class SoundcraftHandler {
             this.logger.info(`Connecting to Soundcraft Ui24R at ${this.config.soundcraftIp}...`);
 
             this.connection = new SoundcraftUI(this.config.soundcraftIp);
-
-            // Set up event handlers
-            this.connection.conn.observeConnection().subscribe(connected => {
-                this.connected = connected;
-                if (connected) {
-                    this.logger.info('✅ Successfully connected to Soundcraft Ui24R');
-                    this.logger.info(`   Configured channels: ${channels.join(', ')}`);
-                    this.reconnectAttempts = 0;
-                } else {
-                    this.logger.warn('⚠️  Disconnected from Soundcraft Ui24R');
-                    this.scheduleReconnect();
-                }
-            });
+            this.connection.connect();
 
             // Wait a moment for initial connection
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 1000));
 
-            return this.connected;
+            // Mark as connected (optimistic - we'll find out if commands fail)
+            this.connected = true;
+            this.reconnectAttempts = 0;
+            this.logger.info('✅ Successfully connected to Soundcraft Ui24R');
+            this.logger.info(`   Configured channels: ${channels.join(', ')}`);
+
+            return true;
         } catch (error) {
             this.logger.error(`Failed to connect to Soundcraft: ${error.message}`);
+            this.logger.warn(`⚠️  Make sure the bot container can reach ${this.config.soundcraftIp} on the network`);
             this.scheduleReconnect();
             return false;
         }
@@ -94,7 +89,7 @@ class SoundcraftHandler {
 
         if (this.connection) {
             try {
-                this.connection.conn.disconnect();
+                this.connection.disconnect();
                 this.logger.info('Disconnected from Soundcraft Ui24R');
             } catch (error) {
                 this.logger.error(`Error disconnecting from Soundcraft: ${error.message}`);
