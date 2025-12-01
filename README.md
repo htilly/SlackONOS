@@ -59,6 +59,7 @@ services:
 ```
 
 📖 **[Complete Discord Setup Guide](DISCORD.md)** - Step-by-step Discord bot configuration
+📖 **[Complete Slack Setup Guide](SLACK.md)** - Socket Mode Slack bot setup (tokens, scopes, events)
 
 ---
 
