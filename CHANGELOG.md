@@ -7,8 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2025-12-02
+
 ### Added
-- **Soundcraft Ui24R Integration** - Control mixer volume on multiple buses (master, aux, fx, or custom named channels) directly from Slack/Discord
+- **Track Blacklist System** - Block specific tracks or artists from being added to the queue
+  - `trackblacklist` command for adding/removing blacklisted tracks (admin-only)
+  - Case-insensitive partial matching (blocks "Last Christmas" variations)
+  - Persistent storage in `config/track-blacklist.json`
+  - Works with all add methods: individual tracks, albums, playlists, and AI-generated lists
+- **Album/Playlist Filtering** - Smart filtering instead of blocking entire collections
+  - Automatically filters out blacklisted tracks from albums and playlists
+  - Shows warning message with skipped track names (up to 5 listed)
+  - Adds remaining tracks individually when filtering is needed
+- **AI Blacklist Integration** - AI-generated music requests now respect blacklist
+  - Music helper module checks blacklist before queueing tracks
+  - Reports skipped tracks in success message
+- **PostHog Telemetry** - Anonymous usage tracking for development insights
+  - Migrated from Plausible to PostHog SDK (posthog-node v4.3.0)
+  - Tracks startup, heartbeat (24h), and shutdown events
+  - Includes OS platform, Node version, and market info
+  - Fully documented in TELEMETRY.md with privacy details
+  - Opt-out via `telemetryEnabled: false` in config
+- **Soundcraft Ui24R Integration** - Control mixer volume on multiple buses directly from Slack/Discord
   - Multi-bus support with named channels (e.g., `setvolume receptionen 30`)
   - WebSocket-based real-time connection with auto-reconnection
   - Configuration via `soundcraftEnabled`, `soundcraftIp`, `soundcraftChannels`
@@ -16,12 +36,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Channel ID Support** - Use Slack channel IDs directly in config to avoid rate limits in large workspaces (100+ channels)
 - **Auto-save Channel IDs** - After first successful lookup by name, IDs are automatically saved to config.json for instant future startups
 - **Smart Channel Lookup** - Detects if config uses IDs vs names; warns when scanning all channels
+- **Comprehensive Test Suite** - 138 passing tests covering text cleaning, voting, parsing, and integrations
+  - Text cleaning tests for Slack formatting (backticks, HTML entities, quotes)
+  - Voting system tests with dynamic config changes
+  - Integration tests for command logic and Spotify API
 
 ### Changed
 - `setvolume` command now supports both Sonos (`setvolume 50`) and Soundcraft (`setvolume master 50`) syntax
 - Channel lookup now skips API pagination if IDs are used directly
 - Config file auto-updates with discovered IDs after first successful name-based lookup
-- Added helpful warnings and tips for large workspace optimization
+- Text cleaning improvements: removes backticks, HTML entities (&gt;, &lt;, &amp;, &quot;), quote markers, number prefixes
+- Music helper module now accepts optional blacklist checker function
+- Album and playlist commands show track count and skipped tracks in messages
+
+### Fixed
+- Slack Socket Mode auto-reconnect prevents crashes on disconnect
+- Build.txt dependency removed (was causing ENOENT errors)
+- Variable redeclaration errors in album/playlist refactoring
+- Private channel IDs (G...) now supported in channel lookup
+- Soundcraft API calls corrected for aux/fx bus control
+- ARM v7 platform support for Raspberry Pi deployments
 
 ## [1.5.0] - 2025-11-30
 
@@ -97,7 +131,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/htilly/SlackONOS/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/htilly/SlackONOS/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/htilly/SlackONOS/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/htilly/SlackONOS/compare/v1.4.0...v1.5.0
 [1.5.0]: https://github.com/htilly/SlackONOS/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/htilly/SlackONOS/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/htilly/SlackONOS/compare/v1.2.0...v1.3.0
