@@ -135,7 +135,7 @@ class SoundcraftHandler {
     /**
      * Set volume for a specific channel
      * @param {string} channelName - Name of the channel (e.g., 'master', 'receptionen')
-     * @param {number} volume - Volume level (0-100)
+     * @param {number} volume - Volume level in dB (-100 to 0)
      * @returns {Promise<boolean>} Success status
      */
     async setVolume(channelName, volume) {
@@ -150,16 +150,13 @@ class SoundcraftHandler {
             return false;
         }
 
-        // Validate volume range
-        if (volume < 0 || volume > 100) {
-            this.logger.error(`Invalid volume: ${volume}. Must be between 0 and 100`);
+        // Validate volume range (dB)
+        if (volume < -100 || volume > 0) {
+            this.logger.error(`Invalid volume: ${volume} dB. Must be between -100 and 0`);
             return false;
         }
 
         try {
-            // Convert volume from 0-100 to 0-1 range (fader level)
-            const faderLevel = volume / 100;
-
             // Resolve the actual bus ID
             let busId = this._resolveBusId(channelName);
 
@@ -176,16 +173,16 @@ class SoundcraftHandler {
             }
 
             busId = busId.toLowerCase();
-            this.logger.info(`Setting Soundcraft channel '${channelName}' (bus: ${busId}) to ${volume}% (fader: ${faderLevel.toFixed(2)})`);
+            this.logger.info(`Setting Soundcraft channel '${channelName}' (bus: ${busId}) to ${volume} dB`);
 
             if (busId === 'master') {
-                this.connection.master.setFaderLevel(faderLevel);
+                this.connection.master.setFaderLevelDB(volume);
             } else if (busId.startsWith('aux')) {
                 const auxNumber = parseInt(busId.replace('aux', '')) || 1;
-                this.connection.aux(auxNumber - 1).setFaderLevel(faderLevel);
+                this.connection.aux(auxNumber).setFaderLevelDB(volume);
             } else if (busId.startsWith('fx')) {
                 const fxNumber = parseInt(busId.replace('fx', '')) || 1;
-                this.connection.fx(fxNumber - 1).setFaderLevel(faderLevel);
+                this.connection.fx(fxNumber).setFaderLevelDB(volume);
             } else {
                 this.logger.error(`Unknown bus type: ${busId}`);
                 return false;

@@ -163,10 +163,22 @@ const spotify = Spotify({
 
 /* Initialize Soundcraft Handler */
 const SoundcraftHandler = require('./soundcraft-handler');
+
+// Parse soundcraftChannels if it's a string (from config file)
+let soundcraftChannels = config.get('soundcraftChannels') || [];
+if (typeof soundcraftChannels === 'string') {
+  try {
+    soundcraftChannels = JSON.parse(soundcraftChannels);
+  } catch (e) {
+    logger.error('Failed to parse soundcraftChannels config: ' + e.message);
+    soundcraftChannels = [];
+  }
+}
+
 const soundcraft = new SoundcraftHandler({
   soundcraftEnabled: config.get('soundcraftEnabled') || false,
   soundcraftIp: config.get('soundcraftIp'),
-  soundcraftChannels: config.get('soundcraftChannels') || []
+  soundcraftChannels: soundcraftChannels
 }, logger);
 
 // Connect to Soundcraft mixer if enabled
@@ -1386,12 +1398,16 @@ function _setVolume(input, channel, userName) {
         return;
       }
 
-      logger.info(`Setting Soundcraft channel '${possibleChannelName}' to ${vol}%`);
+      // Convert 0-100 scale to dB (-100 to 0)
+      // 0 = -100 dB (silent), 100 = 0 dB (max)
+      const volDB = (vol - 100);
+      
+      logger.info(`Setting Soundcraft channel '${possibleChannelName}' to ${vol}% (${volDB} dB)`);
 
-      soundcraft.setVolume(possibleChannelName, vol)
+      soundcraft.setVolume(possibleChannelName, volDB)
         .then(success => {
           if (success) {
-            _slackMessage(`🔊 Soundcraft channel *${possibleChannelName}* volume set to *${vol}%*`, channel);
+            _slackMessage(`🔊 Soundcraft channel *${possibleChannelName}* volume set to *${vol}%* (${volDB} dB)`, channel);
           } else {
             _slackMessage(`❌ Failed to set Soundcraft volume. Check logs for details.`, channel);
           }
@@ -1866,7 +1882,7 @@ async function _debug(channel, userName) {
       (() => {
         const enabled = config.get('soundcraftEnabled');
         const ip = config.get('soundcraftIp');
-        const channels = config.get('soundcraftChannels') || [];
+        const channelNames = soundcraft.getChannelNames();
         const connected = soundcraft.isEnabled();
 
         if (!enabled) {
@@ -1877,7 +1893,7 @@ async function _debug(channel, userName) {
           `> Enabled: true\n` +
           `> IP Address: ${ip || 'not configured'}\n` +
           `> Connected: ${connected ? '✅ Yes' : '❌ No'}\n` +
-          `> Configured Channels: ${channels.length > 0 ? channels.join(', ') : 'none'}\n`
+          `> Configured Channels: ${channelNames.length > 0 ? channelNames.join(', ') : 'none'}\n`
         );
       })();
 
