@@ -1,9 +1,9 @@
 const { SoundcraftUI } = require('soundcraft-ui-connection');
-const logger = require('./logger');
 
 class SoundcraftHandler {
-    constructor(config) {
+    constructor(config, logger) {
         this.config = config;
+        this.logger = logger;
         this.connection = null;
         this.connected = false;
         this.reconnectTimeout = null;
@@ -17,23 +17,23 @@ class SoundcraftHandler {
      */
     async connect() {
         if (!this.config.soundcraftEnabled) {
-            logger.info('Soundcraft integration disabled in config');
+            this.logger.info('Soundcraft integration disabled in config');
             return false;
         }
 
         if (!this.config.soundcraftIp) {
-            logger.error('Soundcraft IP address not configured');
+            this.logger.error('Soundcraft IP address not configured');
             return false;
         }
 
         const channels = this.getChannelNames();
         if (channels.length === 0) {
-            logger.error('No Soundcraft channels configured');
+            this.logger.error('No Soundcraft channels configured');
             return false;
         }
 
         try {
-            logger.info(`Connecting to Soundcraft Ui24R at ${this.config.soundcraftIp}...`);
+            this.logger.info(`Connecting to Soundcraft Ui24R at ${this.config.soundcraftIp}...`);
 
             this.connection = new SoundcraftUI(this.config.soundcraftIp);
 
@@ -41,11 +41,11 @@ class SoundcraftHandler {
             this.connection.conn.observeConnection().subscribe(connected => {
                 this.connected = connected;
                 if (connected) {
-                    logger.info('✅ Successfully connected to Soundcraft Ui24R');
-                    logger.info(`   Configured channels: ${channels.join(', ')}`);
+                    this.logger.info('✅ Successfully connected to Soundcraft Ui24R');
+                    this.logger.info(`   Configured channels: ${channels.join(', ')}`);
                     this.reconnectAttempts = 0;
                 } else {
-                    logger.warn('⚠️  Disconnected from Soundcraft Ui24R');
+                    this.logger.warn('⚠️  Disconnected from Soundcraft Ui24R');
                     this.scheduleReconnect();
                 }
             });
@@ -55,7 +55,7 @@ class SoundcraftHandler {
 
             return this.connected;
         } catch (error) {
-            logger.error(`Failed to connect to Soundcraft: ${error.message}`);
+            this.logger.error(`Failed to connect to Soundcraft: ${error.message}`);
             this.scheduleReconnect();
             return false;
         }
@@ -66,7 +66,7 @@ class SoundcraftHandler {
      */
     scheduleReconnect() {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            logger.error(`Max reconnection attempts (${this.maxReconnectAttempts}) reached. Giving up.`);
+            this.logger.error(`Max reconnection attempts (${this.maxReconnectAttempts}) reached. Giving up.`);
             return;
         }
 
@@ -75,7 +75,7 @@ class SoundcraftHandler {
         }
 
         this.reconnectAttempts++;
-        logger.info(`Scheduling reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${this.reconnectDelay / 1000}s...`);
+        this.logger.info(`Scheduling reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${this.reconnectDelay / 1000}s...`);
 
         this.reconnectTimeout = setTimeout(() => {
             this.reconnectTimeout = null;
@@ -95,9 +95,9 @@ class SoundcraftHandler {
         if (this.connection) {
             try {
                 this.connection.conn.disconnect();
-                logger.info('Disconnected from Soundcraft Ui24R');
+                this.logger.info('Disconnected from Soundcraft Ui24R');
             } catch (error) {
-                logger.error(`Error disconnecting from Soundcraft: ${error.message}`);
+                this.logger.error(`Error disconnecting from Soundcraft: ${error.message}`);
             }
             this.connection = null;
         }
@@ -145,19 +145,19 @@ class SoundcraftHandler {
      */
     async setVolume(channelName, volume) {
         if (!this.connected || !this.connection) {
-            logger.error('Not connected to Soundcraft mixer');
+            this.logger.error('Not connected to Soundcraft mixer');
             return false;
         }
 
         const availableChannels = this.getChannelNames();
         if (!availableChannels.includes(channelName)) {
-            logger.error(`Invalid channel name: ${channelName}. Available channels: ${availableChannels.join(', ')}`);
+            this.logger.error(`Invalid channel name: ${channelName}. Available channels: ${availableChannels.join(', ')}`);
             return false;
         }
 
         // Validate volume range
         if (volume < 0 || volume > 100) {
-            logger.error(`Invalid volume: ${volume}. Must be between 0 and 100`);
+            this.logger.error(`Invalid volume: ${volume}. Must be between 0 and 100`);
             return false;
         }
 
@@ -175,13 +175,13 @@ class SoundcraftHandler {
                 if (lowerName === 'master' || lowerName.startsWith('aux') || lowerName.startsWith('fx')) {
                     busId = lowerName;
                 } else {
-                    logger.error(`Could not resolve bus ID for channel '${channelName}'`);
+                    this.logger.error(`Could not resolve bus ID for channel '${channelName}'`);
                     return false;
                 }
             }
 
             busId = busId.toLowerCase();
-            logger.info(`Setting Soundcraft channel '${channelName}' (bus: ${busId}) to ${volume}% (fader: ${faderLevel.toFixed(2)})`);
+            this.logger.info(`Setting Soundcraft channel '${channelName}' (bus: ${busId}) to ${volume}% (fader: ${faderLevel.toFixed(2)})`);
 
             if (busId === 'master') {
                 this.connection.master.setFaderLevel(faderLevel);
@@ -192,14 +192,14 @@ class SoundcraftHandler {
                 const fxNumber = parseInt(busId.replace('fx', '')) || 1;
                 this.connection.fx(fxNumber - 1).setFaderLevel(faderLevel);
             } else {
-                logger.error(`Unknown bus type: ${busId}`);
+                this.logger.error(`Unknown bus type: ${busId}`);
                 return false;
             }
 
-            logger.info(`✅ Soundcraft volume set successfully`);
+            this.logger.info(`✅ Soundcraft volume set successfully`);
             return true;
         } catch (error) {
-            logger.error(`Failed to set Soundcraft volume: ${error.message}`);
+            this.logger.error(`Failed to set Soundcraft volume: ${error.message}`);
             return false;
         }
     }
@@ -211,13 +211,13 @@ class SoundcraftHandler {
      */
     async getVolume(channelName) {
         if (!this.connected || !this.connection) {
-            logger.error('Not connected to Soundcraft mixer');
+            this.logger.error('Not connected to Soundcraft mixer');
             return null;
         }
 
         const availableChannels = this.getChannelNames();
         if (!availableChannels.includes(channelName)) {
-            logger.error(`Invalid channel name: ${channelName}`);
+            this.logger.error(`Invalid channel name: ${channelName}`);
             return null;
         }
 
@@ -260,7 +260,7 @@ class SoundcraftHandler {
             // Convert from 0-1 to 0-100
             return Math.round(faderLevel * 100);
         } catch (error) {
-            logger.error(`Failed to get Soundcraft volume: ${error.message}`);
+            this.logger.error(`Failed to get Soundcraft volume: ${error.message}`);
             return null;
         }
     }

@@ -167,7 +167,7 @@ const soundcraft = new SoundcraftHandler({
   soundcraftEnabled: config.get('soundcraftEnabled') || false,
   soundcraftIp: config.get('soundcraftIp'),
   soundcraftChannels: config.get('soundcraftChannels') || []
-});
+}, logger);
 
 // Connect to Soundcraft mixer if enabled
 if (config.get('soundcraftEnabled')) {
