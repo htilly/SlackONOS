@@ -251,9 +251,10 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Helper: Check if a string is a Slack channel ID (format: C followed by alphanumeric)
+// Helper: Check if a string is a Slack channel ID (format: C or G followed by alphanumeric)
+// C = public channel, G = private channel/group
 function isChannelId(str) {
-  return /^C[A-Z0-9]{8,}$/i.test(str);
+  return /^[CG][A-Z0-9]{8,}$/i.test(str);
 }
 
 // Function to fetch the channel IDs - optimized to avoid full workspace scan
