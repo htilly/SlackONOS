@@ -19,7 +19,8 @@
 > `setconfig [key] [value]` (or `getconfig`) - View/change bot settings.
 {{configValues}}
 > `configdump` (or `cfgdump`) - Print all current config values (tokens/secrets masked).
-> `debug` - Show build number and system info.
+> `debug` - Show release version and system info.
+> `telemetry` - Show telemetry status and privacy information.
 > `stats` - Show usage statistics for all users.
 > `stats [user]` - Show usage statistics for a specific user.
 

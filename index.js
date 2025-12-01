@@ -16,13 +16,35 @@ const musicHelper = require('./music-helper');
 const gongMessage = fs.readFileSync('gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('vote.txt', 'utf8').split('\n').filter(Boolean);
 const ttsMessage = fs.readFileSync('tts.txt', 'utf8').split('\n').filter(Boolean);
-const buildNumber = Number(fs.readFileSync('build.txt', 'utf8').split('\n').filter(Boolean)[0]);
+
+// Try to get release tag from GitHub Actions (e.g., GITHUB_REF=refs/tags/v1.2.3)
+const getReleaseVersion = () => {
+  // 1. GitHub release tag (from GitHub Actions)
+  const githubRef = process.env.GITHUB_REF || '';
+  const tagMatch = githubRef.match(/refs\/tags\/(.+)$/);
+  if (tagMatch) {
+    return tagMatch[1]; // e.g., "v1.2.3"
+  }
+  
+  // 2. Git commit SHA (for native/local development)
+  try {
+    const sha = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+    return `dev-${sha}`; // e.g., "dev-a3f2b1c"
+  } catch (e) {
+    // 3. Fallback for Docker/no git (use package.json version)
+    const pkgVersion = require('./package.json').version;
+    return `${pkgVersion}-dev`; // e.g., "1.0.0-dev"
+  }
+};
+const releaseVersion = getReleaseVersion();
+
 const { execSync } = require('child_process');
 const SLACK_API_URL_LIST = 'https://slack.com/api/conversations.list';
 const userActionsFile = path.join(__dirname, 'config/userActions.json');
 const blacklistFile = path.join(__dirname, 'config/blacklist.json');
 const aiUnparsedFile = path.join(__dirname, 'config/ai-unparsed.log');
 const WinstonWrapper = require('./logger');
+const Telemetry = require('./telemetry');
 
 // Helper to load blacklist
 function loadBlacklist() {
@@ -64,7 +86,10 @@ config.argv()
     blacklist: [],
     searchLimit: 7,
     webPort: 8181,
-    logLevel: 'info'
+    logLevel: 'info',
+    telemetryEnabled: true,
+    telemetryEndpoint: 'https://plausible.io/api/event',
+    telemetryDomain: 'slackonos.app'
   });
 
 // Application Config Values (let for runtime changes)
@@ -72,6 +97,9 @@ let gongLimit = config.get('gongLimit');
 let voteImmuneLimit = config.get('voteImmuneLimit');
 let voteLimit = config.get('voteLimit');
 let flushVoteLimit = config.get('flushVoteLimit');
+
+// Global telemetry instance (for shutdown handler access)
+let telemetry = null;
 let maxVolume = config.get('maxVolume');
 let voteTimeLimitMinutes = config.get('voteTimeLimitMinutes') || 5;
 const logLevel = config.get('logLevel');
@@ -672,6 +700,19 @@ async function _checkSystemHealth() {
     } else {
       logger.info('✅ System health check passed.');
 
+      // Initialize and send telemetry
+      telemetry = new Telemetry({
+        get: (key) => config.get(key), // Pass config getter for runtime lookups
+        telemetryEnabled: config.get('telemetryEnabled'),
+        telemetryEndpoint: config.get('telemetryEndpoint'),
+        telemetryDomain: config.get('telemetryDomain'),
+        logger: logger
+      });
+      await telemetry.trackStartup(require('./package.json').version, releaseVersion);
+      
+      // Start heartbeat (24-hour interval)
+      telemetry.startHeartbeat(require('./package.json').version, releaseVersion);
+
       // Log Soundcraft status if enabled
       if (config.get('soundcraftEnabled')) {
         if (soundcraft.isEnabled()) {
@@ -685,6 +726,23 @@ async function _checkSystemHealth() {
     }
 
     logger.info('🚀 System startup complete.');
+    
+    // Register shutdown handlers for graceful telemetry tracking
+    const gracefulShutdown = async (signal) => {
+      logger.info(`${signal} received. Sending shutdown telemetry...`);
+      
+      if (telemetry) {
+        await telemetry.trackShutdown(require('./package.json').version, releaseVersion);
+        await telemetry.shutdown(); // Flush pending events
+      }
+      
+      logger.info('Shutdown complete.');
+      process.exit(0);
+    };
+    
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    
   } catch (err) {
     logger.error('⛔️ STARTUP FAILED: ' + err.message);
     process.exit(1);
@@ -799,6 +857,7 @@ const commandRegistry = new Map([
 
   // Admin-only commands
   ['debug', { fn: (args, ch, u) => _debug(ch, u), admin: true }],
+  ['telemetry', { fn: (args, ch, u) => _telemetryStatus(ch), admin: true }],
   ['next', { fn: (args, ch, u) => _nextTrack(ch, u), admin: true }],
   ['stop', { fn: _stop, admin: true }],
   ['flush', { fn: _flush, admin: true }],
@@ -1641,6 +1700,23 @@ async function _bestof(input, channel, userName) {
       return;
     }
 
+    // If player is stopped, flush the queue to start fresh before adding
+    try {
+      const stateBefore = await sonos.getCurrentState();
+      logger.info('Current state before bestof queueing: ' + stateBefore);
+      if (stateBefore === 'stopped') {
+        logger.info('Player stopped - flushing queue before BESTOF');
+        try {
+          await sonos.flush();
+          logger.info('Queue flushed (BESTOF)');
+        } catch (flushErr) {
+          logger.warn('Could not flush queue (BESTOF): ' + flushErr.message);
+        }
+      }
+    } catch (stateErr) {
+      logger.warn('Could not determine player state before BESTOF: ' + stateErr.message);
+    }
+
     let addedCount = 0;
     for (const track of tracksByArtist) {
       try {
@@ -1846,7 +1922,7 @@ async function _debug(channel, userName) {
       .map(key => {
         const value = config.get(key);
         const displayValue = sensitiveKeys.includes(key) ? '[REDACTED]' : JSON.stringify(value);
-        return `> \`${key}\`: ${displayValue}`;
+        return `> ${key}: \`${displayValue}\``;
       })
       .join('\n');
 
@@ -1854,10 +1930,10 @@ async function _debug(channel, userName) {
       `*🛠️ System Debug Report*\n` +
       `------------------------------------------\n` +
       `*📊 System Info:*\n` +
-      `> *Build:* ${buildNumber}\n` +
-      `> *Node:* ${process.version}\n` +
-      `> *Host:* ${process.env.HOSTNAME || 'unknown'}\n` +
-      `> *IP:* ${ipAddress || 'unknown'}\n\n` +
+      `> *Release:* \`${releaseVersion}\`\n` +
+      `> *Node:* \`${process.version}\`\n` +
+      `> *Host:* \`${process.env.HOSTNAME || 'unknown'}\`\n` +
+      `> *IP:* \`${ipAddress || 'unknown'}\`\n\n` +
 
       `*🏥 Health Check:*\n` +
       `${healthStatus}\n\n` +
@@ -1869,12 +1945,12 @@ async function _debug(channel, userName) {
       (() => {
         const ai = AIHandler.getAIDebugInfo();
         return (
-          `> Enabled: ${ai.enabled ? 'true' : 'false'}\n` +
-          `> Key Present: ${config.get('openaiApiKey') ? 'true' : 'false'}\n` +
-          `> Model: ${ai.model}\n` +
-          `> Last Success: ${ai.lastSuccessTS || 'n/a'}\n` +
-          `> Last Error: ${ai.lastErrorTS || 'n/a'}\n` +
-          (ai.lastErrorMessage ? `> Last Error Msg: ${ai.lastErrorMessage}\n` : '')
+          `> Enabled: \`${ai.enabled ? 'true' : 'false'}\`\n` +
+          `> Key Present: \`${config.get('openaiApiKey') ? 'true' : 'false'}\`\n` +
+          `> Model: \`${ai.model}\`\n` +
+          `> Last Success: \`${ai.lastSuccessTS || 'n/a'}\`\n` +
+          `> Last Error: \`${ai.lastErrorTS || 'n/a'}\`\n` +
+          (ai.lastErrorMessage ? `> Last Error Msg: \`${ai.lastErrorMessage}\`\n` : '')
         );
       })() +
       `\n` +
@@ -1886,14 +1962,16 @@ async function _debug(channel, userName) {
         const connected = soundcraft.isEnabled();
 
         if (!enabled) {
-          return `> Enabled: false\n`;
+          return `> Enabled: \`false\`\n`;
         }
 
+        const channels = channelNames.length > 0 ? channelNames.map(n => `\`${n}\``).join(', ') : '\`none\`';
+
         return (
-          `> Enabled: true\n` +
-          `> IP Address: ${ip || 'not configured'}\n` +
-          `> Connected: ${connected ? '✅ Yes' : '❌ No'}\n` +
-          `> Configured Channels: ${channelNames.length > 0 ? channelNames.join(', ') : 'none'}\n`
+          `> Enabled: \`true\`\n` +
+          `> IP Address: \`${ip || 'not configured'}\`\n` +
+          `> Connected: \`${connected ? 'Yes' : 'No'}\`\n` +
+          `> Configured Channels: ${channels}\n`
         );
       })();
 
@@ -1901,6 +1979,52 @@ async function _debug(channel, userName) {
   } catch (err) {
     logger.error('Error in debug: ' + err.message);
     _slackMessage('🚨 Failed to generate debug report: ' + err.message + ' 🔧', channel);
+  }
+}
+
+async function _telemetryStatus(channel) {
+  try {
+    const enabled = config.get('telemetryEnabled');
+    const endpoint = config.get('telemetryEndpoint');
+    const domain = config.get('telemetryDomain');
+    
+    let message = '📊 *Telemetry & Privacy Status*\n\n';
+    
+    // Status
+    message += `> Status: \`${enabled ? 'Enabled ✅' : 'Disabled ❌'}\`\n`;
+    if (enabled) {
+      message += `> Endpoint: \`${endpoint}\`\n`;
+      message += `> Domain: \`${domain}\`\n`;
+    }
+    
+    message += '\n*What IS Collected:* ✅\n';
+    message += '• Anonymous instance ID (hashed hostname - no IP address)\n';
+    message += '• Operating system & Node.js version\n';
+    message += '• App version and release identifier\n';
+    message += '• Startup, heartbeat (every 24h), and shutdown events\n';
+    message += '• Uptime duration (hours and days running)\n';
+    
+    message += '\n*What is NOT Collected:* ❌\n';
+    message += '• No user names or Slack/Discord identities\n';
+    message += '• No commands executed\n';
+    message += '• No songs, artists, or playlists played\n';
+    message += '• No IP addresses or location data\n';
+    message += '• No personally identifiable information (PII)\n';
+    
+    message += '\n*Privacy Compliance:*\n';
+    message += '• GDPR compliant - no personal data collected\n';
+    message += '• CCPA compliant - anonymous metrics only\n';
+    message += '• Fail-silent - never blocks bot operation\n';
+    
+    message += '\n*To Disable:*\n';
+    message += '```\nsetconfig telemetryEnabled false\n```\n';
+    message += 'Or set `TELEMETRY_ENABLED=false` in environment.\n\n';
+    message += 'ℹ️ See `TELEMETRY.md` for complete documentation.';
+    
+    _slackMessage(message, channel);
+  } catch (err) {
+    logger.error('Error in telemetry status: ' + err.message);
+    _slackMessage('🚨 Failed to generate telemetry status: ' + err.message, channel);
   }
 }
 
@@ -2146,7 +2270,21 @@ async function _addplaylist(input, channel, userName) {
   logger.info('Playlist to add: ' + playlist);
 
   try {
-    const result = await spotify.getPlaylist(playlist);
+    let result;
+    try {
+      result = await spotify.getPlaylist(playlist);
+    } catch (e1) {
+      logger.warn('Direct playlist lookup failed, falling back to search: ' + e1.message);
+      const candidates = await spotify.searchPlaylistList(playlist, 5);
+      if (candidates && candidates.length > 0) {
+        // Prefer exact case-insensitive name match; otherwise take first
+        const exact = candidates.find(p => p.name.toLowerCase() === playlist.toLowerCase());
+        result = exact || candidates[0];
+        logger.info(`Using playlist candidate: ${result.name} by ${result.owner}`);
+      } else {
+        throw new Error('Playlist not found');
+      }
+    }
 
     // Get current player state
     const state = await sonos.getCurrentState();
@@ -2196,7 +2334,7 @@ async function _addplaylist(input, channel, userName) {
     _slackMessage(msg, channel);
   } catch (err) {
     logger.error('Error adding playlist: ' + err.message);
-    _slackMessage('🔎 Couldn\'t find that playlist. Try a Spotify link or check the spelling! 🎵', channel);
+    _slackMessage('🔎 Couldn\'t find that playlist. Try a Spotify link, or use `searchplaylist <name>` to pick one. 🎵', channel);
   }
 }
 
@@ -2677,6 +2815,7 @@ function _setconfig(input, channel, userName) {
 > \`aiPrompt\`: ${(config.get('aiPrompt') || '').slice(0, 80)}${(config.get('aiPrompt') || '').length > 80 ? '…' : ''}
 > \`defaultTheme\`: ${config.get('defaultTheme') || '(not set)'}
 > \`themePercentage\`: ${config.get('themePercentage') || 0}%
+> \`telemetryEnabled\`: ${config.get('telemetryEnabled')}
 > \`soundcraftEnabled\`: ${config.get('soundcraftEnabled') || false}
 > \`soundcraftIp\`: ${config.get('soundcraftIp') || '(not set)'}
 
@@ -2684,6 +2823,7 @@ function _setconfig(input, channel, userName) {
 *Example:* \`setconfig gongLimit 5\`
 *Example:* \`setconfig defaultTheme lounge\`
 *Example:* \`setconfig themePercentage 30\`
+*Example:* \`setconfig telemetryEnabled false\`
 *Example:* \`setconfig soundcraftEnabled true\`
 *Example:* \`setconfig soundcraftIp 192.168.1.100\`
     `;
@@ -2707,6 +2847,7 @@ function _setconfig(input, channel, userName) {
     aiModel: { type: 'string', minLen: 1, maxLen: 50, allowed: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
     aiPrompt: { type: 'string', minLen: 1, maxLen: 500 },
     defaultTheme: { type: 'string', minLen: 0, maxLen: 100 },
+    telemetryEnabled: { type: 'boolean' },
     soundcraftEnabled: { type: 'boolean' },
     soundcraftIp: { type: 'string', minLen: 0, maxLen: 50 }
   };

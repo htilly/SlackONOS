@@ -38,6 +38,35 @@ SlackONOS is licensed under the **GNU Affero General Public License v3 (AGPL-3.0
 
 See the `LICENSE` file for full details.
 
+## Privacy & Telemetry
+
+**SlackONOS respects your privacy.** Optional anonymous telemetry helps us understand usage and improve the bot.
+
+**What's Collected (Anonymous Only):**
+- ✅ Startup, heartbeat (24h), and shutdown events
+- ✅ Uptime duration (hours/days running)
+- ✅ OS platform & Node.js version
+- ✅ Release version/commit hash
+- ✅ Anonymous instance ID (hashed hostname - no PII)
+
+**What's NOT Collected:**
+- ❌ No user data, usernames, or chat messages
+- ❌ No Slack/Discord server information
+- ❌ No song titles, playlists, or listening history
+- ❌ No IP addresses or location data
+- ❌ No command usage or voting patterns
+
+Telemetry is **enabled by default** but can be disabled anytime:
+```json
+{
+  "telemetryEnabled": false
+}
+```
+
+📖 **[Full Telemetry Documentation](TELEMETRY.md)** - Details, privacy info, and self-hosting options
+
+Use the `telemetry` admin command to view current status and what data is being sent.
+
 ## Quick Start
 
 **What You Need:**
