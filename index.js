@@ -2661,11 +2661,15 @@ function _setconfig(input, channel, userName) {
 > \`aiPrompt\`: ${(config.get('aiPrompt') || '').slice(0, 80)}${(config.get('aiPrompt') || '').length > 80 ? '…' : ''}
 > \`defaultTheme\`: ${config.get('defaultTheme') || '(not set)'}
 > \`themePercentage\`: ${config.get('themePercentage') || 0}%
+> \`soundcraftEnabled\`: ${config.get('soundcraftEnabled') || false}
+> \`soundcraftIp\`: ${config.get('soundcraftIp') || '(not set)'}
 
 *Usage:* \`setconfig <key> <value>\`
 *Example:* \`setconfig gongLimit 5\`
 *Example:* \`setconfig defaultTheme lounge\`
 *Example:* \`setconfig themePercentage 30\`
+*Example:* \`setconfig soundcraftEnabled true\`
+*Example:* \`setconfig soundcraftIp 192.168.1.100\`
     `;
     _slackMessage(currentConfig.trim(), channel);
     return;
@@ -2686,7 +2690,9 @@ function _setconfig(input, channel, userName) {
     themePercentage: { type: 'number', min: 0, max: 100 },
     aiModel: { type: 'string', minLen: 1, maxLen: 50, allowed: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
     aiPrompt: { type: 'string', minLen: 1, maxLen: 500 },
-    defaultTheme: { type: 'string', minLen: 0, maxLen: 100 }
+    defaultTheme: { type: 'string', minLen: 0, maxLen: 100 },
+    soundcraftEnabled: { type: 'boolean' },
+    soundcraftIp: { type: 'string', minLen: 0, maxLen: 50 }
   };
 
   if (!allowedConfigs[key]) {
@@ -2767,6 +2773,23 @@ function _setconfig(input, channel, userName) {
     }
     const oldValue = config.get(key) || '';
     config.set(key, newValue);
+    
+    // Update Soundcraft IP if changed
+    if (key === 'soundcraftIp') {
+      soundcraft.config.soundcraftIp = newValue;
+      if (soundcraft.config.soundcraftEnabled && newValue) {
+        // Reconnect with new IP
+        soundcraft.disconnect();
+        soundcraft.connect().then(success => {
+          if (success) {
+            logger.info(`Soundcraft reconnected to new IP: ${newValue}`);
+          } else {
+            logger.warn(`Failed to connect to Soundcraft at new IP: ${newValue}`);
+          }
+        });
+      }
+    }
+    
     config.save(function (err) {
       if (err) {
         logger.error('Error saving config: ' + err);
@@ -2774,6 +2797,50 @@ function _setconfig(input, channel, userName) {
         return;
       }
       _slackMessage(`✅ Successfully updated \`${key}\` and saved to config.\nOld: \`${oldValue.slice(0, 80)}${oldValue.length > 80 ? '…' : ''}\`\nNew: \`${newValue.slice(0, 80)}${newValue.length > 80 ? '…' : ''}\``, channel);
+    });
+  } else if (configDef.type === 'boolean') {
+    const lowerValue = value.toLowerCase();
+    let boolValue;
+    
+    if (lowerValue === 'true' || lowerValue === '1' || lowerValue === 'yes' || lowerValue === 'on') {
+      boolValue = true;
+    } else if (lowerValue === 'false' || lowerValue === '0' || lowerValue === 'no' || lowerValue === 'off') {
+      boolValue = false;
+    } else {
+      _slackMessage(`🔘 Value for \`${key}\` must be a boolean (true/false, yes/no, on/off, 1/0)`, channel);
+      return;
+    }
+    
+    const oldValue = config.get(key);
+    config.set(key, boolValue);
+    
+    // Update Soundcraft connection if changing soundcraftEnabled
+    if (key === 'soundcraftEnabled') {
+      if (boolValue && !soundcraft.isEnabled()) {
+        // Enable and connect
+        soundcraft.config.soundcraftEnabled = true;
+        soundcraft.connect().then(success => {
+          if (success) {
+            logger.info('Soundcraft enabled and connected via setconfig');
+          } else {
+            logger.warn('Soundcraft enabled but connection failed');
+          }
+        });
+      } else if (!boolValue && soundcraft.isEnabled()) {
+        // Disable and disconnect
+        soundcraft.config.soundcraftEnabled = false;
+        soundcraft.disconnect();
+        logger.info('Soundcraft disabled via setconfig');
+      }
+    }
+    
+    config.save(function (err) {
+      if (err) {
+        logger.error('Error saving config: ' + err);
+        _slackMessage(`⚠️ Updated \`${key}\` to \`${boolValue}\` in memory, but failed to save to disk!`, channel);
+        return;
+      }
+      _slackMessage(`✅ Successfully updated \`${key}\` from \`${oldValue}\` to \`${boolValue}\` and saved to config.`, channel);
     });
   }
 }
