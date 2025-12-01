@@ -22,6 +22,7 @@ A democratic music bot for Discord and Slack that lets teams control Sonos speak
 - 👥 **Multi-Platform** - Run Discord and Slack simultaneously on one Sonos system
 - 🎯 **Role-Based Permissions** - Admin controls for flush, volume, and queue management
 - 🚫 **Gong Ban System** - Tracks voted down become immune to re-queuing
+- 🎛️ **Soundcraft Ui24R Support** - Control mixer volume on multiple buses directly from chat (NEW!)
 
 *Screenshot*
 
@@ -61,6 +62,8 @@ services:
 📖 **[Complete Discord Setup Guide](DISCORD.md)** - Step-by-step Discord bot configuration
 
 📖 **[Complete Slack Setup Guide](SLACK.md)** - Socket Mode Slack bot setup (tokens, scopes, events)
+
+🎛️ **[Soundcraft Ui24R Integration](SOUNDCRAFT.md)** - Control mixer volume directly from Slack/Discord
 
 ---
 
@@ -325,7 +328,8 @@ The bot queues song requests and plays them in order. If enough people dislike t
 **Playback Control:**
 * `play` - Resume playback
 * `stop` - Stop playback
-* `setvolume <number>` - Set volume (0-100)
+* `setvolume <number>` - Set Sonos volume (0-100)
+* `setvolume <channel> <number>` - Set Soundcraft mixer channel volume (if enabled)
 
 **System:**
 * `blacklist add <@user>` - Prevent user from adding songs

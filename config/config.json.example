@@ -27,5 +27,12 @@
     "spotifyClientId": "supersecretid",
     "spotifyClientSecret": "extrasupersecretsecret",
     "logLevel": "info",
-    "useLegacyBot": false
+    "useLegacyBot": false,
+    "soundcraftEnabled": false,
+    "soundcraftIp": "192.168.1.100",
+    "soundcraftChannels": {
+        "master": "master",
+        "reception": "aux3",
+        "sub": "aux8"
+    }
 }

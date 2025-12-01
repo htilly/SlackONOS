@@ -161,6 +161,21 @@ const spotify = Spotify({
   logger: logger,
 });
 
+/* Initialize Soundcraft Handler */
+const SoundcraftHandler = require('./soundcraft-handler');
+const soundcraft = new SoundcraftHandler({
+  soundcraftEnabled: config.get('soundcraftEnabled') || false,
+  soundcraftIp: config.get('soundcraftIp'),
+  soundcraftChannels: config.get('soundcraftChannels') || []
+});
+
+// Connect to Soundcraft mixer if enabled
+if (config.get('soundcraftEnabled')) {
+  (async () => {
+    await soundcraft.connect();
+  })();
+}
+
 /* Initialize AI Handler */
 (async () => {
   await AIHandler.initialize(logger);
@@ -353,27 +368,27 @@ async function _saveChannelIDsToConfig(adminChannelId, standardChannelId) {
   try {
     const fs = await import('fs/promises');
     const path = await import('path');
-    
+
     const configPath = path.join(process.cwd(), 'config', 'config.json');
-    
+
     // Read current config file
     const configData = await fs.readFile(configPath, 'utf8');
     const configObj = JSON.parse(configData);
-    
+
     // Update with IDs
     const oldAdminChannel = configObj.adminChannel;
     const oldStandardChannel = configObj.standardChannel;
-    
+
     configObj.adminChannel = adminChannelId;
     configObj.standardChannel = standardChannelId;
-    
+
     // Write back to file with pretty formatting
     await fs.writeFile(configPath, JSON.stringify(configObj, null, 4) + '\n', 'utf8');
-    
+
     // Also update nconf in-memory so we don't need restart
     config.set('adminChannel', adminChannelId);
     config.set('standardChannel', standardChannelId);
-    
+
     logger.info('✅ Auto-saved channel IDs to config.json for faster future startups');
     logger.info(`   Updated: "${oldAdminChannel}" → "${adminChannelId}"`);
     logger.info(`   Updated: "${oldStandardChannel}" → "${standardChannelId}"`);
@@ -401,7 +416,11 @@ function ensureConfigDefaults() {
     // AI features
     defaultTheme: '',
     themePercentage: 0,
-    aiPrompt: 'You are a funny, upbeat DJ for a Slack music bot controlling Sonos. Reply with a super short, playful one-liner that confirms what you\'ll do, using casual humor and emojis when appropriate.'
+    aiPrompt: 'You are a funny, upbeat DJ for a Slack music bot controlling Sonos. Reply with a super short, playful one-liner that confirms what you\'ll do, using casual humor and emojis when appropriate.',
+    // Soundcraft mixer integration
+    soundcraftEnabled: false,
+    soundcraftIp: '',
+    soundcraftChannels: []
   };
   const applied = [];
   for (const [key, val] of Object.entries(defaults)) {
@@ -463,6 +482,28 @@ async function _checkSystemHealth() {
   }
   report.checks.push(sonosCheck);
 
+  // 3. Check Soundcraft (if enabled)
+  if (config.get('soundcraftEnabled')) {
+    const soundcraftCheck = {
+      name: 'Soundcraft Ui24R',
+      status: 'ok',
+      message: `Connected at ${config.get('soundcraftIp')}`
+    };
+
+    if (!config.get('soundcraftIp')) {
+      soundcraftCheck.status = 'error';
+      soundcraftCheck.message = 'Missing IP address in config';
+    } else if (!soundcraft.isEnabled()) {
+      soundcraftCheck.status = 'error';
+      soundcraftCheck.message = `Not connected to ${config.get('soundcraftIp')}`;
+    } else {
+      const channels = soundcraft.getChannelNames();
+      soundcraftCheck.message = `Connected at ${config.get('soundcraftIp')} (${channels.length} channels: ${channels.join(', ')})`;
+    }
+
+    report.checks.push(soundcraftCheck);
+  }
+
   // Determine overall status
   if (report.checks.some(c => c.status === 'error')) {
     report.status = 'error';
@@ -491,7 +532,7 @@ async function _checkSystemHealth() {
       gongMessages: gongMessage,
       voteMessages: voteMessage,
     });
-    
+
     // Update voting config
     voting.setConfig({
       gongLimit,
@@ -504,7 +545,7 @@ async function _checkSystemHealth() {
     // Check that at least one platform is configured
     const hasSlack = slackBotToken && slackAppToken;
     const hasDiscord = config.get('discordToken');
-    
+
     if (!hasSlack && !hasDiscord) {
       throw new Error('No platform configured! Provide either Slack tokens (slackAppToken + token) or Discord token (discordToken)');
     }
@@ -536,18 +577,18 @@ async function _checkSystemHealth() {
         }, (...args) => routeCommand(...args), logger);  // Use closure for AI parsing support
         if (discord) {
           logger.info('✅ Discord connection established.');
-          
+
           // Set up reaction handler for Discord
           DiscordSystem.setReactionHandler(async (action, trackName, channelId, userName, platform) => {
             logger.info(`[DISCORD] Reaction ${action} from ${userName} for track: ${trackName}`);
-            
+
             // Set platform context
             currentPlatform = platform;
             currentChannel = channelId;
-            
+
             // For reactions, we vote/gong the track that was just added (most recent in queue)
             // This is more intuitive than requiring a queue position number
-            
+
             if (action === 'vote') {
               // Reaction vote is for making the track play sooner
               // We'll get the queue and find the track by name, then call _vote with its position
@@ -555,10 +596,10 @@ async function _checkSystemHealth() {
                 const queue = await sonos.getQueue();
                 if (queue && queue.items) {
                   // Find the track by name (case-insensitive, partial match)
-                  const trackIndex = queue.items.findIndex(item => 
+                  const trackIndex = queue.items.findIndex(item =>
                     item.title.toLowerCase().includes(trackName.toLowerCase())
                   );
-                  
+
                   if (trackIndex >= 0) {
                     // Convert to queue position (0-based index matches Sonos internal)
                     await _vote(['vote', trackIndex.toString()], channelId, userName);
@@ -597,7 +638,7 @@ async function _checkSystemHealth() {
     // 3.5 Apply config defaults and announce
     const appliedDefaults = ensureConfigDefaults();
     if (appliedDefaults.length && global.adminChannel) {
-      const lines = appliedDefaults.map(a => `• ${a.key} → \`${String(a.value).slice(0,80)}\``).join('\n');
+      const lines = appliedDefaults.map(a => `• ${a.key} → \`${String(a.value).slice(0, 80)}\``).join('\n');
       const msg = `*🔧 Missing config values were added with defaults:*\n${lines}\n\nYou can change these via \`setconfig\`. Type \`help\` for more information.`;
       await _slackMessage(msg, global.adminChannel);
     }
@@ -618,6 +659,17 @@ async function _checkSystemHealth() {
       }
     } else {
       logger.info('✅ System health check passed.');
+
+      // Log Soundcraft status if enabled
+      if (config.get('soundcraftEnabled')) {
+        if (soundcraft.isEnabled()) {
+          const channels = soundcraft.getChannelNames();
+          logger.info(`🎛️ Soundcraft Ui24R connected at ${config.get('soundcraftIp')}`);
+          logger.info(`   Channels: ${channels.join(', ')}`);
+        } else {
+          logger.warn(`⚠️ Soundcraft enabled but not connected (IP: ${config.get('soundcraftIp')})`);
+        }
+      }
     }
 
     logger.info('🚀 System startup complete.');
@@ -633,10 +685,10 @@ async function _checkSystemHealth() {
 const httpServer = http.createServer((req, res) => {
   // Parse URL to ignore query params (used for cache-busting)
   const urlPath = req.url.split('?')[0];
-  
+
   if (urlPath === '/tts.mp3') {
     const ttsFilePath = path.join(os.tmpdir(), 'sonos-tts.mp3');
-    
+
     if (fs.existsSync(ttsFilePath)) {
       res.writeHead(200, {
         'Content-Type': 'audio/mpeg',
@@ -831,7 +883,7 @@ async function _configdump(input, channel, userName) {
       }
       return `${k}: ${val}`;
     });
-    
+
     // Add seasonal context info
     const seasonal = AIHandler.getSeasonalContext();
     const aiDebug = AIHandler.getAIDebugInfo();
@@ -842,7 +894,7 @@ async function _configdump(input, channel, userName) {
     lines.push(`themes: ${seasonal.themes.join(', ')}`);
     lines.push(`defaultTheme: ${aiDebug.defaultTheme}`);
     lines.push(`themePercentage: ${aiDebug.themePercentage}%`);
-    
+
     const msg = '```' + lines.join('\n') + '```';
     _slackMessage(msg, channel);
   } catch (e) {
@@ -857,35 +909,35 @@ async function _configdump(input, channel, userName) {
  */
 async function handleNaturalLanguage(text, channel, userName, platform = 'slack', isAdmin = false) {
   logger.info(`>>> handleNaturalLanguage called with: "${text}"`);
-  
+
   // Set platform context for message routing (needed for _slackMessage to work correctly)
   currentPlatform = platform;
   currentChannel = channel;
   currentIsAdmin = isAdmin;
-  
+
   // Remove @bot mention
   const cleanText = text.replace(/<@[^>]+>/g, '').trim();
   logger.info(`>>> cleanText after stripping mention: "${cleanText}"`);
-  
+
   // If it starts with a known command, check if it looks like natural language
   const firstWord = cleanText.split(/\s+/)[0].toLowerCase();
   const restOfText = cleanText.slice(firstWord.length).trim().toLowerCase();
-  
+
   // Natural language indicators that should go through AI even if starting with a command
   const naturalLangPattern = /\b(some|couple|few|several|good|best|nice|great|top|tunes|songs|music|tracks|for a|for the)\b/i;
   const looksLikeNaturalLang = naturalLangPattern.test(restOfText);
   logger.info(`>>> firstWord="${firstWord}", looksLikeNaturalLang=${looksLikeNaturalLang}`);
-  
+
   if ((commandRegistry.has(firstWord) || aliasMap.has(firstWord)) && !looksLikeNaturalLang) {
     logger.info(`>>> Skipping AI - known command "${firstWord}" without natural language`);
     return processInput(cleanText, channel, userName, platform, isAdmin);
   }
-  
+
   // Log if we're proceeding to AI despite starting with a command
   if (commandRegistry.has(firstWord) || aliasMap.has(firstWord)) {
     logger.info(`>>> Proceeding to AI despite command "${firstWord}" because it looks like natural language`);
   }
-  
+
   // Try AI parsing
   if (!AIHandler.isAIEnabled()) {
     logger.debug('AI disabled, falling back to standard processing');
@@ -893,23 +945,23 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
     _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, reason: 'ai_disabled' });
     return;
   }
-  
+
   try {
     const parsed = await AIHandler.parseNaturalLanguage(cleanText, userName);
-    
+
     if (!parsed) {
       logger.warn(`AI parsing returned null for: "${cleanText}"`);
       _slackMessage('🤖 Sorry, I couldn\'t understand that. Try `help` to see available commands!', channel);
       _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, reasoning: 'none', reason: 'parse_null' });
       return;
     }
-    
+
     // Handle "chat" command FIRST - direct responses to simple questions/greetings
     // This bypasses confidence check since chat responses are always valid
     if (parsed.command === 'chat' && parsed.response) {
       logger.info(`AI chat response: "${cleanText}" → "${parsed.response}"`);
       _slackMessage(parsed.response, channel);
-      
+
       // If chat includes a music suggestion, save it for follow-up
       if (parsed.suggestedAction && parsed.suggestedAction.command) {
         const suggestion = `${parsed.suggestedAction.command} ${parsed.suggestedAction.args.join(' ')}`;
@@ -919,7 +971,7 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
       }
       return;
     }
-    
+
     // Check confidence threshold (only for non-chat commands)
     if (parsed.confidence < 0.5) {
       logger.info(`Low confidence (${parsed.confidence}) for: "${cleanText}" → ${parsed.command}`);
@@ -927,14 +979,14 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
       _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, parsed, reasoning: parsed.reasoning, reason: 'low_confidence' });
       return;
     }
-    
+
     // Log successful AI parse
     logger.info(`✨ AI parsed: "${cleanText}" → ${parsed.command} [${parsed.args.join(', ')}] (${(parsed.confidence * 100).toFixed(0)}%)`);
     // Send short DJ-style summary before executing
     if (parsed.summary) {
       _slackMessage(parsed.summary, channel);
     }
-    
+
     // Sanitize arguments for better Spotify matching
     let finalArgs = parsed.args;
     if (parsed.command === 'add' && finalArgs.length > 0) {
@@ -946,7 +998,7 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
       finalArgs[0] = term.trim();
       logger.info(`Track to add: ${finalArgs[0]}`);
     }
-    
+
     // Construct command text and process it
     // If AI gave a single arg, try to extract a leading number (e.g., "5 good tunes ...")
     if (parsed.command === 'add' && finalArgs.length === 1) {
@@ -966,11 +1018,11 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
     // If AI indicates a count for add (e.g., "add <query> 5"), batch-add top N tracks
     if (parsed.command === 'add' && finalArgs.length >= 2) {
       let maybeCount = parseInt(finalArgs[finalArgs.length - 1], 10);
-      
+
       // Apply limits based on channel: admin channel = 200, regular = 20
       const isAdminChannel = (channel === global.adminChannel);
       const maxTracks = isAdminChannel ? 200 : 20;
-      
+
       if (!isNaN(maybeCount) && maybeCount > 1) {
         // Enforce limit and notify if capped
         if (maybeCount > maxTracks) {
@@ -980,20 +1032,20 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
             _slackMessage(`📝 Note: Limited to ${maxTracks} tracks in this channel. Use admin channel for larger requests.`, channel);
           }
         }
-        
+
         const query = finalArgs.slice(0, -1).join(' ');
-        
+
         try {
           // Only use theme mixing in admin channel
           const result = await musicHelper.searchAndQueue(sonos, query, maybeCount, {
             useTheme: isAdminChannel
           });
-          
+
           if (!result.added) {
             _slackMessage(`🤷 I couldn't find tracks for "${query}". Try a different search!`, channel);
             return;
           }
-          
+
           // Build informative message
           const actionMsg = result.wasPlaying ? 'Added' : 'Started fresh with';
           let msg = `🎵 ${actionMsg} ${result.added} tracks`;
@@ -1012,21 +1064,21 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
           return;
         }
       }
-        logger.info(`AI add: count argument not valid → ${finalArgs[finalArgs.length - 1]}`);
+      logger.info(`AI add: count argument not valid → ${finalArgs[finalArgs.length - 1]}`);
     }
 
     const commandText = finalArgs.length > 0
       ? `${parsed.command} ${finalArgs.join(' ')}`
       : parsed.command;
     await processInput(commandText, channel, userName, platform, isAdmin);
-    
+
     // Handle followUp command if present (for multi-step requests like "flush and add 100 songs")
     if (parsed.followUp && parsed.followUp.command) {
       logger.info(`>>> Processing followUp command: ${parsed.followUp.command} [${(parsed.followUp.args || []).join(', ')}]`);
-      
+
       // Small delay to let the first command complete
       await new Promise(resolve => setTimeout(resolve, 1000));
-      
+
       // Build the followUp as a new parsed object and recursively handle it
       const followUpParsed = {
         command: parsed.followUp.command,
@@ -1035,18 +1087,18 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
         reasoning: parsed.followUp.reasoning || 'followUp command',
         summary: null // Don't send another summary for followUp
       };
-      
+
       // Re-run the AI add logic for the followUp command
       let followUpArgs = followUpParsed.args;
-      
+
       if (followUpParsed.command === 'add' && followUpArgs.length >= 1) {
         // Check if there's a count argument
         let maybeCount = parseInt(followUpArgs[followUpArgs.length - 1], 10);
-        
+
         // Apply limits based on channel: admin channel = 200, regular = 20
         const isAdminChannel = (channel === global.adminChannel);
         const maxTracks = isAdminChannel ? 200 : 20;
-        
+
         if (!isNaN(maybeCount) && maybeCount > 1) {
           // Enforce limit and notify if capped
           if (maybeCount > maxTracks) {
@@ -1056,22 +1108,22 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
               _slackMessage(`📝 Note: Limited to ${maxTracks} tracks in this channel. Use admin channel for larger requests.`, channel);
             }
           }
-          
+
           // Use defaultTheme from config as fallback if no query specified
           const defaultTheme = config.get('defaultTheme') || 'popular hits';
           const query = followUpArgs.slice(0, -1).join(' ') || defaultTheme;
-          
+
           try {
             // Only use theme mixing in admin channel
             const result = await musicHelper.searchAndQueue(sonos, query, maybeCount, {
               useTheme: isAdminChannel
             });
-            
+
             if (!result.added) {
               _slackMessage(`🤷 Couldn't find tracks for "${query}" in followUp.`, channel);
               return;
             }
-            
+
             // Build informative message
             let msg = `🎵 Added ${result.added} tracks`;
             if (result.themeCount > 0) {
@@ -1090,14 +1142,14 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
           }
         }
       }
-      
+
       // If not a special add case, just run as regular command
       const followUpText = followUpArgs.length > 0
         ? `${followUpParsed.command} ${followUpArgs.join(' ')}`
         : followUpParsed.command;
       await processInput(followUpText, channel, userName, platform, isAdmin);
     }
-    
+
   } catch (err) {
     logger.error(`Error in AI natural language handler: ${err.message}`);
     _slackMessage('❌ Oops, something went wrong processing your request. Try using a command directly!', channel);
@@ -1110,9 +1162,9 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
  * Routes @mentions and natural language to AI, commands directly to processInput
  * Replaces the stub defined earlier
  */
-routeCommand = async function(text, channel, userName, platform = 'slack', isAdmin = false, isMention = false) {
+routeCommand = async function (text, channel, userName, platform = 'slack', isAdmin = false, isMention = false) {
   logger.info(`>>> routeCommand: text="${text}", isMention=${isMention}`);
-  
+
   // Clean up copy-pasted text from Slack formatting FIRST
   // Remove leading quote marker ("> " or "&gt; ")
   text = text.replace(/^(&gt;|>)\s*/, '');
@@ -1123,24 +1175,24 @@ routeCommand = async function(text, channel, userName, platform = 'slack', isAdm
   // Remove leading numbers from search results (e.g., "1. " -> "")
   text = text.replace(/^\d+\.\s*/, '');
   text = text.trim();
-  
+
   logger.info(`>>> routeCommand: cleaned text="${text}"`);
-  
+
   // Check if this looks like a natural language request (not starting with a command)
   const trimmed = text.replace(/<@[^>]+>/g, '').trim();
   const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
-  
+
   // If it's a mention, ALWAYS go through AI (even if it starts with a command like "add")
   if (isMention) {
     logger.info(`>>> Mention detected, routing to handleNaturalLanguage`);
     return handleNaturalLanguage(text, channel, userName, platform, isAdmin);
   }
-  
+
   // For non-mentions: if it starts with a known command, process normally
   if (commandRegistry.has(firstWord) || aliasMap.has(firstWord)) {
     return processInput(text, channel, userName, platform, isAdmin);
   }
-  
+
   // Unknown command for non-mention - ignore
   logger.debug(`Ignoring unknown command from non-mention: "${firstWord}"`);
 };
@@ -1152,7 +1204,7 @@ async function processInput(text, channel, userName, platform = 'slack', isAdmin
   currentPlatform = platform;
   currentChannel = channel;
   currentIsAdmin = isAdmin;
-  
+
   if (!text || typeof text !== 'string') {
     logger.warn('processInput called without text');
     return;
@@ -1194,10 +1246,10 @@ async function processInput(text, channel, userName, platform = 'slack', isAdmin
       // Slack uses channel-based permissions
       authorized = (channel === global.adminChannel);
     }
-    
+
     if (!authorized) {
       logger.info(`Unauthorized admin cmd attempt: ${cmdKey} by ${userName} in ${channel} (platform: ${platform})`);
-      
+
       // Suggest alternatives for common admin commands and set context for follow-up
       if (cmdKey === 'flush') {
         _slackMessage('🚫 That\'s an admin-only command! But you can use `flushvote` to start a democratic vote to clear the queue. 🗳️', channel);
@@ -1210,7 +1262,7 @@ async function processInput(text, channel, userName, platform = 'slack', isAdmin
         // Check if user is trying to play a specific track number
         const trackMatch = rawTerm.match(/(?:track\s*)?(\d+)/i) || args.find(a => /^\d+$/.test(a));
         const trackNum = trackMatch ? (Array.isArray(trackMatch) ? trackMatch[1] : trackMatch) : null;
-        
+
         if (trackNum) {
           _slackMessage(`🚫 That's an admin-only command! But you can use \`vote ${trackNum}\` to vote for that track to play sooner. 🗳️`, channel);
           AIHandler.setUserContext(userName, `vote ${trackNum}`, `play track ${trackNum} is admin-only, suggested vote`);
@@ -1270,7 +1322,7 @@ async function _checkUser(userId) {
       // Discord-only mode: just return the username as-is
       return userId;
     }
-    
+
     // Clean the userId if wrapped in <@...>
     userId = userId.replace(/[<@>]/g, '');
 
@@ -1314,10 +1366,62 @@ function _setVolume(input, channel, userName) {
   _logUserAction(userName, 'setVolume');
   // Admin check now handled in processInput (platform-aware)
 
+  // Check if Soundcraft is enabled and if we have multiple arguments
+  if (soundcraft.isEnabled() && input.length >= 2) {
+    const channelNames = soundcraft.getChannelNames();
+
+    // Check if first argument is a Soundcraft channel name
+    const possibleChannelName = input[1];
+    if (channelNames.includes(possibleChannelName)) {
+      // Syntax: _setvolume <channel> <volume>
+      const vol = Number(input[2]);
+
+      if (!input[2] || isNaN(vol)) {
+        _slackMessage(`🤔 Usage: \`setvolume ${possibleChannelName} <number>\`\n\nExample: \`setvolume ${possibleChannelName} 50\``, channel);
+        return;
+      }
+
+      if (vol < 0 || vol > 100) {
+        _slackMessage(`🚨 Volume must be between 0 and 100. You tried: ${vol}`, channel);
+        return;
+      }
+
+      logger.info(`Setting Soundcraft channel '${possibleChannelName}' to ${vol}%`);
+
+      soundcraft.setVolume(possibleChannelName, vol)
+        .then(success => {
+          if (success) {
+            _slackMessage(`🔊 Soundcraft channel *${possibleChannelName}* volume set to *${vol}%*`, channel);
+          } else {
+            _slackMessage(`❌ Failed to set Soundcraft volume. Check logs for details.`, channel);
+          }
+        })
+        .catch(err => {
+          logger.error('Error setting Soundcraft volume: ' + err);
+          _slackMessage(`❌ Error setting Soundcraft volume: ${err.message}`, channel);
+        });
+      return;
+    }
+  }
+
+  // Default behavior: Set Sonos volume
   const vol = Number(input[1]);
 
   if (isNaN(vol)) {
-    _slackMessage('🤔 That\'s not a number, that\'s... I don\'t even know what that is. Try again with actual digits!', channel);
+    // If Soundcraft is enabled, show helpful message with available channels
+    if (soundcraft.isEnabled()) {
+      const channelNames = soundcraft.getChannelNames();
+      const channelList = channelNames.map(c => `\`${c}\``).join(', ');
+      _slackMessage(
+        `🤔 Invalid volume!\n\n` +
+        `*Sonos:* \`setvolume <number>\`\n` +
+        `*Soundcraft:* \`setvolume <channel> <number>\`\n\n` +
+        `Available Soundcraft channels: ${channelList}`,
+        channel
+      );
+    } else {
+      _slackMessage('🤔 That\'s not a number, that\'s... I don\'t even know what that is. Try again with actual digits!', channel);
+    }
     return;
   }
 
@@ -1381,10 +1485,10 @@ async function _showQueue(channel) {
       result.items.map(function (item, i) {
         let trackTitle = item.title;
         let prefix = '';
-        
+
         // Check if this is the currently playing track
         const isCurrentTrack = track && (i + 1) === track.queuePosition;
-        
+
         // Check if track is gong banned (immune)
         if (voting.isTrackGongBanned(item.title)) {
           prefix = ':lock: ';
@@ -1756,6 +1860,25 @@ async function _debug(channel, userName) {
           `> Last Error: ${ai.lastErrorTS || 'n/a'}\n` +
           (ai.lastErrorMessage ? `> Last Error Msg: ${ai.lastErrorMessage}\n` : '')
         );
+      })() +
+      `\n` +
+      `*🎛️ Soundcraft Ui24R:*\n` +
+      (() => {
+        const enabled = config.get('soundcraftEnabled');
+        const ip = config.get('soundcraftIp');
+        const channels = config.get('soundcraftChannels') || [];
+        const connected = soundcraft.isEnabled();
+
+        if (!enabled) {
+          return `> Enabled: false\n`;
+        }
+
+        return (
+          `> Enabled: true\n` +
+          `> IP Address: ${ip || 'not configured'}\n` +
+          `> Connected: ${connected ? '✅ Yes' : '❌ No'}\n` +
+          `> Configured Channels: ${channels.length > 0 ? channels.join(', ') : 'none'}\n`
+        );
       })();
 
     _slackMessage(message, channel);
@@ -1852,9 +1975,9 @@ async function _add(input, channel, userName) {
       }
     }
 
-    _slackMessage(msg, channel, { 
-      trackName: result.name, 
-      addReactions: currentPlatform === 'discord' 
+    _slackMessage(msg, channel, {
+      trackName: result.name,
+      addReactions: currentPlatform === 'discord'
     });
   } catch (err) {
     logger.error('Error adding track: ' + err.message);
@@ -2140,7 +2263,7 @@ function _currentTrack(channel, cb) {
     .then((track) => {
       if (track) {
         let message = `Currently playing: *${track.title}* by _${track.artist}_`;
-        
+
         // Add time information if available
         if (track.duration && track.position) {
           const remaining = track.duration - track.position;
@@ -2148,10 +2271,10 @@ function _currentTrack(channel, cb) {
           const remainingSec = Math.floor(remaining % 60);
           const durationMin = Math.floor(track.duration / 60);
           const durationSec = Math.floor(track.duration % 60);
-          
+
           message += `\n⏱️ ${remainingMin}:${remainingSec.toString().padStart(2, '0')} remaining (${durationMin}:${durationSec.toString().padStart(2, '0')} total)`;
         }
-        
+
         if (voting.isTrackGongBanned(track.title)) {
           message += ' :lock: (Immune to GONG)';
         }
@@ -2172,36 +2295,36 @@ function _currentTrack(channel, cb) {
 async function _gongplay(command, channel) {
   if (command === 'play') {
     // Track banning is now handled by voting module
-    
+
     try {
       // Get current track position
       const currentTrack = await sonos.currentTrack();
       const currentPosition = currentTrack ? currentTrack.queuePosition : 1;
       const gongPosition = currentPosition + 1;
-      
+
       // Queue the gong sound from Spotify right after current track (+1)
       const gongUri = 'spotify:track:1FzsAo5gX5oEJD9PFVH5FO';
       await sonos.queue(gongUri, gongPosition);
       logger.info('Queued gong sound at position ' + gongPosition);
-      
+
       // Skip to the gong sound
       await sonos.next();
       logger.info('Playing gong sound, will auto-advance to next track');
-      
+
       // Wait for gong to finish playing and advance to next song (it's about 10 seconds long)
       setTimeout(async () => {
         try {
           // Find and remove the gong sound from the queue
           const queue = await sonos.getQueue();
           let gongIndex = -1;
-          
+
           for (let i = 0; i < queue.items.length; i++) {
             if (queue.items[i].title === 'Gong 1' || queue.items[i].uri.includes('1FzsAo5gX5oEJD9PFVH5FO')) {
               gongIndex = i;
               break;
             }
           }
-          
+
           if (gongIndex >= 0) {
             // Sonos uses 1-based indexing for removeTracksFromQueue
             await sonos.removeTracksFromQueue(gongIndex + 1, 1);
@@ -2213,7 +2336,7 @@ async function _gongplay(command, channel) {
           logger.warn('Could not remove gong from queue: ' + removeErr.message);
         }
       }, 12000); // Wait 12 seconds for gong to finish and auto-advance
-      
+
     } catch (err) {
       logger.error('Error playing GONG sound: ' + err);
       // Fallback: just skip if gong playback fails
@@ -2410,9 +2533,9 @@ function _help(input, channel) {
   try {
     // Determine admin status platform-aware
     const isAdminUser = currentPlatform === 'discord' ? currentIsAdmin : (channel === global.adminChannel);
-    
+
     let messages = [];
-    
+
     // AI help section (only shown if OpenAI is enabled)
     let aiHelpSection = '';
     if (AIHandler.isAIEnabled()) {
@@ -2430,12 +2553,12 @@ function _help(input, channel) {
 
 `;
     }
-    
+
     // For Discord admins, show both regular + admin help (split into multiple messages due to 2000 char limit)
     if (currentPlatform === 'discord' && isAdminUser) {
       const regularHelp = fs.readFileSync('helpText.txt', 'utf8');
       const adminHelp = fs.readFileSync('helpTextAdmin.txt', 'utf8');
-      
+
       messages.push(aiHelpSection + regularHelp);
       messages.push('━━━━━━━━━━━━━━━━━━━━━\n**🎛️ ADMIN COMMANDS** (DJ/Admin role)\n━━━━━━━━━━━━━━━━━━━━━\n\n' + adminHelp);
     } else {
@@ -2535,7 +2658,7 @@ function _setconfig(input, channel, userName) {
 > \`searchLimit\`: ${searchLimit}
 > \`voteTimeLimitMinutes\`: ${voteTimeLimitMinutes}
 > \`aiModel\`: ${config.get('aiModel') || 'gpt-4o'}
-> \`aiPrompt\`: ${(config.get('aiPrompt') || '').slice(0,80)}${(config.get('aiPrompt')||'').length>80?'…':''}
+> \`aiPrompt\`: ${(config.get('aiPrompt') || '').slice(0, 80)}${(config.get('aiPrompt') || '').length > 80 ? '…' : ''}
 > \`defaultTheme\`: ${config.get('defaultTheme') || '(not set)'}
 > \`themePercentage\`: ${config.get('themePercentage') || 0}%
 
@@ -2650,7 +2773,7 @@ function _setconfig(input, channel, userName) {
         _slackMessage(`⚠️ Updated \`${key}\` in memory, but failed to save to disk!`, channel);
         return;
       }
-      _slackMessage(`✅ Successfully updated \`${key}\` and saved to config.\nOld: \`${oldValue.slice(0,80)}${oldValue.length>80?'…':''}\`\nNew: \`${newValue.slice(0,80)}${newValue.length>80?'…':''}\``, channel);
+      _slackMessage(`✅ Successfully updated \`${key}\` and saved to config.\nOld: \`${oldValue.slice(0, 80)}${oldValue.length > 80 ? '…' : ''}\`\nNew: \`${newValue.slice(0, 80)}${newValue.length > 80 ? '…' : ''}\``, channel);
     });
   }
 }
@@ -2741,7 +2864,7 @@ async function _tts(input, channel) {
   }
 
   const ttsFilePath = path.join(os.tmpdir(), 'sonos-tts.mp3');
-  
+
   // Pick a random intro message to use in both Slack and TTS
   const introMessage = ttsMessage[Math.floor(Math.random() * ttsMessage.length)];
   // Build full TTS text with intro, longer pause (...), and the actual message
@@ -2760,7 +2883,7 @@ async function _tts(input, channel) {
     // Combine all audio chunks into a single buffer
     const audioBuffers = audioResults.map(result => Buffer.from(result.base64, 'base64'));
     const combinedBuffer = Buffer.concat(audioBuffers);
-    
+
     // Write the combined audio to file
     fs.writeFileSync(ttsFilePath, combinedBuffer);
     logger.info('TTS audio saved to: ' + ttsFilePath);
@@ -2784,10 +2907,10 @@ async function _tts(input, channel) {
     // Use HTTP server to serve the TTS file (with cache-busting timestamp)
     const uri = `http://${ipAddress}:${webPort}/tts.mp3?t=${Date.now()}`;
     logger.info('Queuing TTS file from: ' + uri + ' at position ' + ttsPosition);
-    
+
     // Queue TTS right after current track
     await sonos.queue(uri, ttsPosition);
-    
+
     _slackMessage(introMessage, channel);
 
     // Skip to TTS
@@ -2800,7 +2923,7 @@ async function _tts(input, channel) {
         // Remove the TTS track from queue
         await sonos.removeTracksFromQueue([ttsPosition]);
         logger.info('Removed TTS track from queue at position ' + ttsPosition);
-        
+
         // Go back to previous track (the one that was playing before TTS)
         await sonos.previous();
         logger.info('Returned to previous track after TTS cleanup');
@@ -2808,7 +2931,7 @@ async function _tts(input, channel) {
         logger.error('Error cleaning up after TTS: ' + e);
       }
     }, waitTime);
-    
+
   } catch (err) {
     logger.error('Error during TTS: ' + err);
     _slackMessage('🚨 Error generating text-to-speech. Try again with a simpler message! 🔄', channel);

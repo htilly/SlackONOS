@@ -8,11 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Soundcraft Ui24R Integration** - Control mixer volume on multiple buses (master, aux, fx, or custom named channels) directly from Slack/Discord
+  - Multi-bus support with named channels (e.g., `setvolume receptionen 30`)
+  - WebSocket-based real-time connection with auto-reconnection
+  - Configuration via `soundcraftEnabled`, `soundcraftIp`, `soundcraftChannels`
+  - Comprehensive documentation in SOUNDCRAFT.md
 - **Channel ID Support** - Use Slack channel IDs directly in config to avoid rate limits in large workspaces (100+ channels)
 - **Auto-save Channel IDs** - After first successful lookup by name, IDs are automatically saved to config.json for instant future startups
 - **Smart Channel Lookup** - Detects if config uses IDs vs names; warns when scanning all channels
 
 ### Changed
+- `setvolume` command now supports both Sonos (`setvolume 50`) and Soundcraft (`setvolume master 50`) syntax
 - Channel lookup now skips API pagination if IDs are used directly
 - Config file auto-updates with discovered IDs after first successful name-based lookup
 - Added helpful warnings and tips for large workspace optimization
