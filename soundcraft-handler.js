@@ -13,6 +13,21 @@ class SoundcraftHandler {
     }
 
     /**
+     * Convert dB value to fader level (0-1)
+     * Uses the fader curve from the Soundcraft library
+     * @param {number} db - dB value (-100 to 0)
+     * @returns {number} Fader level (0 to 1)
+     */
+    dbToFaderLevel(db) {
+        // Clamp to valid range
+        db = Math.max(-100, Math.min(0, db));
+        
+        // Simple linear conversion for now
+        // -100 dB = 0, 0 dB = 1
+        return (db + 100) / 100;
+    }
+
+    /**
      * Initialize connection to Soundcraft Ui24R mixer
      */
     async connect() {
@@ -179,10 +194,18 @@ class SoundcraftHandler {
                 this.connection.master.setFaderLevelDB(volume);
             } else if (busId.startsWith('aux')) {
                 const auxNumber = parseInt(busId.replace('aux', '')) || 1;
-                this.connection.aux(auxNumber).setFaderLevelDB(volume);
+                // For aux buses, we control the master output of that aux
+                // The aux() method returns an AuxBus, we need to use master on it
+                const auxBus = this.connection.aux(auxNumber);
+                // Aux buses don't have setFaderLevelDB, so we need to use the raw fader value
+                // Convert dB to fader level (0-1)
+                const faderLevel = this.dbToFaderLevel(volume);
+                auxBus.master.setFaderLevel(faderLevel);
             } else if (busId.startsWith('fx')) {
                 const fxNumber = parseInt(busId.replace('fx', '')) || 1;
-                this.connection.fx(fxNumber).setFaderLevelDB(volume);
+                const fxBus = this.connection.fx(fxNumber);
+                const faderLevel = this.dbToFaderLevel(volume);
+                fxBus.master.setFaderLevel(faderLevel);
             } else {
                 this.logger.error(`Unknown bus type: ${busId}`);
                 return false;
