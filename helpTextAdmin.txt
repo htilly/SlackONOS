@@ -2,8 +2,10 @@
 > `play` / `pause` / `resume` / `stop` - Basic playback controls.
 > `next` - Skip to the next track.
 > `previous` - Go back to the previous track.
-> `setvolume [0-100]` - Set the volume level.
+> `setvolume [0-100]` - Set Sonos volume level.
+> `setvolume [channel] [0-100]` - Set Soundcraft mixer channel volume (if enabled).
 > `shuffle` / `normal` - Toggle shuffle mode.
+
 
 *📋 Queue Management:*
 > `flush` - Clear the entire queue instantly. 🗑️
@@ -11,13 +13,17 @@
 > `move [from] [to]` (or `mv`) - Move a track from one position to another.
 > `thanos` (or `snap`) - Randomly remove half the queue. 💀
 > `blacklist [user]` - Ban/unban a user. Run without args to list blocked users. 🚫
+> `trackblacklist` - List all blacklisted tracks/artists. 🎵🚫
+> `trackblacklist add <name>` - Block a track or artist (e.g., "Last Christmas").
+> `trackblacklist remove <name>` - Unblock a track or artist.
 > `listimmune` - List all tracks currently immune to GONG.
 
 *⚙️ System & Config:*
 > `setconfig [key] [value]` (or `getconfig`) - View/change bot settings.
 {{configValues}}
 > `configdump` (or `cfgdump`) - Print all current config values (tokens/secrets masked).
-> `debug` - Show build number and system info.
+> `debug` - Show release version and system info.
+> `telemetry` - Show telemetry status and privacy information.
 > `stats` - Show usage statistics for all users.
 > `stats [user]` - Show usage statistics for a specific user.
 

@@ -1,6 +1,6 @@
 {
   "name": "zenmusic",
-  "version": "1.0.0",
+  "version": "1.6.0",
   "description": "Zen sonos project",
   "main": "index.js",
   "scripts": {
@@ -35,7 +35,9 @@
     "mp3-duration": "^1.1.0",
     "nconf": "^0.13.0",
     "openai": "^4.76.1",
+    "posthog-node": "^4.3.0",
     "sonos": "^1.14.2",
+    "soundcraft-ui-connection": "^4.0.0",
     "urlencode": "^2.0.0",
     "winston": "^3.18.3",
     "xml2js": "^0.6.2"

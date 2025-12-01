@@ -7,6 +7,7 @@ const nconf = require('nconf');
 
 let spotify = null;
 let logger = null;
+let isTrackBlacklisted = null;
 
 // Mood/theme boosters for search queries
 const BOOSTERS = [
@@ -40,10 +41,12 @@ const BOOSTERS = [
  * Initialize the music helper with dependencies
  * @param {Object} spotifyModule - The spotify-async module
  * @param {Object} loggerModule - The logger module
+ * @param {Function} blacklistChecker - Optional function(name, artist) to check if track is blacklisted
  */
-function initialize(spotifyModule, loggerModule) {
+function initialize(spotifyModule, loggerModule, blacklistChecker = null) {
   spotify = spotifyModule;
   logger = loggerModule;
+  isTrackBlacklisted = blacklistChecker;
   logger.info('✅ Music helper initialized');
 }
 
@@ -232,8 +235,16 @@ async function searchTracks(query, count, options = {}) {
  */
 async function queueTracks(sonos, tracks) {
   let added = 0;
+  let skipped = [];
   
   for (const t of tracks) {
+    // Check blacklist if checker is available
+    if (isTrackBlacklisted && isTrackBlacklisted(t.name, t.artist)) {
+      logger.info(`Music helper: skipping blacklisted track "${t.name}" by ${t.artist}`);
+      skipped.push({ name: t.name, artist: t.artist });
+      continue;
+    }
+    
     try {
       await sonos.queue(t.uri);
       added++;
@@ -242,8 +253,8 @@ async function queueTracks(sonos, tracks) {
     }
   }
   
-  logger.info(`Music helper: queued ${added}/${tracks.length} tracks`);
-  return added;
+  logger.info(`Music helper: queued ${added}/${tracks.length} tracks (skipped ${skipped.length} blacklisted)`);
+  return { added, skipped };
 }
 
 /**
@@ -256,7 +267,7 @@ async function queueTracks(sonos, tracks) {
  * @param {string} options.defaultTheme - Theme to mix in (overrides config)
  * @param {number} options.themePercentage - Theme percentage 0-100 (overrides config)
  * @param {boolean} options.autoPlay - Start playback if stopped (default: true)
- * @returns {Promise<{added: number, tracks: Array, mainCount: number, themeCount: number, query: string, wasPlaying: boolean}>}
+ * @returns {Promise<{added: number, skipped: Array, tracks: Array, mainCount: number, themeCount: number, query: string, wasPlaying: boolean}>}
  */
 async function searchAndQueue(sonos, query, count, options = {}) {
   const { autoPlay = true, useTheme = true } = options;
@@ -301,10 +312,10 @@ async function searchAndQueue(sonos, query, count, options = {}) {
   }
   
   // Queue the tracks
-  const added = await queueTracks(sonos, searchResult.tracks);
+  const queueResult = await queueTracks(sonos, searchResult.tracks);
   
   // Start playback if wasn't playing
-  if (autoPlay && !wasPlaying && added > 0) {
+  if (autoPlay && !wasPlaying && queueResult.added > 0) {
     try {
       await new Promise(resolve => setTimeout(resolve, 500));
       await sonos.play();
@@ -315,7 +326,8 @@ async function searchAndQueue(sonos, query, count, options = {}) {
   }
   
   return {
-    added,
+    added: queueResult.added,
+    skipped: queueResult.skipped,
     tracks: searchResult.tracks,
     mainCount: searchResult.mainCount,
     themeCount: searchResult.themeCount,

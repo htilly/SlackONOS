@@ -22,6 +22,7 @@ A democratic music bot for Discord and Slack that lets teams control Sonos speak
 - 👥 **Multi-Platform** - Run Discord and Slack simultaneously on one Sonos system
 - 🎯 **Role-Based Permissions** - Admin controls for flush, volume, and queue management
 - 🚫 **Gong Ban System** - Tracks voted down become immune to re-queuing
+- 🎛️ **Soundcraft Ui24R Support** - Control mixer volume on multiple buses directly from chat (NEW!)
 
 *Screenshot*
 
@@ -36,6 +37,35 @@ SlackONOS is licensed under the **GNU Affero General Public License v3 (AGPL-3.0
 - Commercial entities that wish to use SlackONOS without AGPL obligations (e.g. closed-source forks or proprietary integrations) may contact the author to discuss **separate commercial licensing**.
 
 See the `LICENSE` file for full details.
+
+## Privacy & Telemetry
+
+**SlackONOS respects your privacy.** Optional anonymous telemetry helps us understand usage and improve the bot.
+
+**What's Collected (Anonymous Only):**
+- ✅ Startup, heartbeat (24h), and shutdown events
+- ✅ Uptime duration (hours/days running)
+- ✅ OS platform & Node.js version
+- ✅ Release version/commit hash
+- ✅ Anonymous instance ID (hashed hostname - no PII)
+
+**What's NOT Collected:**
+- ❌ No user data, usernames, or chat messages
+- ❌ No Slack/Discord server information
+- ❌ No song titles, playlists, or listening history
+- ❌ No IP addresses or location data
+- ❌ No command usage or voting patterns
+
+Telemetry is **enabled by default** but can be disabled anytime:
+```json
+{
+  "telemetryEnabled": false
+}
+```
+
+📖 **[Full Telemetry Documentation](TELEMETRY.md)** - Details, privacy info, and self-hosting options
+
+Use the `telemetry` admin command to view current status and what data is being sent.
 
 ## Quick Start
 
@@ -59,6 +89,10 @@ services:
 ```
 
 📖 **[Complete Discord Setup Guide](DISCORD.md)** - Step-by-step Discord bot configuration
+
+📖 **[Complete Slack Setup Guide](SLACK.md)** - Socket Mode Slack bot setup (tokens, scopes, events)
+
+🎛️ **[Soundcraft Ui24R Integration](SOUNDCRAFT.md)** - Control mixer volume directly from Slack/Discord
 
 ---
 
@@ -93,6 +127,39 @@ legacySlackBotToken="MySlackBotToken" sonos="192.168.0.1" node index.js
 ```
 You can also provide any of the other variables from config.json.example as arguments or environment variables.
 The blacklist can be provided as either an array in config.json, or as a comma-separated string when using arguments or environment variables.
+
+**Channel Configuration (Important for Large Workspaces)**
+
+SlackONOS uses two channels: `adminChannel` (for admin commands) and `standardChannel` (for regular users).
+
+**For workspaces with 100+ channels:** Use channel IDs instead of channel names to avoid Slack API rate limits during startup.
+
+- **Channel names** (default): `"adminChannel": "music-admin"` → Bot scans all channels to find ID (slow, but **auto-upgrades to IDs after first run**)
+- **Channel IDs** (recommended): `"adminChannel": "C01ABC123XY"` → Direct lookup (instant)
+
+**🎉 NEW: Auto-save Feature**
+
+If you configure channel names, SlackONOS will automatically update your `config.json` with the discovered IDs after the first successful startup. This means:
+- **First startup**: Slow (1-3 minutes in large workspaces)
+- **All future startups**: Instant (uses saved IDs)
+
+**Manual Configuration (Optional)**
+
+You can also manually set channel IDs to skip the first slow startup.
+
+**How to find Channel IDs:**
+1. In Slack web/desktop, right-click the channel
+2. Select "View channel details"
+3. Scroll to bottom, copy the Channel ID (format: `C` + 9+ alphanumeric characters)
+
+Example config.json:
+```json
+{
+  "adminChannel": "C01ABC123XY",
+  "standardChannel": "C987DEF654",
+  ...
+}
+```
 
 Logo for the bot in #Slack can be found at "doc/images/ZenMusic.png
 
@@ -290,7 +357,8 @@ The bot queues song requests and plays them in order. If enough people dislike t
 **Playback Control:**
 * `play` - Resume playback
 * `stop` - Stop playback
-* `setvolume <number>` - Set volume (0-100)
+* `setvolume <number>` - Set Sonos volume (0-100)
+* `setvolume <channel> <number>` - Set Soundcraft mixer channel volume (if enabled)
 
 **System:**
 * `blacklist add <@user>` - Prevent user from adding songs

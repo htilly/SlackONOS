@@ -1,10 +1,7 @@
-# Use the official Node.js image based on Alpine Linux
-# The --platform flag is used here to make sure we use a multi-platform base image
-FROM --platform=$TARGETPLATFORM node:25.1-slim AS base
-
-# Update and install git (if needed for your application)
-#RUN apk update && \
-#    apk upgrade
+# Use the official Node.js image based on Debian Slim
+# Note: ARM v7 requires Node 22 or lower, other platforms can use Node 25
+ARG TARGETPLATFORM
+FROM --platform=$TARGETPLATFORM node:22-slim AS base
 
 # Clear npm cache to reduce image size and avoid potential issues
 RUN npm cache clean --force

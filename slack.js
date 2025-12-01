@@ -10,7 +10,21 @@ module.exports = function SlackSystem({ botToken, appToken, logger, onCommand })
         appToken,
         logger,
         logLevel: "debug", // Keep debug for now to be safe
-        clientPingTimeout: 30000 // Increase timeout to 30s to handle network lag
+        clientPingTimeout: 30000, // Increase timeout to 30s to handle network lag
+        autoReconnectEnabled: true // Enable automatic reconnection
+    });
+
+    // Handle disconnections gracefully
+    socket.on('disconnect', (event) => {
+        logger.warn(`Socket Mode disconnected: ${event?.reason || 'unknown reason'}`);
+    });
+
+    socket.on('error', (error) => {
+        logger.error(`Socket Mode error: ${error.message}`);
+    });
+
+    socket.on('reconnect', () => {
+        logger.info('Socket Mode reconnected successfully');
     });
 
     // ==========================================
