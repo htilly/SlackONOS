@@ -13,9 +13,9 @@ const http = require('http');
 const AIHandler = require('./ai-handler');
 const voting = require('./voting');
 const musicHelper = require('./music-helper');
-const gongMessage = fs.readFileSync('gong.txt', 'utf8').split('\n').filter(Boolean);
-const voteMessage = fs.readFileSync('vote.txt', 'utf8').split('\n').filter(Boolean);
-const ttsMessage = fs.readFileSync('tts.txt', 'utf8').split('\n').filter(Boolean);
+const gongMessage = fs.readFileSync('config/messages/gong.txt', 'utf8').split('\n').filter(Boolean);
+const voteMessage = fs.readFileSync('config/messages/vote.txt', 'utf8').split('\n').filter(Boolean);
+const ttsMessage = fs.readFileSync('config/messages/tts.txt', 'utf8').split('\n').filter(Boolean);
 
 // Try to get release tag from GitHub Actions (e.g., GITHUB_REF=refs/tags/v1.2.3)
 const getReleaseVersion = () => {
@@ -122,8 +122,8 @@ config.argv()
     webPort: 8181,
     logLevel: 'info',
     telemetryEnabled: true,
-    telemetryEndpoint: 'https://plausible.io/api/event',
-    telemetryDomain: 'slackonos.app'
+    telemetryApiKey: 'phc_dkh7jm9oxMh7lLKr8TRBY0eKQ5Jn708pXk9McRC0qlO',
+    telemetryHost: 'https://us.i.posthog.com'
   });
 
 // Application Config Values (let for runtime changes)
@@ -2043,16 +2043,16 @@ async function _debug(channel, userName) {
 async function _telemetryStatus(channel) {
   try {
     const enabled = config.get('telemetryEnabled');
-    const endpoint = config.get('telemetryEndpoint');
-    const domain = config.get('telemetryDomain');
+    const host = config.get('telemetryHost');
+    const apiKey = config.get('telemetryApiKey');
     
     let message = '📊 *Telemetry & Privacy Status*\n\n';
     
     // Status
     message += `> Status: \`${enabled ? 'Enabled ✅' : 'Disabled ❌'}\`\n`;
     if (enabled) {
-      message += `> Endpoint: \`${endpoint}\`\n`;
-      message += `> Domain: \`${domain}\`\n`;
+      message += `> Backend: \`PostHog (US)\`\n`;
+      message += `> Host: \`${host}\`\n`;
     }
     
     message += '\n*What IS Collected:* ✅\n';
@@ -2824,14 +2824,14 @@ function _help(input, channel) {
 
     // For Discord admins, show both regular + admin help (split into multiple messages due to 2000 char limit)
     if (currentPlatform === 'discord' && isAdminUser) {
-      const regularHelp = fs.readFileSync('helpText.txt', 'utf8');
+      const regularHelp = fs.readFileSync('config/help/helpText.txt', 'utf8');
       const adminHelp = fs.readFileSync('helpTextAdmin.txt', 'utf8');
 
       messages.push(aiHelpSection + regularHelp);
       messages.push('━━━━━━━━━━━━━━━━━━━━━\n**🎛️ ADMIN COMMANDS** (DJ/Admin role)\n━━━━━━━━━━━━━━━━━━━━━\n\n' + adminHelp);
     } else {
       // Slack or non-admin: show appropriate single help file
-      const helpFile = isAdminUser ? 'helpTextAdmin.txt' : 'helpText.txt';
+      const helpFile = isAdminUser ? 'config/help/helpTextAdmin.txt' : 'config/help/helpText.txt';
       messages.push(aiHelpSection + fs.readFileSync(helpFile, 'utf8'));
     }
 

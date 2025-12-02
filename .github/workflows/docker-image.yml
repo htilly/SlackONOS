@@ -10,7 +10,6 @@ on:
     branches:
       - develop # Dev builds → :develop
     paths-ignore:
-      - 'build.txt'
       - 'CHANGELOG.md'
       - '*.md'
   

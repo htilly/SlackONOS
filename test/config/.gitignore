@@ -1,0 +1,2 @@
+# Ignore test config with real tokens
+test-config.json
