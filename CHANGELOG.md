@@ -10,7 +10,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Help text and message templates are now loaded from `templates/` instead of `config/` for improved security and clarity.
+
+## [1.7.2] - 2025-12-02
+
+### Changed
+- The `add` command now uses the same search logic as the `search` command, ensuring the top result is always added to the queue. This fixes inconsistencies when adding tracks after searching.
+
 ## [Unreleased]
+
+## [1.7.0] - 2025-12-02
+
+### Added
+- **Comprehensive Integration Test Suite** - 21 automated end-to-end tests
+  - Multi-channel testing (regular + admin channels)
+  - Democratic feature validation (gong, vote, flushvote)
+  - Admin command access control testing
+  - Strict validators with `notContainsText` support
+  - Test configuration in `test/config/test-config.json`
+  - Documentation in `test/INTEGRATION_TESTING.md`
+  - NPM scripts: `test:integration` and `test:integration:verbose`
+
+### Changed
+- **Repository Organization** - Cleaner project structure
+  - Moved message templates to `config/messages/` (gong.txt, vote.txt, tts.txt)
+  - Moved help files to `config/help/` (helpText.txt, helpTextAdmin.txt)
+  - Updated Docker Compose to use `htilly/slackonos:latest` image
+  - Enhanced `.dockerignore` with better exclusions
+- **Dependency Updates**
+  - Updated sinon: 19.0.2 → 21.0.0
+  - Updated chai: 6.2.0 → 6.2.1
+  - Updated posthog-node: 4.3.0 → 5.15.0
+  - Updated openai: 4.76.1 → 6.9.1
+
+### Removed
+- Removed unused legacy files and folders
+  - Deleted empty `tools/` directory
+  - Removed `.travis.yml` (using GitHub Actions)
+  - Removed `.snyk` config file
+  - Removed `Procfile` (Heroku deployment)
+  - Removed `sound/` directory with unused audio files
+  - Cleaned up `.gitignore` (removed obsolete entries)
+
+### Fixed
+- Corrected TTS server port mapping in docker-compose (8080)
+- Removed local file paths from documentation
 
 ## [1.7.0] - 2025-12-02
 

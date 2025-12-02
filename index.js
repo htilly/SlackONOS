@@ -2130,7 +2130,16 @@ async function _add(input, channel, userName) {
   logger.info('Track to add: ' + track);
 
   try {
-    const result = await spotify.getTrack(track);
+    const tracks = await spotify.searchTrackList(track, 7);
+    if (!tracks || tracks.length === 0) {
+      _slackMessage("🤷 Couldn't find anything matching that. Try different keywords or check the spelling! 🎵", channel);
+      return;
+    }
+    const result = {
+      name: tracks[0].name,
+      artist: tracks[0].artist,
+      uri: tracks[0].uri
+    };
     
     // Check if track is blacklisted
     if (isTrackBlacklisted(result.name, result.artist)) {
