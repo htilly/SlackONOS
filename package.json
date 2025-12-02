@@ -1,6 +1,6 @@
 {
   "name": "slackonos",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Democratic Slack bot for controlling Sonos speakers with community voting",
   "main": "index.js",
   "scripts": {
