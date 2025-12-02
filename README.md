@@ -161,7 +161,7 @@ Example config.json:
 }
 ```
 
-Logo for the bot in #Slack can be found at "doc/images/ZenMusic.png
+Logo for the bot in #Slack can be found at "doc/images/SlackONOS.png
 
 **⚠️ BREAKING CHANGES (v2.0+)**
 
@@ -387,7 +387,7 @@ For detailed installation instructions, see the [INSTALL](INSTALL) file.
 
 For Discord-specific setup, see the **[Discord Setup Guide](DISCORD.md)**.
 
-**Wiki:** https://github.com/htilly/zenmusic/wiki
+**Wiki:** https://github.com/htilly/SlackONOS/wiki
 
 ---
 

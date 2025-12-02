@@ -13,12 +13,13 @@ class Telemetry {
     // Store the config object for runtime lookups
     this.config = config;
     this.enabled = config.telemetryEnabled !== false; // Enabled by default
-    this.apiKey = config.telemetryApiKey || 'phc_6pvjvLx9w8lkUcQ135lx4JEqf0w9FONpPYWiQEjUkn5';
+    this.apiKey = config.telemetryApiKey || 'phc_dkh7jm9oxMh7lLKr8TRBY0eKQ5Jn708pXk9McRC0qlO';
     this.logger = config.logger;
     
     // Initialize PostHog client
     this.client = new PostHog(this.apiKey, {
-      host: 'https://eu.i.posthog.com',
+      host: 'https://us.i.posthog.com',
+      geoipDisable: false,
     });
     
     // Generate a stable anonymous instance ID

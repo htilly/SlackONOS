@@ -1,2 +1,9 @@
 node_modules
 coverage
+.git
+.github
+test/
+doc/
+*.md
+.gitignore
+.dockerignore

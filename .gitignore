@@ -1,11 +1,8 @@
 coverage
 node_modules/
-config.json
-blacklist.txt
 .vscode/
 *.log
 config/config.json
 config/userActions.json
 docker-compose.yml
-Dockerfile-local
-build.txt
+test/config/test-config.json

@@ -1,9 +1,9 @@
 services:
   slackonos:
     container_name: slackonos
-    image: slackonos:latest
+    image: htilly/slackonos:latest
     restart: unless-stopped
     volumes:
       - PATH_TO_CONFIG_FOLDER/slackonos/config:/app/config
     ports:
-      - "8080:8080"  # Needed for TTS
+      - "8080:8080"  # HTTP server for TTS (webPort from config)
