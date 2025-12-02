@@ -19,7 +19,7 @@ class Telemetry {
     // Initialize PostHog client
     this.client = new PostHog(this.apiKey, {
       host: 'https://us.i.posthog.com',
-      geoipDisable: false,
+      disableGeoip: false,
     });
     
     // Generate a stable anonymous instance ID

@@ -1,4 +1,34 @@
 const fs = require('fs');
+// --- MIGRATION: Move legacy message/help files to /app/templates/ if found ---
+const legacyFiles = [
+  { old: 'config/gong.txt', new: 'templates/messages/gong.txt' },
+  { old: 'config/vote.txt', new: 'templates/messages/vote.txt' },
+  { old: 'config/tts.txt', new: 'templates/messages/tts.txt' },
+  { old: 'config/helpText.txt', new: 'templates/help/helpText.txt' },
+  { old: 'config/helpTextAdmin.txt', new: 'templates/help/helpTextAdmin.txt' },
+  { old: 'gong.txt', new: 'templates/messages/gong.txt' },
+  { old: 'vote.txt', new: 'templates/messages/vote.txt' },
+  { old: 'tts.txt', new: 'templates/messages/tts.txt' },
+  { old: 'helpText.txt', new: 'templates/help/helpText.txt' },
+  { old: 'helpTextAdmin.txt', new: 'templates/help/helpTextAdmin.txt' },
+];
+for (const file of legacyFiles) {
+  try {
+    if (fs.existsSync(file.old)) {
+      // Ensure target directory exists
+      const targetDir = file.new.substring(0, file.new.lastIndexOf('/'));
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+      fs.renameSync(file.old, file.new);
+      // eslint-disable-next-line no-console
+      console.log(`[SlackONOS MIGRATION] Moved ${file.old} → ${file.new}`);
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[SlackONOS MIGRATION] Failed to move ${file.old}: ${err.message}`);
+  }
+}
 const os = require('os');
 const mp3Duration = require('mp3-duration');
 const path = require('path');
@@ -13,9 +43,9 @@ const http = require('http');
 const AIHandler = require('./ai-handler');
 const voting = require('./voting');
 const musicHelper = require('./music-helper');
-const gongMessage = fs.readFileSync('config/messages/gong.txt', 'utf8').split('\n').filter(Boolean);
-const voteMessage = fs.readFileSync('config/messages/vote.txt', 'utf8').split('\n').filter(Boolean);
-const ttsMessage = fs.readFileSync('config/messages/tts.txt', 'utf8').split('\n').filter(Boolean);
+const gongMessage = fs.readFileSync('templates/messages/gong.txt', 'utf8').split('\n').filter(Boolean);
+const voteMessage = fs.readFileSync('templates/messages/vote.txt', 'utf8').split('\n').filter(Boolean);
+const ttsMessage = fs.readFileSync('templates/messages/tts.txt', 'utf8').split('\n').filter(Boolean);
 
 // Try to get release tag from GitHub Actions (e.g., GITHUB_REF=refs/tags/v1.2.3)
 const getReleaseVersion = () => {
@@ -2824,14 +2854,14 @@ function _help(input, channel) {
 
     // For Discord admins, show both regular + admin help (split into multiple messages due to 2000 char limit)
     if (currentPlatform === 'discord' && isAdminUser) {
-      const regularHelp = fs.readFileSync('config/help/helpText.txt', 'utf8');
-      const adminHelp = fs.readFileSync('helpTextAdmin.txt', 'utf8');
+      const regularHelp = fs.readFileSync('templates/help/helpText.txt', 'utf8');
+      const adminHelp = fs.readFileSync('templates/help/helpTextAdmin.txt', 'utf8');
 
       messages.push(aiHelpSection + regularHelp);
       messages.push('━━━━━━━━━━━━━━━━━━━━━\n**🎛️ ADMIN COMMANDS** (DJ/Admin role)\n━━━━━━━━━━━━━━━━━━━━━\n\n' + adminHelp);
     } else {
       // Slack or non-admin: show appropriate single help file
-      const helpFile = isAdminUser ? 'config/help/helpTextAdmin.txt' : 'config/help/helpText.txt';
+      const helpFile = isAdminUser ? 'templates/help/helpTextAdmin.txt' : 'templates/help/helpText.txt';
       messages.push(aiHelpSection + fs.readFileSync(helpFile, 'utf8'));
     }
 

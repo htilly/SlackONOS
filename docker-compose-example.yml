@@ -1,6 +1,7 @@
 services:
   slackonos:
     container_name: slackonos
+    hostname: slackonos
     image: htilly/slackonos:latest
     restart: unless-stopped
     volumes:
