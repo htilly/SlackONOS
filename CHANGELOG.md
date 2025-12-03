@@ -11,12 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Help text and message templates are now loaded from `templates/` instead of `config/` for improved security and clarity.
 
+## [1.7.3] - 2025-12-03
+
+### Added
+- **Persistent Telemetry Instance ID** - Anonymous telemetry now uses a persistent UUID stored in config, ensuring consistent tracking across restarts
+- **Soundcraft Volume Display** - The `volume` command now shows configured Soundcraft mixer channel levels alongside Sonos volume
+
+### Changed
+- Soundcraft volume conversion now uses linear dB mapping for more accurate fader representation
+
 ## [1.7.2] - 2025-12-02
 
 ### Changed
 - The `add` command now uses the same search logic as the `search` command, ensuring the top result is always added to the queue. This fixes inconsistencies when adding tracks after searching.
-
-## [Unreleased]
 
 ## [1.7.0] - 2025-12-02
 
