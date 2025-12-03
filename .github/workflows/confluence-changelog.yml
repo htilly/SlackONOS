@@ -3,6 +3,22 @@ name: Publish Changelog to Confluence
 on:
   release:
     types: [published]
+  
+  # Manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to test (e.g., v1.7.3)'
+        required: true
+        default: 'v1.7.3'
+      dry_run:
+        description: 'Dry run (log only, skip Confluence API call)'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 jobs:
   publish-changelog:
@@ -15,15 +31,23 @@ jobs:
     - name: Get release info
       id: release
       run: |
-        echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
-        echo "name=${{ github.event.release.name }}" >> $GITHUB_OUTPUT
-        # Get release body and escape for JSON
-        BODY=$(cat << 'EOF'
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          # Manual trigger - use input values
+          echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          echo "name=SlackONOS ${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          echo "url=https://github.com/htilly/SlackONOS/releases/tag/${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          echo "dry_run=${{ github.event.inputs.dry_run }}" >> $GITHUB_OUTPUT
+          echo "(Manual test run)" > release_body.txt
+        else
+          # Release trigger
+          echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          echo "name=${{ github.event.release.name }}" >> $GITHUB_OUTPUT
+          echo "url=${{ github.event.release.html_url }}" >> $GITHUB_OUTPUT
+          echo "dry_run=false" >> $GITHUB_OUTPUT
+          cat << 'EOF' > release_body.txt
         ${{ github.event.release.body }}
         EOF
-        )
-        # Store body in a file for later use
-        echo "$BODY" > release_body.txt
+        fi
     
     - name: Extract changelog for this version
       id: changelog
@@ -51,13 +75,19 @@ jobs:
         CONFLUENCE_PARENT_PAGE_ID: "753665"
         CONFLUENCE_USER: ${{ secrets.CONFLUENCE_USER }}
         CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+        DRY_RUN: ${{ steps.release.outputs.dry_run }}
       run: |
-        VERSION="${{ github.event.release.tag_name }}"
+        VERSION="${{ steps.release.outputs.version }}"
         RELEASE_DATE=$(date +%Y-%m-%d)
-        RELEASE_URL="${{ github.event.release.html_url }}"
+        RELEASE_URL="${{ steps.release.outputs.url }}"
         
         # Read changelog content
         CHANGELOG_CONTENT=$(cat changelog_section.txt)
+        
+        echo "📋 Changelog content for ${VERSION}:"
+        echo "---"
+        cat changelog_section.txt
+        echo "---"
         
         # Convert markdown to Confluence storage format (basic conversion)
         # Replace ### with h3, ## with h2, etc.
@@ -83,6 +113,21 @@ jobs:
         ${CONFLUENCE_BODY}
         <hr/>
         <p><em>This page was automatically generated from the <a href=\"https://github.com/htilly/SlackONOS\">SlackONOS</a> GitHub release.</em></p>"
+        
+        echo ""
+        echo "📄 Generated Confluence page content:"
+        echo "---"
+        echo "$PAGE_CONTENT"
+        echo "---"
+        
+        if [ "$DRY_RUN" = "true" ]; then
+          echo ""
+          echo "🧪 DRY RUN MODE - Skipping Confluence API call"
+          echo "Would create page: SlackONOS ${VERSION} - ${RELEASE_DATE}"
+          echo "Parent page ID: ${CONFLUENCE_PARENT_PAGE_ID}"
+          echo "Space key: ${CONFLUENCE_SPACE_KEY}"
+          exit 0
+        fi
         
         # Escape for JSON
         PAGE_CONTENT_ESCAPED=$(echo "$PAGE_CONTENT" | jq -Rs .)
