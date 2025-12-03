@@ -83,13 +83,7 @@ jobs:
         RELEASE_DATE=$(date +%Y-%m-%d)
         RELEASE_URL="${{ steps.release.outputs.url }}"
         
-        # Read changelog content
         CHANGELOG_CONTENT=$(cat changelog_section.txt)
-        
-        echo "📋 Changelog content for ${VERSION}:"
-        echo "---"
-        cat changelog_section.txt
-        echo "---"
         
         # Convert markdown to Confluence storage format (basic conversion)
         # Replace ### with h3, ## with h2, etc.
@@ -116,43 +110,18 @@ jobs:
         <hr/>
         <p><em>This page was automatically generated from the <a href=\"https://github.com/htilly/SlackONOS\">SlackONOS</a> GitHub release.</em></p>"
         
-        echo ""
-        echo "📄 Generated Confluence page content:"
-        echo "---"
-        echo "$PAGE_CONTENT"
-        echo "---"
-        
         if [ "$DRY_RUN" = "true" ]; then
-          echo ""
-          echo "🧪 DRY RUN MODE - Skipping Confluence API call"
-          echo "Would create page: SlackONOS ${VERSION} - ${RELEASE_DATE}"
-          echo "Parent page ID: ${CONFLUENCE_PARENT_PAGE_ID}"
-          echo "Space key: ${CONFLUENCE_SPACE_KEY}"
+          echo "🧪 DRY RUN - Would create: SlackONOS ${VERSION} - ${RELEASE_DATE}"
           exit 0
         fi
         
         # Check if secrets are configured
         if [ -z "$CONFLUENCE_USER" ] || [ -z "$CONFLUENCE_API_TOKEN" ]; then
-          echo "❌ ERROR: CONFLUENCE_USER and/or CONFLUENCE_API_TOKEN secrets are not configured!"
-          echo "Please add these secrets in GitHub repository settings."
+          echo "❌ ERROR: Confluence secrets not configured"
           exit 1
         fi
         
-        # Escape for JSON
-        PAGE_CONTENT_ESCAPED=$(echo "$PAGE_CONTENT" | jq -Rs .)
-        
-        echo ""
-        echo "🔗 Calling Confluence API..."
-        echo "   URL: ${CONFLUENCE_BASE_URL}/rest/api/content"
-        echo "   Space: ${CONFLUENCE_SPACE_KEY}"
-        echo "   Parent Page ID: ${CONFLUENCE_PARENT_PAGE_ID}"
-        echo ""
-        
-        # Disable exit on error temporarily to capture failures
-        set +e
-        
-        # Build JSON payload using jq to ensure proper formatting
-        echo "🔧 Building JSON payload..."
+        # Build JSON payload using jq
         JSON_PAYLOAD=$(jq -n \
           --arg type "page" \
           --arg title "SlackONOS ${VERSION} - ${RELEASE_DATE}" \
@@ -171,23 +140,16 @@ jobs:
               }
             }
           }')
-        JQ_EXIT=$?
-        if [ $JQ_EXIT -ne 0 ]; then
-          echo "❌ jq failed to build payload (exit code: $JQ_EXIT)"
-          exit 1
-        fi
-        echo "✓ JSON payload built successfully"
+
         
         # Write payload to temp file to avoid shell escaping issues
         echo "$JSON_PAYLOAD" > /tmp/confluence_payload.json
         
-        # Pre-compute the Authorization header to avoid shell escaping issues
+        # Pre-compute auth header
         AUTH_HEADER=$(printf '%s:%s' "${CONFLUENCE_USER}" "${CONFLUENCE_API_TOKEN}" | base64 | tr -d '\n')
-        echo "🔐 Auth header generated (length: ${#AUTH_HEADER})"
         
-        # Create the page via Confluence REST API
-        echo "🔧 Making API request..."
-        echo "Debug: Using URL: ${CONFLUENCE_BASE_URL}/rest/api/content"
+        # Create Confluence page
+        echo "📤 Creating Confluence page for ${VERSION}..."
         
         # Write response to file to avoid any shell escaping issues
         HTTP_CODE=$(curl -s -o /tmp/response.json -w "%{http_code}" -X POST \
@@ -198,26 +160,14 @@ jobs:
           --data-binary @/tmp/confluence_payload.json)
         CURL_EXIT=$?
         
-        echo "🔍 Curl exit code: $CURL_EXIT"
-        echo "🔍 HTTP code: $HTTP_CODE"
-        
         if [ $CURL_EXIT -ne 0 ]; then
-          echo "❌ curl failed with exit code: $CURL_EXIT"
-          echo "Payload file contents:"
-          cat /tmp/confluence_payload.json
-          echo ""
-          echo "Response (if any):"
-          cat /tmp/response.json 2>/dev/null || echo "(no response)"
+          echo "❌ Request failed (curl exit: $CURL_EXIT)"
+          cat /tmp/response.json 2>/dev/null
           exit 1
         fi
-        echo "✓ API request completed"
         
         # Read response from file
         HTTP_BODY=$(cat /tmp/response.json)
-        
-        echo "📨 API Response (HTTP ${HTTP_CODE}):"
-        echo "$HTTP_BODY" | jq . 2>/dev/null || echo "$HTTP_BODY"
-        echo ""
         
         if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
           PAGE_URL=$(echo "$HTTP_BODY" | jq -r '._links.base + ._links.webui // empty' 2>/dev/null)
@@ -226,6 +176,7 @@ jobs:
             echo "🔗 Page URL: ${PAGE_URL}"
           fi
         else
-          echo "❌ Failed to create Confluence page (HTTP ${HTTP_CODE})"
+          echo "❌ Failed (HTTP ${HTTP_CODE}):"
+          echo "$HTTP_BODY" | jq . 2>/dev/null || echo "$HTTP_BODY"
           exit 1
         fi
