@@ -181,43 +181,51 @@ jobs:
         # Write payload to temp file to avoid shell escaping issues
         echo "$JSON_PAYLOAD" > /tmp/confluence_payload.json
         
-        # Create the page via Confluence REST API - capture both response and HTTP code
-        echo "🔧 Making API request..."
-        echo "Debug: File exists check:"
-        ls -la /tmp/confluence_payload.json || echo "File does not exist!"
+        # Pre-compute the Authorization header to avoid shell escaping issues
+        AUTH_HEADER=$(printf '%s:%s' "${CONFLUENCE_USER}" "${CONFLUENCE_API_TOKEN}" | base64 | tr -d '\n')
+        echo "🔐 Auth header generated (length: ${#AUTH_HEADER})"
         
-        HTTP_RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" -X POST \
-          -H "Authorization: Basic $(echo -n "${CONFLUENCE_USER}:${CONFLUENCE_API_TOKEN}" | base64)" \
+        # Create the page via Confluence REST API
+        echo "🔧 Making API request..."
+        echo "Debug: Using URL: ${CONFLUENCE_BASE_URL}/rest/api/content"
+        
+        # Write response to file to avoid any shell escaping issues
+        HTTP_CODE=$(curl -s -o /tmp/response.json -w "%{http_code}" -X POST \
+          -H "Authorization: Basic ${AUTH_HEADER}" \
           -H "Content-Type: application/json" \
           -H "Accept: application/json" \
           "${CONFLUENCE_BASE_URL}/rest/api/content" \
           --data-binary @/tmp/confluence_payload.json)
         CURL_EXIT=$?
         
+        echo "🔍 Curl exit code: $CURL_EXIT"
+        echo "🔍 HTTP code: $HTTP_CODE"
+        
         if [ $CURL_EXIT -ne 0 ]; then
           echo "❌ curl failed with exit code: $CURL_EXIT"
-          echo "This usually means a network error or invalid request format."
           echo "Payload file contents:"
           cat /tmp/confluence_payload.json
+          echo ""
+          echo "Response (if any):"
+          cat /tmp/response.json 2>/dev/null || echo "(no response)"
           exit 1
         fi
         echo "✓ API request completed"
         
-        # Extract the body and status code
-        HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed -e 's/HTTPSTATUS\:.*//g')
-        HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tr -d '\n' | sed -e 's/.*HTTPSTATUS://')
+        # Read response from file
+        HTTP_BODY=$(cat /tmp/response.json)
         
-        echo "📨 API Response (HTTP ${HTTP_STATUS}):"
+        echo "📨 API Response (HTTP ${HTTP_CODE}):"
         echo "$HTTP_BODY" | jq . 2>/dev/null || echo "$HTTP_BODY"
         echo ""
         
-        if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+        if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
           PAGE_URL=$(echo "$HTTP_BODY" | jq -r '._links.base + ._links.webui // empty' 2>/dev/null)
           echo "✅ Confluence page created for ${VERSION}"
           if [ -n "$PAGE_URL" ]; then
             echo "🔗 Page URL: ${PAGE_URL}"
           fi
         else
-          echo "❌ Failed to create Confluence page (HTTP ${HTTP_STATUS})"
+          echo "❌ Failed to create Confluence page (HTTP ${HTTP_CODE})"
           exit 1
         fi
