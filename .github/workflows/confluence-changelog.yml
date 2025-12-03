@@ -69,6 +69,7 @@ jobs:
         echo "$CHANGELOG_SECTION" > changelog_section.txt
         
     - name: Create Confluence page
+      shell: bash {0}
       env:
         CONFLUENCE_BASE_URL: https://htilly.atlassian.net/wiki
         CONFLUENCE_SPACE_KEY: "~5570587e5fa4f786c64409a23448de7e84a65c"
@@ -77,6 +78,7 @@ jobs:
         CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
         DRY_RUN: ${{ steps.release.outputs.dry_run }}
       run: |
+        set -o pipefail
         VERSION="${{ steps.release.outputs.version }}"
         RELEASE_DATE=$(date +%Y-%m-%d)
         RELEASE_URL="${{ steps.release.outputs.url }}"
@@ -179,9 +181,6 @@ jobs:
         # Write payload to temp file to avoid shell escaping issues
         echo "$JSON_PAYLOAD" > /tmp/confluence_payload.json
         
-        # Re-enable exit on error
-        set -e
-        
         # Create the page via Confluence REST API - capture both response and HTTP code
         echo "🔧 Making API request..."
         HTTP_RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" -X POST \
@@ -190,6 +189,16 @@ jobs:
           -H "Accept: application/json" \
           "${CONFLUENCE_BASE_URL}/rest/api/content" \
           -d @/tmp/confluence_payload.json)
+        CURL_EXIT=$?
+        
+        if [ $CURL_EXIT -ne 0 ]; then
+          echo "❌ curl failed with exit code: $CURL_EXIT"
+          echo "This usually means a network error or invalid request format."
+          echo "Payload file contents:"
+          cat /tmp/confluence_payload.json
+          exit 1
+        fi
+        echo "✓ API request completed"
         
         # Extract the body and status code
         HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed -e 's/HTTPSTATUS\:.*//g')
