@@ -183,12 +183,15 @@ jobs:
         
         # Create the page via Confluence REST API - capture both response and HTTP code
         echo "🔧 Making API request..."
+        echo "Debug: File exists check:"
+        ls -la /tmp/confluence_payload.json || echo "File does not exist!"
+        
         HTTP_RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" -X POST \
           -H "Authorization: Basic $(echo -n "${CONFLUENCE_USER}:${CONFLUENCE_API_TOKEN}" | base64)" \
           -H "Content-Type: application/json" \
           -H "Accept: application/json" \
           "${CONFLUENCE_BASE_URL}/rest/api/content" \
-          -d @/tmp/confluence_payload.json)
+          --data-binary @/tmp/confluence_payload.json)
         CURL_EXIT=$?
         
         if [ $CURL_EXIT -ne 0 ]; then
