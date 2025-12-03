@@ -56,6 +56,7 @@ See the `LICENSE` file for full details.
 - ❌ No IP addresses or location data
 - ❌ No command usage or voting patterns
 
+
 Telemetry is **enabled by default** but can be disabled anytime:
 ```json
 {
@@ -63,9 +64,17 @@ Telemetry is **enabled by default** but can be disabled anytime:
 }
 ```
 
+Or, disable telemetry instantly from Slack (admin channel):
+```
+setconfig telemetryEnabled false
+```
+
 📖 **[Full Telemetry Documentation](TELEMETRY.md)** - Details, privacy info, and self-hosting options
 
-Use the `telemetry` admin command to view current status and what data is being sent.
+
+Use the `telemetry` admin command in Slack (admin channel) to view current status and what data is being sent.
+
+**Note:** Analytics data is not publicly viewable; it is only accessible to the maintainers for improving the bot. If you self-host, you control all telemetry endpoints.
 
 ## Quick Start
 

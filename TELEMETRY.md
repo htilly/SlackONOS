@@ -73,13 +73,6 @@ Default API key is included, but you can use your own PostHog instance:
 TELEMETRY_API_KEY=phc_YOUR_PROJECT_API_KEY
 ```
 
-### Custom PostHog Instance
-If self-hosting PostHog, you can configure the endpoint in `telemetry.js`:
-```javascript
-this.client = new PostHog(this.apiKey, {
-  host: 'https://your-posthog-instance.com',
-});
-```
 
 ## Disabling Telemetry
 
@@ -105,16 +98,6 @@ Edit `config/config.json` and add:
 
 No data will be sent when disabled.
 
-## Viewing Analytics
-
-If using the default PostHog cloud instance, analytics are available at:
-- **Dashboard**: https://app.posthog.com/
-
-Create custom insights to view:
-- **Unique instances over time**: Trend of `startup` events by unique users
-- **Geographic distribution**: Breakdown by `$geoip_country_name` (requires GeoIP enabled)
-- **OS/Platform distribution**: Breakdown by `os_platform` or `node_version`
-- **Uptime tracking**: Average `uptime_hours` from `heartbeat` events
 
 ## Technical Implementation
 

@@ -1549,8 +1549,8 @@ function _setVolume(input, channel, userName) {
       // Typical Soundcraft range: -70 dB (silent) to 0 dB (max)
       const minDB = -70;
       const maxDB = 0;
-      // Curve factor (gamma): 2.5 gives a good match to the slider
-      const gamma = 2.5;
+      // Curve factor (gamma): 1.2 gives a realistic audio fader mapping
+      const gamma = 1.2;
       const percent = vol / 100;
       const volDB = minDB + (maxDB - minDB) * Math.pow(percent, gamma);
       

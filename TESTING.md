@@ -1,24 +1,28 @@
-# Kom igång med tester
 
-## Snabbstart
+# Getting Started with Testing
 
-1. **Installera dependencies** (inklusive sinon för mocking):
+
+## Quick Start
+
+1. **Install dependencies** (including sinon for mocking):
 ```bash
 npm install
 ```
 
-2. **Kör alla tester**:
+2. **Run all tests**:
 ```bash
 npm test
 ```
 
-Du bör se output från alla testfiler:
-- ✅ `test.mjs` (befintlig numFormatter test)
-- ✅ `voting.test.mjs` (voting system logik)
-- ✅ `parser.test.mjs` (argument parser)
-- ✅ `integration.test.mjs` (integration tester)
 
-## Exempel på test output
+You should see output from all test files:
+- ✅ `test.mjs` (existing numFormatter test)
+- ✅ `voting.test.mjs` (voting system logic)
+- ✅ `parser.test.mjs` (argument parser)
+- ✅ `integration.test.mjs` (integration tests)
+
+
+## Example Test Output
 
 ```
   Voting System Logic
@@ -39,19 +43,24 @@ Du bör se output från alla testfiler:
   50 passing (25ms)
 ```
 
-## När du gör ändringar
 
-**Innan du pushar kod**, kör testerna:
+## When Making Changes
+
+
+**Before you push code**, run the tests:
 
 ```bash
 npm test
 ```
 
-Om alla tester passerar ✅ = dina ändringar har inte brutit befintlig funktionalitet!
 
-## Lägga till nya tester
+If all tests pass ✅, your changes have not broken existing functionality!
 
-När du lägger till ny funktionalitet, lägg till ett test först:
+
+## Adding New Tests
+
+
+When you add new functionality, add a test first:
 
 ```javascript
 // test/myfeature.test.mjs
@@ -65,36 +74,46 @@ describe('My New Feature', function() {
 });
 ```
 
-Detta kallas **Test Driven Development (TDD)**.
 
-## Vad testas?
+This is called **Test Driven Development (TDD)**.
 
-✅ **Voting logik** - Gong/vote räknare, limits, immunity
-✅ **Argument parsing** - Quote handling, edge cases  
-✅ **Business logik** - Duplicates, state management, URI conversion
+
+## What is Tested?
+
+
+✅ **Voting logic** - Gong/vote counters, limits, immunity
+✅ **Argument parsing** - Quote handling, edge cases
+✅ **Business logic** - Duplicates, state management, URI conversion
 ✅ **Config validation** - Number ranges, type checking
-✅ **Blacklist hantering** - Add/remove/check users
+✅ **Blacklist handling** - Add/remove/check users
 
-## Vad testas INTE (än)?
 
-❌ Faktiska Spotify API anrop
-❌ Faktiska Sonos anrop  
-❌ Slack meddelanden
+## What is NOT Tested (yet)?
 
-→ Dessa kan mockas i framtiden med sinon!
 
-## Fördelar
+❌ Actual Spotify API calls
+❌ Actual Sonos calls
+❌ Slack messages
 
-🚀 **Snabbt** - Testerna körs på < 1 sekund
-🔒 **Säkert** - Upptäck bugs innan de når produktion
-📚 **Dokumentation** - Visar hur koden ska fungera
-♻️ **Refactoring** - Våga ändra kod, testerna berättar om något går sönder
+
+→ These can be mocked in the future with sinon!
+
+
+## Benefits
+
+
+🚀 **Fast** - Tests run in under 1 second
+🔒 **Safe** - Catch bugs before they reach production
+📚 **Documentation** - Shows how the code should work
+♻️ **Refactoring** - Change code confidently, tests will tell you if something breaks
+
 
 ## Tips
 
-- Kör `npm test` innan varje commit
-- Skriv test när du hittar en bug (regression test)
-- Håll tester enkla och fokuserade
-- Ett test = en assert (ungefär)
 
-Lycka till! 🎉
+- Run `npm test` before every commit
+- Write a test when you find a bug (regression test)
+- Keep tests simple and focused
+- One test = one assert (roughly)
+
+Good luck! 🎉
