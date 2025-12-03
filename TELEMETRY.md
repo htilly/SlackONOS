@@ -15,7 +15,7 @@ Telemetry uses [PostHog](https://posthog.com/), an open-source product analytics
 When enabled, the following anonymous data is sent:
 
 ### All Events
-- **Instance ID**: SHA256 hash of hostname (anonymous, stable identifier) - used as `distinctId`
+- **Instance ID**: Random UUID generated on first boot and persisted in `config/config.json` (anonymous, stable identifier) - used as `distinctId`
 - **OS Platform**: e.g., `linux`, `darwin`, `win32`
 - **OS Release**: Kernel version
 - **Node Version**: e.g., `v22.21.1`
@@ -49,7 +49,7 @@ PostHog automatically enriches events with:
 ## Privacy & Compliance
 
 - **No cookies or tracking scripts** (server-side only)
-- **Anonymous instance IDs** (hashed hostname)
+- **Anonymous instance IDs** (random UUID, persisted in config)
 - **No user behavior tracking** (only system events)
 - **Fail-silent** (errors never crash the app)
 - **Batched events** (PostHog SDK handles buffering and retry)

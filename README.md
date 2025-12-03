@@ -47,7 +47,7 @@ See the `LICENSE` file for full details.
 - ✅ Uptime duration (hours/days running)
 - ✅ OS platform & Node.js version
 - ✅ Release version/commit hash
-- ✅ Anonymous instance ID (hashed hostname - no PII)
+- ✅ Anonymous instance ID (random UUID, persisted in config - no PII)
 
 **What's NOT Collected:**
 - ❌ No user data, usernames, or chat messages

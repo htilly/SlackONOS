@@ -1,0 +1,109 @@
+name: Publish Changelog to Confluence
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish-changelog:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Get release info
+      id: release
+      run: |
+        echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+        echo "name=${{ github.event.release.name }}" >> $GITHUB_OUTPUT
+        # Get release body and escape for JSON
+        BODY=$(cat << 'EOF'
+        ${{ github.event.release.body }}
+        EOF
+        )
+        # Store body in a file for later use
+        echo "$BODY" > release_body.txt
+    
+    - name: Extract changelog for this version
+      id: changelog
+      run: |
+        VERSION="${{ github.event.release.tag_name }}"
+        # Remove 'v' prefix if present
+        VERSION_NUM="${VERSION#v}"
+        
+        # Try to extract the changelog section for this version
+        # Look for the version header and extract until the next version header
+        CHANGELOG_SECTION=$(awk "/## \[${VERSION_NUM}\]/{found=1; next} /## \[/{if(found) exit} found{print}" CHANGELOG.md)
+        
+        if [ -z "$CHANGELOG_SECTION" ]; then
+          # Fallback to release body if no changelog section found
+          CHANGELOG_SECTION=$(cat release_body.txt)
+        fi
+        
+        # Save to file for the API call
+        echo "$CHANGELOG_SECTION" > changelog_section.txt
+        
+    - name: Create Confluence page
+      env:
+        CONFLUENCE_BASE_URL: https://htilly.atlassian.net/wiki
+        CONFLUENCE_SPACE_KEY: "~5570587e5fa4f786c64409a23448de7e84a65c"
+        CONFLUENCE_PARENT_PAGE_ID: "753665"
+        CONFLUENCE_USER: ${{ secrets.CONFLUENCE_USER }}
+        CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+      run: |
+        VERSION="${{ github.event.release.tag_name }}"
+        RELEASE_DATE=$(date +%Y-%m-%d)
+        RELEASE_URL="${{ github.event.release.html_url }}"
+        
+        # Read changelog content
+        CHANGELOG_CONTENT=$(cat changelog_section.txt)
+        
+        # Convert markdown to Confluence storage format (basic conversion)
+        # Replace ### with h3, ## with h2, etc.
+        CONFLUENCE_BODY=$(echo "$CHANGELOG_CONTENT" | \
+          sed 's/^### \(.*\)/<h3>\1<\/h3>/g' | \
+          sed 's/^## \(.*\)/<h2>\1<\/h2>/g' | \
+          sed 's/^- \(.*\)/<li>\1<\/li>/g' | \
+          sed 's/\*\*\([^*]*\)\*\*/<strong>\1<\/strong>/g' | \
+          sed 's/`\([^`]*\)`/<code>\1<\/code>/g' | \
+          tr '\n' ' ' | \
+          sed 's/<li>/<ul><li>/1' | \
+          sed 's/<\/li> *$/<\/li><\/ul>/' | \
+          sed 's/<\/li> *<li>/<\/li><li>/g')
+        
+        # Build the page content
+        PAGE_CONTENT="<h2>Release Information</h2>
+        <table>
+          <tr><th>Version</th><td>${VERSION}</td></tr>
+          <tr><th>Release Date</th><td>${RELEASE_DATE}</td></tr>
+          <tr><th>GitHub Release</th><td><a href=\"${RELEASE_URL}\">${RELEASE_URL}</a></td></tr>
+        </table>
+        <h2>Changes</h2>
+        ${CONFLUENCE_BODY}
+        <hr/>
+        <p><em>This page was automatically generated from the <a href=\"https://github.com/htilly/SlackONOS\">SlackONOS</a> GitHub release.</em></p>"
+        
+        # Escape for JSON
+        PAGE_CONTENT_ESCAPED=$(echo "$PAGE_CONTENT" | jq -Rs .)
+        
+        # Create the page via Confluence REST API
+        curl -s -X POST \
+          -H "Authorization: Basic $(echo -n "${CONFLUENCE_USER}:${CONFLUENCE_API_TOKEN}" | base64)" \
+          -H "Content-Type: application/json" \
+          -H "Accept: application/json" \
+          "${CONFLUENCE_BASE_URL}/rest/api/content" \
+          -d "{
+            \"type\": \"page\",
+            \"title\": \"SlackONOS ${VERSION} - ${RELEASE_DATE}\",
+            \"ancestors\": [{\"id\": \"${CONFLUENCE_PARENT_PAGE_ID}\"}],
+            \"space\": {\"key\": \"${CONFLUENCE_SPACE_KEY}\"},
+            \"body\": {
+              \"storage\": {
+                \"value\": ${PAGE_CONTENT_ESCAPED},
+                \"representation\": \"storage\"
+              }
+            }
+          }" | jq .
+        
+        echo "✅ Confluence page created for ${VERSION}"

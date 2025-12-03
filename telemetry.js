@@ -1,6 +1,8 @@
 'use strict';
 
 const os = require('os');
+const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
 const { PostHog } = require('posthog-node');
 
@@ -22,8 +24,8 @@ class Telemetry {
       disableGeoip: false,
     });
     
-    // Generate a stable anonymous instance ID
-    this.instanceId = this._getInstanceId();
+    // Generate or retrieve a stable persistent instance ID
+    this.instanceId = this._getOrCreateInstanceId();
     
     // Track startup time for uptime calculations
     this.startTime = Date.now();
@@ -33,12 +35,46 @@ class Telemetry {
   }
 
   /**
-   * Generate a stable anonymous instance ID based on hostname
-   * This allows tracking unique instances without PII
+   * Get or create a persistent anonymous instance ID
+   * Stored in config/config.json as 'telemetryInstanceId'
+   * This allows tracking unique instances without PII, persisted across restarts
    */
-  _getInstanceId() {
-    const hostname = os.hostname();
-    return crypto.createHash('sha256').update(hostname).digest('hex').substring(0, 16);
+  _getOrCreateInstanceId() {
+    const configPath = path.join(process.cwd(), 'config', 'config.json');
+    
+    try {
+      // Read existing config
+      const configData = fs.readFileSync(configPath, 'utf8');
+      const configJson = JSON.parse(configData);
+      
+      // Check if instance ID already exists
+      if (configJson.telemetryInstanceId) {
+        if (this.logger) {
+          this.logger.info(`📊 Using existing telemetry instance ID: ${configJson.telemetryInstanceId.substring(0, 8)}...`);
+        }
+        return configJson.telemetryInstanceId;
+      }
+      
+      // Generate new instance ID
+      const newId = crypto.randomUUID();
+      configJson.telemetryInstanceId = newId;
+      
+      // Write back to config file
+      fs.writeFileSync(configPath, JSON.stringify(configJson, null, 4), 'utf8');
+      
+      if (this.logger) {
+        this.logger.info(`📊 Generated new telemetry instance ID: ${newId.substring(0, 8)}...`);
+      }
+      
+      return newId;
+    } catch (err) {
+      // Fallback to hostname-based ID if config file can't be read/written
+      if (this.logger) {
+        this.logger.warn(`📊 Could not persist instance ID to config: ${err.message}. Using hostname-based ID.`);
+      }
+      const hostname = os.hostname();
+      return crypto.createHash('sha256').update(hostname).digest('hex').substring(0, 16);
+    }
   }
 
   /**
