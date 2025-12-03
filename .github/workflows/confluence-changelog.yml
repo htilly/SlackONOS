@@ -137,7 +137,9 @@ jobs:
         fi
         
         # Escape for JSON
+        echo "🔧 Escaping content for JSON..."
         PAGE_CONTENT_ESCAPED=$(echo "$PAGE_CONTENT" | jq -Rs .)
+        echo "✓ JSON escaping complete"
         
         echo ""
         echo "🔗 Calling Confluence API..."
@@ -147,6 +149,7 @@ jobs:
         echo ""
         
         # Create the page via Confluence REST API - capture both response and HTTP code
+        echo "🔧 Making curl request..."
         HTTP_RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" -X POST \
           -H "Authorization: Basic $(echo -n "${CONFLUENCE_USER}:${CONFLUENCE_API_TOKEN}" | base64)" \
           -H "Content-Type: application/json" \
@@ -163,7 +166,9 @@ jobs:
                 \"representation\": \"storage\"
               }
             }
-          }")
+          }") || echo "⚠️ curl command failed with exit code: $?"
+        
+        echo "✓ curl request complete"
         
         # Extract the body and status code
         HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed -e 's/HTTPSTATUS\:.*//g')
