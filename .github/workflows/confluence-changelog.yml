@@ -129,11 +129,25 @@ jobs:
           exit 0
         fi
         
+        # Check if secrets are configured
+        if [ -z "$CONFLUENCE_USER" ] || [ -z "$CONFLUENCE_API_TOKEN" ]; then
+          echo "❌ ERROR: CONFLUENCE_USER and/or CONFLUENCE_API_TOKEN secrets are not configured!"
+          echo "Please add these secrets in GitHub repository settings."
+          exit 1
+        fi
+        
         # Escape for JSON
         PAGE_CONTENT_ESCAPED=$(echo "$PAGE_CONTENT" | jq -Rs .)
         
-        # Create the page via Confluence REST API
-        curl -s -X POST \
+        echo ""
+        echo "🔗 Calling Confluence API..."
+        echo "   URL: ${CONFLUENCE_BASE_URL}/rest/api/content"
+        echo "   Space: ${CONFLUENCE_SPACE_KEY}"
+        echo "   Parent Page ID: ${CONFLUENCE_PARENT_PAGE_ID}"
+        echo ""
+        
+        # Create the page via Confluence REST API - capture both response and HTTP code
+        HTTP_RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" -X POST \
           -H "Authorization: Basic $(echo -n "${CONFLUENCE_USER}:${CONFLUENCE_API_TOKEN}" | base64)" \
           -H "Content-Type: application/json" \
           -H "Accept: application/json" \
@@ -149,6 +163,23 @@ jobs:
                 \"representation\": \"storage\"
               }
             }
-          }" | jq .
+          }")
         
-        echo "✅ Confluence page created for ${VERSION}"
+        # Extract the body and status code
+        HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed -e 's/HTTPSTATUS\:.*//g')
+        HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tr -d '\n' | sed -e 's/.*HTTPSTATUS://')
+        
+        echo "📨 API Response (HTTP ${HTTP_STATUS}):"
+        echo "$HTTP_BODY" | jq . 2>/dev/null || echo "$HTTP_BODY"
+        echo ""
+        
+        if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+          PAGE_URL=$(echo "$HTTP_BODY" | jq -r '._links.base + ._links.webui // empty' 2>/dev/null)
+          echo "✅ Confluence page created for ${VERSION}"
+          if [ -n "$PAGE_URL" ]; then
+            echo "🔗 Page URL: ${PAGE_URL}"
+          fi
+        else
+          echo "❌ Failed to create Confluence page (HTTP ${HTTP_STATUS})"
+          exit 1
+        fi
