@@ -262,6 +262,29 @@ class SoundcraftHandler {
     }
 
     /**
+     * Get all channel volumes
+     * @returns {Promise<Object>} Object with channel names and their volumes (0-100)
+     */
+    async getAllVolumes() {
+        if (!this.connected || !this.connection) {
+            this.logger.error('Not connected to Soundcraft mixer');
+            return {};
+        }
+
+        const channels = this.getChannelNames();
+        const volumes = {};
+
+        for (const channelName of channels) {
+            const volume = await this.getVolume(channelName);
+            if (volume !== null) {
+                volumes[channelName] = volume;
+            }
+        }
+
+        return volumes;
+    }
+
+    /**
      * Check if Soundcraft integration is enabled and connected
      * @returns {boolean}
      */

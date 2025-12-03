@@ -461,18 +461,23 @@ Please drop a comment or send a PM if you use this bot! Contributions and improv
  
 **ToDo**
 
-* Code cleaning! =)
 * Simple "view" window of what is happening in the channel. I.e. - Put on big-screen of what is happening in #music
 * Backend DB
-* Text-to-speech. 
 * Now playing. Announce when starting a new song.
 * When asking for "Stat" show most played songs and most active users.
 * When local playlist is empty -> fallback and start playing "$playlist", i.e. Spotify topp 100.
 * Limit consecutive song additions by non-admin
 * Delete range of songs from queue
-* Implement some code-testing
 
 **DONE**
+* Code cleaning and refactoring (templates, migration logic, legacy file cleanup)
+* Comprehensive integration test suite (21 tests)
+* Unit tests for voting, parsing, and utilities
+* Text-to-speech (TTS) feature
+* Soundcraft mixer integration with volume control
+* AI-powered music suggestions (OpenAI)
+* Discord support
+* Telemetry with PostHog (opt-out available)
 * Vote to flush entire queue
 * New vote system including votecheck
 * Restrict songs already in the queue
@@ -496,4 +501,4 @@ Please drop a comment or send a PM if you use this bot! Contributions and improv
 * Admin commands from i.e."swe-music-admin".
 * Vote - If +1 in slack then move in queue. (sort of)
 * Ask "what is playing".
-* 
+

@@ -1509,16 +1509,27 @@ async function _checkUser(userId) {
   }
 }
 
-function _getVolume(channel) {
-  sonos
-    .getVolume()
-    .then((vol) => {
-      logger.info('The volume is: ' + vol);
-      _slackMessage('🔊 Currently blasting at *' + vol + '* out of ' + maxVolume + ' (your ears\' limits, not ours)', channel);
-    })
-    .catch((err) => {
-      logger.error('Error occurred: ' + err);
-    });
+async function _getVolume(channel) {
+  try {
+    const vol = await sonos.getVolume();
+    logger.info('The volume is: ' + vol);
+    let message = '🔊 *Sonos:* Currently blasting at *' + vol + '* out of ' + maxVolume + ' (your ears\' limits, not ours)';
+
+    // If Soundcraft is enabled, also show Soundcraft channel volumes
+    if (soundcraft.isEnabled()) {
+      const scVolumes = await soundcraft.getAllVolumes();
+      if (Object.keys(scVolumes).length > 0) {
+        message += '\n\n🎛️ *Soundcraft Channels:*';
+        for (const [name, scVol] of Object.entries(scVolumes)) {
+          message += `\n> *${name}:* ${scVol}%`;
+        }
+      }
+    }
+
+    _slackMessage(message, channel);
+  } catch (err) {
+    logger.error('Error occurred: ' + err);
+  }
 }
 
 function _setVolume(input, channel, userName) {
@@ -1545,14 +1556,12 @@ function _setVolume(input, channel, userName) {
         return;
       }
 
-      // Convert 0-100 scale to dB using a logarithmic mapping
-      // Typical Soundcraft range: -70 dB (silent) to 0 dB (max)
+      // Convert 0-100 scale to dB using linear mapping
+      // Soundcraft range: -70 dB (silent) to 0 dB (max)
+      // 0% = -70 dB, 50% = -35 dB, 100% = 0 dB
       const minDB = -70;
       const maxDB = 0;
-      // Curve factor (gamma): 1.2 gives a realistic audio fader mapping
-      const gamma = 1.2;
-      const percent = vol / 100;
-      const volDB = minDB + (maxDB - minDB) * Math.pow(percent, gamma);
+      const volDB = minDB + (maxDB - minDB) * (vol / 100);
       
       logger.info(`Setting Soundcraft channel '${possibleChannelName}' to ${vol}% (${volDB} dB)`);
 
