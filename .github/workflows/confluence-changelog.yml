@@ -137,9 +137,7 @@ jobs:
         fi
         
         # Escape for JSON
-        echo "🔧 Escaping content for JSON..."
         PAGE_CONTENT_ESCAPED=$(echo "$PAGE_CONTENT" | jq -Rs .)
-        echo "✓ JSON escaping complete"
         
         echo ""
         echo "🔗 Calling Confluence API..."
@@ -148,27 +146,36 @@ jobs:
         echo "   Parent Page ID: ${CONFLUENCE_PARENT_PAGE_ID}"
         echo ""
         
+        # Build JSON payload using jq to ensure proper formatting
+        JSON_PAYLOAD=$(jq -n \
+          --arg type "page" \
+          --arg title "SlackONOS ${VERSION} - ${RELEASE_DATE}" \
+          --arg parentId "${CONFLUENCE_PARENT_PAGE_ID}" \
+          --arg spaceKey "${CONFLUENCE_SPACE_KEY}" \
+          --arg bodyValue "$PAGE_CONTENT" \
+          '{
+            type: $type,
+            title: $title,
+            ancestors: [{id: $parentId}],
+            space: {key: $spaceKey},
+            body: {
+              storage: {
+                value: $bodyValue,
+                representation: "storage"
+              }
+            }
+          }')
+        
+        # Write payload to temp file to avoid shell escaping issues
+        echo "$JSON_PAYLOAD" > /tmp/confluence_payload.json
+        
         # Create the page via Confluence REST API - capture both response and HTTP code
-        echo "🔧 Making curl request..."
         HTTP_RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" -X POST \
           -H "Authorization: Basic $(echo -n "${CONFLUENCE_USER}:${CONFLUENCE_API_TOKEN}" | base64)" \
           -H "Content-Type: application/json" \
           -H "Accept: application/json" \
           "${CONFLUENCE_BASE_URL}/rest/api/content" \
-          -d "{
-            \"type\": \"page\",
-            \"title\": \"SlackONOS ${VERSION} - ${RELEASE_DATE}\",
-            \"ancestors\": [{\"id\": \"${CONFLUENCE_PARENT_PAGE_ID}\"}],
-            \"space\": {\"key\": \"${CONFLUENCE_SPACE_KEY}\"},
-            \"body\": {
-              \"storage\": {
-                \"value\": ${PAGE_CONTENT_ESCAPED},
-                \"representation\": \"storage\"
-              }
-            }
-          }") || echo "⚠️ curl command failed with exit code: $?"
-        
-        echo "✓ curl request complete"
+          -d @/tmp/confluence_payload.json)
         
         # Extract the body and status code
         HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed -e 's/HTTPSTATUS\:.*//g')
