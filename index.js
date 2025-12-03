@@ -1545,9 +1545,14 @@ function _setVolume(input, channel, userName) {
         return;
       }
 
-      // Convert 0-100 scale to dB (-100 to 0)
-      // 0 = -100 dB (silent), 100 = 0 dB (max)
-      const volDB = (vol - 100);
+      // Convert 0-100 scale to dB using a logarithmic mapping
+      // Typical Soundcraft range: -70 dB (silent) to 0 dB (max)
+      const minDB = -70;
+      const maxDB = 0;
+      // Curve factor (gamma): 2.5 gives a good match to the slider
+      const gamma = 2.5;
+      const percent = vol / 100;
+      const volDB = minDB + (maxDB - minDB) * Math.pow(percent, gamma);
       
       logger.info(`Setting Soundcraft channel '${possibleChannelName}' to ${vol}% (${volDB} dB)`);
 
