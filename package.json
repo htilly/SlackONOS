@@ -45,7 +45,7 @@
     "sonos": "^1.14.2",
     "soundcraft-ui-connection": "^4.0.0",
     "urlencode": "^2.0.0",
-    "winston": "^3.18.3",
+    "winston": "^3.19.0",
     "xml2js": "^0.6.2"
   },
   "engines": {
