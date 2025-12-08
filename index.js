@@ -1860,6 +1860,27 @@ async function handleAdminAPI(req, res, url) {
       handleLogStream(req, res);
       return;
     }
+
+    // Client-side WebAuthn log relay
+    if (urlPath === '/api/admin/webauthn-log' && req.method === 'POST') {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const msg = payload.message || 'WebAuthn client log';
+        const meta = payload.meta || {};
+        if (logger && typeof logger.info === 'function') {
+          logger.info(`[WEBAUTHN_CLIENT] ${msg} ${JSON.stringify(meta)}`);
+        } else {
+          console.log('[WEBAUTHN_CLIENT]', msg, meta);
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        if (logger) logger.error('Failed to record WebAuthn client log: ' + err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
     
     // Get log buffer (for initial load)
     if (urlPath === '/api/admin/logs/buffer') {

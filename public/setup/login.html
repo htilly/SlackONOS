@@ -200,6 +200,18 @@
     const webauthnSection = document.getElementById('webauthn-section');
     const passwordSection = document.getElementById('password-section');
 
+    const logClient = async (message, meta = {}) => {
+      try {
+        await fetch('/api/admin/webauthn-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, meta })
+        });
+      } catch (e) {
+        // ignore client log errors
+      }
+    };
+
     // Get return URL from query params
     const urlParams = new URLSearchParams(window.location.search);
     const returnUrl = urlParams.get('return') || '/admin';
@@ -249,10 +261,13 @@
         });
         
         if (!optionsResponse.ok) {
+          logClient('auth-options-error', { status: optionsResponse.status }).catch(() => {});
           throw new Error('Failed to get authentication options');
         }
         
         const options = await optionsResponse.json();
+
+        await logClient('auth-options-received', { rpId: options.rpId, userVerification: options.userVerification }).catch(() => {});
 
         // Start WebAuthn authentication
         const assertionResponse = await SimpleWebAuthnBrowser.startAuthentication(options);
@@ -267,14 +282,17 @@
         const verifyData = await verifyResponse.json();
 
         if (verifyData.verified) {
+          logClient('auth-success').catch(() => {});
           // Success - redirect
           window.location.href = returnUrl;
         } else {
+          logClient('auth-failed', { error: verifyData.error || 'not verified' }).catch(() => {});
           showError('Authentication failed. Please try again.');
           btnWebAuthn.disabled = false;
           btnWebAuthn.innerHTML = '🔐 Login with Security Key';
         }
       } catch (err) {
+        logClient('auth-error', { error: err.message }).catch(() => {});
         showError(err.message || 'WebAuthn authentication failed. Please try again.');
         btnWebAuthn.disabled = false;
         btnWebAuthn.innerHTML = '🔐 Login with Security Key';

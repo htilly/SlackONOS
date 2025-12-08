@@ -711,11 +711,24 @@ async function setupWebAuthn() {
   const credentialsList = document.getElementById('webauthn-credentials-list');
   const messageDiv = document.getElementById('webauthn-message');
 
+  const logClient = async (message, meta = {}) => {
+    try {
+      await fetch('/api/admin/webauthn-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, meta })
+      });
+    } catch (e) {
+      // ignore logging errors on client
+    }
+  };
+
   // Try to load the WebAuthn library once on init to surface errors early
   try {
     await ensureWebAuthnLib();
   } catch (err) {
     console.error('[WebAuthn] initial load failed:', err);
+    logClient('initial-load-failed', { error: err.message }).catch(() => {});
     showWebAuthnMessage(messageDiv, 'WebAuthn library failed to load. Please check network/CSP and refresh.', 'error');
   }
 
@@ -727,17 +740,20 @@ async function setupWebAuthn() {
     // Already available
     if (typeof window.SimpleWebAuthnBrowser !== 'undefined') {
       console.log('[WebAuthn] library already on window');
+      logClient('library-on-window').catch(() => {});
       return;
     }
     // Global variable (non-window) available
     if (typeof SimpleWebAuthnBrowser !== 'undefined') {
       window.SimpleWebAuthnBrowser = SimpleWebAuthnBrowser;
       console.log('[WebAuthn] library found as global, assigned to window');
+      logClient('library-found-global').catch(() => {});
       return;
     }
 
     // Dynamically load the library from CDN as a fallback (retry once)
     console.log('[WebAuthn] loading library from CDN...');
+    logClient('load-cdn-start').catch(() => {});
     const cdnUrls = [
       'https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@9.0.0/dist/bundle/index.umd.min.js',
       'https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@9.0.0/dist/bundle/index.umd.min.js?v=2'
@@ -756,12 +772,14 @@ async function setupWebAuthn() {
             }
             if (typeof window.SimpleWebAuthnBrowser !== 'undefined') {
               console.log('[WebAuthn] library loaded from CDN url:', url);
+              logClient('load-cdn-success', { url }).catch(() => {});
               resolve();
             } else {
               reject(new Error('WebAuthn library failed to load after onload'));
             }
           };
           script.onerror = (e) => {
+            logClient('load-cdn-error', { url, error: 'script onerror' }).catch(() => {});
             reject(new Error(`Failed to load WebAuthn library (${url})`));
           };
           document.head.appendChild(script);
@@ -771,6 +789,7 @@ async function setupWebAuthn() {
       } catch (err) {
         lastError = err;
         console.error('[WebAuthn] load attempt failed:', err);
+        logClient('load-cdn-failed', { url, error: err.message }).catch(() => {});
       }
     }
 
@@ -932,6 +951,7 @@ async function setupWebAuthn() {
       }
     } catch (err) {
       console.error('[WebAuthn] registration error', err);
+      logClient('registration-error', { error: err.message }).catch(() => {});
       showWebAuthnMessage(messageDiv, 'Registration error: ' + err.message, 'error');
     } finally {
       registerBtn.disabled = false;
