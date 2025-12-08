@@ -1407,6 +1407,7 @@ async function handleHttpRequest(req, res) {
     // Setup route is protected only if password is set AND setup is complete
     const isAdminRoute = urlPath.startsWith('/admin') || urlPath.startsWith('/api/admin/');
     const isSetupRoute = urlPath === '/setup' || urlPath === '/setup/';
+    const isSetupApiRoute = urlPath.startsWith('/api/setup/');
 
     // Check if authentication is required
     let requiresAuth = false;
@@ -1417,11 +1418,12 @@ async function handleHttpRequest(req, res) {
     } catch (err) {
       // ignore
     }
+    const passwordSet = authHandler ? authHandler.isPasswordSet() : false;
+    const hasAuthMethod = passwordSet || webauthnEnabledWithCreds;
 
     // If admin route and neither password nor WebAuthn creds are set, block access and force setup
     if (isAdminRoute) {
-      const passwordSet = authHandler ? authHandler.isPasswordSet() : false;
-      if (!passwordSet && !webauthnEnabledWithCreds) {
+      if (!hasAuthMethod) {
         if (urlPath.startsWith('/api/admin/')) {
           res.writeHead(403, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: false, error: 'Admin access blocked until a password or WebAuthn credential is configured. Visit /setup to set one.' }));
@@ -1433,23 +1435,16 @@ async function handleHttpRequest(req, res) {
       }
     }
 
-    if (authHandler && (authHandler.isPasswordSet() || webauthnEnabledWithCreds)) {
-      // Admin routes always require auth
-      if (isAdminRoute) {
+    // Admin routes always require auth (unless we blocked earlier for missing password/creds)
+    if (isAdminRoute) {
+      requiresAuth = true;
+    }
+
+    // Setup page and setup APIs require auth as soon as an auth method exists
+    if ((isSetupRoute || isSetupApiRoute) && hasAuthMethod) {
+      // Allow password bootstrap endpoint when no auth method; otherwise require auth
+      if (!(urlPath === '/api/setup/password-setup' && !hasAuthMethod)) {
         requiresAuth = true;
-      }
-      
-      // Setup route requires auth only if setup is complete
-      if (isSetupRoute && setupHandler) {
-        try {
-          const setupStatus = await setupHandler.isSetupNeeded();
-          // If setup is not needed (complete), require auth
-          if (!setupStatus.needed) {
-            requiresAuth = true;
-          }
-        } catch (err) {
-          // If check fails, assume setup needed (no auth required)
-        }
       }
     }
 
