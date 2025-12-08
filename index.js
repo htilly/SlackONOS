@@ -1410,20 +1410,31 @@ async function handleHttpRequest(req, res) {
 
     // Check if authentication is required
     let requiresAuth = false;
-    
-    // Check if WebAuthn is enabled and has credentials
-    let webauthnRequired = false;
+    let webauthnEnabledWithCreds = false;
     try {
       const webauthnHandler = require('./lib/webauthn-handler');
-      if (webauthnHandler.isWebAuthnEnabled() && await webauthnHandler.hasCredentials()) {
-        webauthnRequired = true;
-      }
+      webauthnEnabledWithCreds = webauthnHandler.isWebAuthnEnabled() && await webauthnHandler.hasCredentials();
     } catch (err) {
-      // WebAuthn handler not available, continue with password check
+      // ignore
     }
-    
-    if (authHandler && (authHandler.isPasswordSet() || webauthnRequired)) {
-      // Admin routes always require auth if password is set OR WebAuthn is enabled
+
+    // If admin route and neither password nor WebAuthn creds are set, block access and force setup
+    if (isAdminRoute) {
+      const passwordSet = authHandler ? authHandler.isPasswordSet() : false;
+      if (!passwordSet && !webauthnEnabledWithCreds) {
+        if (urlPath.startsWith('/api/admin/')) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Admin access blocked until a password or WebAuthn credential is configured. Visit /setup to set one.' }));
+        } else {
+          res.writeHead(302, { Location: '/setup?force=true' });
+          res.end();
+        }
+        return;
+      }
+    }
+
+    if (authHandler && (authHandler.isPasswordSet() || webauthnEnabledWithCreds)) {
+      // Admin routes always require auth
       if (isAdminRoute) {
         requiresAuth = true;
       }
