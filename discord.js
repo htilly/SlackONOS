@@ -14,6 +14,34 @@ let discordLogger = null; // module-level logger reference
 let reactionHandler = null; // handler for reaction events
 const trackMessages = new Map(); // Map message IDs to track info for reactions
 
+// Cleanup old trackMessages entries every 10 minutes to prevent memory leak
+// Entries older than 1 hour are removed (reactions on older tracks are unlikely)
+const TRACK_MESSAGE_CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const TRACK_MESSAGE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
+
+function cleanupOldTrackMessages() {
+    const now = Date.now();
+    const cutoff = now - TRACK_MESSAGE_MAX_AGE_MS;
+    let removedCount = 0;
+
+    for (const [messageId, data] of trackMessages.entries()) {
+        if (data.timestamp < cutoff) {
+            trackMessages.delete(messageId);
+            removedCount++;
+        }
+    }
+
+    if (removedCount > 0 && discordLogger) {
+        discordLogger.debug(`[DISCORD] Cleaned up ${removedCount} old track messages from memory`);
+    }
+}
+
+// Start cleanup interval when module loads
+const cleanupInterval = setInterval(cleanupOldTrackMessages, TRACK_MESSAGE_CLEANUP_INTERVAL_MS);
+
+// Keep the interval from preventing Node.js shutdown
+cleanupInterval.unref();
+
 // We accept an injected logger (recommended). If not provided we create a minimal one.
 async function initializeDiscord(config, messageHandler, injectedLogger) {
     let logger = injectedLogger;

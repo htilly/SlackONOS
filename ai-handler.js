@@ -17,6 +17,30 @@ let lastErrorMessage = null;
 // Format: { userName: { lastSuggestion: 'command', timestamp: Date, context: 'string' } }
 const userContext = {};
 const CONTEXT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const CONTEXT_CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+
+// Periodic cleanup of expired user contexts to prevent memory leak
+function cleanupExpiredContexts() {
+  const now = Date.now();
+  let removedCount = 0;
+
+  for (const userName in userContext) {
+    if (now - userContext[userName].timestamp > CONTEXT_TIMEOUT_MS) {
+      delete userContext[userName];
+      removedCount++;
+    }
+  }
+
+  if (removedCount > 0 && logger) {
+    logger.debug(`[AI] Cleaned up ${removedCount} expired user contexts from memory`);
+  }
+}
+
+// Start periodic cleanup when module loads
+const contextCleanupInterval = setInterval(cleanupExpiredContexts, CONTEXT_CLEANUP_INTERVAL_MS);
+
+// Keep the interval from preventing Node.js shutdown
+contextCleanupInterval.unref();
 
 /**
  * Get seasonal context for AI prompt based on current date

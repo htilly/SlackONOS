@@ -4,6 +4,8 @@ services:
     hostname: slackonos
     image: htilly/slackonos:latest
     restart: unless-stopped
+    environment:
+      - HOST_IP=192.168.1.100  # Replace with your Docker host's IP address (required for TTS to work)
     volumes:
       - PATH_TO_CONFIG_FOLDER/slackonos/config:/app/config
     ports:

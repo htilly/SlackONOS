@@ -504,8 +504,8 @@ async function runTestSuite() {
             failed++;
         }
 
-        // Small delay between tests to avoid rate limits
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Delay between tests to avoid rate limits and allow bot to process
+        await new Promise(resolve => setTimeout(resolve, 3000));
     }
 
     console.log('\n' + '─'.repeat(60));

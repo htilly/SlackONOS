@@ -203,42 +203,80 @@ module.exports = function (config) {
             };
         },
 
-        // Get all tracks from an album
+        // Get all tracks from an album (with pagination support)
         getAlbumTracks: async function (albumUri) {
             const albumId = albumUri.split(':')[2];
-            const data = await _search(`albums/${albumId}/tracks`, { 
-                market: config.market,
-                limit: 50 
-            });
-            
-            if (!data.items) {
-                return [];
+            let allTracks = [];
+            let offset = 0;
+            const limit = 50; // Spotify API limit for album tracks
+
+            while (true) {
+                const data = await _search(`albums/${albumId}/tracks`, {
+                    market: config.market,
+                    limit: limit,
+                    offset: offset
+                });
+
+                if (!data.items || data.items.length === 0) {
+                    break;
+                }
+
+                const tracks = data.items.map(track => ({
+                    name: track.name,
+                    artist: track.artists[0].name,
+                    uri: track.uri
+                }));
+
+                allTracks = allTracks.concat(tracks);
+
+                // If we got fewer tracks than the limit, we've reached the end
+                if (data.items.length < limit) {
+                    break;
+                }
+
+                offset += limit;
             }
 
-            return data.items.map(track => ({
-                name: track.name,
-                artist: track.artists[0].name,
-                uri: track.uri
-            }));
+            return allTracks;
         },
 
-        // Get all tracks from a playlist
+        // Get all tracks from a playlist (with pagination support)
         getPlaylistTracks: async function (playlistUri) {
             const playlistId = playlistUri.split(':')[2];
-            const data = await _search(`playlists/${playlistId}/tracks`, { 
-                market: config.market,
-                limit: 100
-            });
-            
-            if (!data.items) {
-                return [];
+            let allTracks = [];
+            let offset = 0;
+            const limit = 100; // Spotify API limit for playlist tracks
+
+            while (true) {
+                const data = await _search(`playlists/${playlistId}/tracks`, {
+                    market: config.market,
+                    limit: limit,
+                    offset: offset
+                });
+
+                if (!data.items || data.items.length === 0) {
+                    break;
+                }
+
+                const tracks = data.items
+                    .filter(item => item.track) // Filter out null tracks (removed from Spotify)
+                    .map(item => ({
+                        name: item.track.name,
+                        artist: item.track.artists[0].name,
+                        uri: item.track.uri
+                    }));
+
+                allTracks = allTracks.concat(tracks);
+
+                // If we got fewer tracks than the limit, we've reached the end
+                if (data.items.length < limit) {
+                    break;
+                }
+
+                offset += limit;
             }
 
-            return data.items.map(item => ({
-                name: item.track.name,
-                artist: item.track.artists[0].name,
-                uri: item.track.uri
-            }));
+            return allTracks;
         },
 
         searchTrackList: async function (term, limit) {

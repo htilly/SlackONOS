@@ -179,6 +179,37 @@ const sonosIp = config.get('sonos');
 const webPort = config.get('webPort');
 let ipAddress = config.get('ipAddress');
 
+// Auto-detect IP address if not configured or set to placeholder
+if (!ipAddress || ipAddress === 'IP_HOST') {
+  // First, check for HOST_IP environment variable (Docker best practice)
+  if (process.env.HOST_IP) {
+    ipAddress = process.env.HOST_IP;
+    logger.info(`Using HOST_IP from environment: ${ipAddress}`);
+  } else {
+    // Try to auto-detect from network interfaces
+    const networkInterfaces = os.networkInterfaces();
+    for (const interfaceName in networkInterfaces) {
+      const interfaces = networkInterfaces[interfaceName];
+      for (const iface of interfaces) {
+        // Skip internal (loopback) and non-IPv4 addresses
+        // Also skip Docker bridge interfaces (172.17.x.x, 172.18.x.x, etc.)
+        if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('172.')) {
+          ipAddress = iface.address;
+          logger.info(`Auto-detected IP address: ${ipAddress}`);
+          break;
+        }
+      }
+      if (ipAddress && ipAddress !== 'IP_HOST') break;
+    }
+
+    // Fallback if no suitable address found
+    if (!ipAddress || ipAddress === 'IP_HOST') {
+      ipAddress = '127.0.0.1';
+      logger.warn('Could not auto-detect IP address. Set HOST_IP environment variable or configure ipAddress in config.json');
+    }
+  }
+}
+
 //Slack Config
 const slackAppToken = config.get('slackAppToken');
 const slackBotToken = config.get('token');
@@ -816,38 +847,45 @@ async function _checkSystemHealth() {
 // ==========================================
 // SIMPLE HTTP SERVER FOR TTS
 // ==========================================
-const httpServer = http.createServer((req, res) => {
-  // Parse URL to ignore query params (used for cache-busting)
-  const urlPath = req.url.split('?')[0];
+const ttsEnabled = config.get('ttsEnabled') !== false; // Default to true for backward compatibility
+let httpServer = null;
 
-  if (urlPath === '/tts.mp3') {
-    const ttsFilePath = path.join(os.tmpdir(), 'sonos-tts.mp3');
+if (ttsEnabled) {
+  httpServer = http.createServer((req, res) => {
+    // Parse URL to ignore query params (used for cache-busting)
+    const urlPath = req.url.split('?')[0];
 
-    if (fs.existsSync(ttsFilePath)) {
-      res.writeHead(200, {
-        'Content-Type': 'audio/mpeg',
-        'Accept-Ranges': 'bytes',
-        'Cache-Control': 'no-cache, no-store, must-revalidate'
-      });
-      const stream = fs.createReadStream(ttsFilePath);
-      stream.pipe(res);
-      logger.info('Serving TTS file to Sonos');
+    if (urlPath === '/tts.mp3') {
+      const ttsFilePath = path.join(os.tmpdir(), 'sonos-tts.mp3');
+
+      if (fs.existsSync(ttsFilePath)) {
+        res.writeHead(200, {
+          'Content-Type': 'audio/mpeg',
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'no-cache, no-store, must-revalidate'
+        });
+        const stream = fs.createReadStream(ttsFilePath);
+        stream.pipe(res);
+        logger.info('Serving TTS file to Sonos');
+      } else {
+        res.writeHead(404);
+        res.end('TTS file not found');
+      }
+    } else if (req.url === '/') {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('SlackONOS TTS Server');
     } else {
       res.writeHead(404);
-      res.end('TTS file not found');
+      res.end('Not found');
     }
-  } else if (req.url === '/') {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('SlackONOS TTS Server');
-  } else {
-    res.writeHead(404);
-    res.end('Not found');
-  }
-});
+  });
 
-httpServer.listen(webPort, () => {
-  logger.info(`📻 HTTP server for TTS listening on port ${webPort}`);
-});
+  httpServer.listen(webPort, () => {
+    logger.info(`📻 HTTP server for TTS listening on port ${webPort}`);
+  });
+} else {
+  logger.info('📻 TTS HTTP server disabled (ttsEnabled = false)');
+}
 
 // ==========================================
 // COMMAND REGISTRY & PARSING
@@ -1472,7 +1510,20 @@ async function processInput(text, channel, userName, platform = 'slack', isAdmin
 
 // Removed duplicate _slackMessage definition (platform-aware version earlier in file is authoritative)
 
-const userCache = {};
+// Simple LRU cache implementation for user data to prevent memory leak
+const USER_CACHE_MAX_SIZE = 500; // Max users to cache
+const userCache = new Map();
+
+function addToUserCache(userId, userName) {
+  // If cache is at max size, remove oldest entry (first in Map)
+  if (userCache.size >= USER_CACHE_MAX_SIZE) {
+    const firstKey = userCache.keys().next().value;
+    userCache.delete(firstKey);
+  }
+  // Delete and re-add to move to end (most recent)
+  userCache.delete(userId);
+  userCache.set(userId, userName);
+}
 
 async function _checkUser(userId) {
   try {
@@ -1486,14 +1537,17 @@ async function _checkUser(userId) {
     userId = userId.replace(/[<@>]/g, '');
 
     // Check if user info is already in cache
-    if (userCache[userId]) {
-      return userCache[userId];
+    if (userCache.has(userId)) {
+      const userName = userCache.get(userId);
+      // Move to end (mark as recently used)
+      addToUserCache(userId, userName);
+      return userName;
     }
 
     // Fetch user info from Slack API
     const result = await web.users.info({ user: userId });
     if (result.ok && result.user) {
-      userCache[userId] = result.user.name; // Cache the user info
+      addToUserCache(userId, result.user.name);
       return result.user.name;
     } else {
       logger.error('User not found: ' + userId);
@@ -2075,7 +2129,14 @@ async function _debug(channel, userName) {
           `> Connected: \`${connected ? 'Yes' : 'No'}\`\n` +
           `> Configured Channels: ${channels}\n`
         );
-      })();
+      })() +
+      `\n` +
+      `*📻 TTS HTTP Server:*\n` +
+      `> Enabled: \`${ttsEnabled ? 'true' : 'false'}\`\n` +
+      (ttsEnabled ?
+        `> Port: \`${webPort}\`\n` +
+        `> Endpoint: \`http://${ipAddress}:${webPort}/tts.mp3\`\n`
+        : '');
 
     _slackMessage(message, channel);
   } catch (err) {
@@ -2579,32 +2640,44 @@ function _currentTrackTitle(channel, cb) {
 }
 
 function _currentTrack(channel, cb) {
+  // First check the playback state
   sonos
-    .currentTrack()
-    .then((track) => {
-      if (track) {
-        let message = `Currently playing: *${track.title}* by _${track.artist}_`;
-
-        // Add time information if available
-        if (track.duration && track.position) {
-          const remaining = track.duration - track.position;
-          const remainingMin = Math.floor(remaining / 60);
-          const remainingSec = Math.floor(remaining % 60);
-          const durationMin = Math.floor(track.duration / 60);
-          const durationSec = Math.floor(track.duration % 60);
-
-          message += `\n⏱️ ${remainingMin}:${remainingSec.toString().padStart(2, '0')} remaining (${durationMin}:${durationSec.toString().padStart(2, '0')} total)`;
-        }
-
-        if (voting.isTrackGongBanned(track.title)) {
-          message += ' :lock: (Immune to GONG)';
-        }
-        _slackMessage(message, channel);
-        if (cb) cb(null, track);
-      } else {
-        _slackMessage('🔇 *Silence...* Nothing is currently playing. Use `add` to get started! 🎵', channel);
+    .getCurrentState()
+    .then((state) => {
+      if (state !== 'playing') {
+        // Not playing - just show the state
+        const stateEmoji = state === 'paused' ? '⏸️' : '⏹️';
+        _slackMessage(`${stateEmoji} Playback is *${state}*`, channel);
         if (cb) cb(null, null);
+        return;
       }
+      
+      // Playing - get track info
+      return sonos.currentTrack().then((track) => {
+        if (track) {
+          let message = `Currently playing: *${track.title}* by _${track.artist}_`;
+
+          // Add time information if available
+          if (track.duration && track.position) {
+            const remaining = track.duration - track.position;
+            const remainingMin = Math.floor(remaining / 60);
+            const remainingSec = Math.floor(remaining % 60);
+            const durationMin = Math.floor(track.duration / 60);
+            const durationSec = Math.floor(track.duration % 60);
+
+            message += `\n⏱️ ${remainingMin}:${remainingSec.toString().padStart(2, '0')} remaining (${durationMin}:${durationSec.toString().padStart(2, '0')} total)`;
+          }
+
+          if (voting.isTrackGongBanned(track.title)) {
+            message += ' :lock: (Immune to GONG)';
+          }
+          _slackMessage(message, channel);
+          if (cb) cb(null, track);
+        } else {
+          _slackMessage('🔇 *Silence...* Nothing is currently playing. Use `add` to get started! 🎵', channel);
+          if (cb) cb(null, null);
+        }
+      });
     })
     .catch((err) => {
       logger.error('Error getting current track: ' + err);
@@ -3390,7 +3463,7 @@ function _moveTrackAdmin(input, channel, userName) {
   }
 
   sonos
-    .reorderTracksInQueue(from, 1, to, 0)
+    .reorderTracksInQueue(from + 1, 1, to + 1, 0)
     .then(() => {
       _slackMessage(`📍 Successfully moved track from position *${from}* to *${to}*! Queue reshuffled! 🔀`, channel);
     })
