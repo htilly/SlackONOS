@@ -8,6 +8,8 @@ document.addEventListener('DOMContentLoaded', () => {
   setupLogout();
   setupPasswordChange();
   setupWebAuthn();
+  setupConfigCollapse();
+  setupPlayerControls();
   loadAllData();
   setupRefreshButton();
   setupLogViewer();
@@ -111,6 +113,17 @@ function createStatusCard(integration, status) {
         </div>
       `;
     }
+
+    if (status.details) {
+      const detailEntries = Object.entries(status.details)
+        .map(([k,v]) => `<div><strong>${k}:</strong> ${Array.isArray(v) ? v.join(', ') : v}</div>`)
+        .join('');
+      statusHTML += `
+        <div style="margin-top: 1rem; font-size: 0.9rem; color: rgba(255,255,255,0.7);">
+          ${detailEntries}
+        </div>
+      `;
+    }
   }
   
   card.innerHTML = statusHTML;
@@ -163,6 +176,19 @@ async function loadNowPlaying() {
         <div class="volume-fill" style="width: ${data.volume !== null ? (data.volume / (data.maxVolume || 75) * 100) : 0}%"></div>
       </div>
     `;
+
+    // Up next list
+    const upNext = (data.nextTracks || []).slice(1, 6); // skip current if present
+    if (upNext.length > 0) {
+      html += `
+        <div style="margin-top: 1.5rem; text-align: left;">
+          <h4 style="margin: 0 0 0.5rem 0;">Up next (5):</h4>
+          <ol style="padding-left: 1.25rem; color: rgba(255,255,255,0.85);">
+            ${upNext.map(t => `<li><strong>${escapeHtml(t.title)}</strong> <span style="color: rgba(255,255,255,0.7);">— ${escapeHtml(t.artist)}</span></li>`).join('')}
+          </ol>
+        </div>
+      `;
+    }
     
     content.innerHTML = html;
   } catch (err) {
@@ -170,6 +196,37 @@ async function loadNowPlaying() {
     document.getElementById('now-playing-content').innerHTML = 
       '<p class="error-message">Error loading: ' + err.message + '</p>';
   }
+}
+
+/**
+ * Player controls
+ */
+function setupPlayerControls() {
+  const btnPlay = document.getElementById('btn-play');
+  const btnPause = document.getElementById('btn-pause');
+  const btnStop = document.getElementById('btn-stop');
+
+  const callAction = async (endpoint, label) => {
+    const btns = [btnPlay, btnPause, btnStop].filter(Boolean);
+    btns.forEach(b => b.disabled = true);
+    try {
+      const resp = await fetch(`${API_BASE}/${endpoint}`, { method: 'POST' });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        alert(`${label} failed: ${data.error || 'Unknown error'}`);
+      } else {
+        await loadNowPlaying();
+      }
+    } catch (err) {
+      alert(`${label} failed: ${err.message}`);
+    } finally {
+      btns.forEach(b => b.disabled = false);
+    }
+  };
+
+  btnPlay?.addEventListener('click', () => callAction('play', 'Start'));
+  btnPause?.addEventListener('click', () => callAction('pause', 'Pause'));
+  btnStop?.addEventListener('click', () => callAction('stop', 'Stop'));
 }
 
 /**
@@ -337,6 +394,18 @@ function startAutoRefresh() {
   refreshInterval = setInterval(() => {
     loadAllData();
   }, 30000); // Refresh every 30 seconds
+}
+
+// Setup config collapse
+function setupConfigCollapse() {
+  const toggle = document.getElementById('btn-toggle-config');
+  const body = document.getElementById('config-body');
+  if (!toggle || !body) return;
+  toggle.addEventListener('click', () => {
+    const isHidden = body.style.display === 'none' || body.style.display === '';
+    body.style.display = isHidden ? 'block' : 'none';
+    toggle.textContent = isHidden ? 'Hide' : 'Show';
+  });
 }
 
 /**

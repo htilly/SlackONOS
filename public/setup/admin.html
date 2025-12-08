@@ -334,6 +334,20 @@
       </div>
     </div>
 
+    <!-- Config Section (collapsed by default) -->
+    <div class="config-section" id="config-section">
+      <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" id="config-toggle">
+        <h2 style="margin: 0;">⚙️ Configuration</h2>
+        <button class="btn btn-ghost" id="btn-toggle-config">Show</button>
+      </div>
+      <div id="config-body" style="display: none; margin-top: 1rem;">
+        <div id="config-items">
+          <div class="loading"></div>
+          <p>Loading configuration...</p>
+        </div>
+      </div>
+    </div>
+
     <!-- Now Playing Card -->
     <div class="now-playing-card" id="now-playing-card">
       <h2>🎵 Now Playing</h2>
@@ -341,21 +355,18 @@
         <div class="loading"></div>
         <p>Loading...</p>
       </div>
+      <div id="player-controls" style="margin-top: 1.5rem; display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
+        <button class="btn btn-secondary" id="btn-play">▶️ Start</button>
+        <button class="btn btn-secondary" id="btn-pause">⏸️ Pause</button>
+        <button class="btn btn-secondary" id="btn-stop">⏹️ Stop</button>
+      </div>
+      <div id="up-next" style="margin-top: 1.5rem; text-align: left;"></div>
     </div>
 
     <!-- Status Grid -->
     <div class="status-grid" id="status-grid">
       <div class="status-card">
         <h3>⏳ Loading status...</h3>
-      </div>
-    </div>
-
-    <!-- Config Section -->
-    <div class="config-section">
-      <h2>⚙️ Configuration</h2>
-      <div id="config-items">
-        <div class="loading"></div>
-        <p>Loading configuration...</p>
       </div>
     </div>
 

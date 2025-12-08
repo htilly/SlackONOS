@@ -1800,6 +1800,43 @@ async function handleAdminAPI(req, res, url) {
       res.end(JSON.stringify(nowPlaying));
       return;
     }
+
+    // Playback controls
+    if (urlPath === '/api/admin/play' && req.method === 'POST') {
+      try {
+        await sonos.play();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/admin/pause' && req.method === 'POST') {
+      try {
+        await sonos.pause();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/admin/stop' && req.method === 'POST') {
+      try {
+        await sonos.stop();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
     
     // Get config values
     if (urlPath === '/api/admin/config') {
@@ -1862,6 +1899,10 @@ async function getAdminStatus() {
         // Fallback: try to check socket state
         status.slack.connected = false;
       }
+      status.slack.details = {
+        adminChannel: config.get('adminChannel') || 'N/A',
+        standardChannel: config.get('standardChannel') || 'N/A'
+      };
     } catch (err) {
       status.slack.error = err.message;
     }
@@ -1874,6 +1915,9 @@ async function getAdminStatus() {
       const discordClient = DiscordSystem.getDiscordClient();
       if (discordClient) {
         status.discord.connected = discordClient.isReady() || false;
+        status.discord.details = {
+          guilds: discordClient.guilds?.cache?.size || 0
+        };
       }
     } catch (err) {
       status.discord.error = err.message;
@@ -1889,6 +1933,10 @@ async function getAdminStatus() {
       // Try a simple API call to check connection
       await spotify.searchTrackList('test', 1);
       status.spotify.connected = true;
+      status.spotify.details = {
+        market: config.get('market') || 'N/A',
+        clientId: spotifyClientId ? spotifyClientId.slice(0,6) + '…' : 'N/A'
+      };
     } catch (err) {
       status.spotify.connected = false;
       status.spotify.error = err.message;
@@ -1907,6 +1955,10 @@ async function getAdminStatus() {
         room: deviceInfo.roomName || 'Unknown',
         ip: sonosIp
       };
+      status.sonos.details = {
+        softwareVersion: deviceInfo.softwareVersion || 'Unknown',
+        hardwareVersion: deviceInfo.hardwareVersion || 'Unknown'
+      };
     } catch (err) {
       status.sonos.connected = false;
       status.sonos.error = err.message;
@@ -1920,6 +1972,10 @@ async function getAdminStatus() {
       if (soundcraft && soundcraft.isEnabled()) {
         status.soundcraft.connected = true;
         status.soundcraft.channels = soundcraft.getChannelNames();
+        status.soundcraft.details = {
+          ip: config.get('soundcraftIp') || 'N/A',
+          channels: soundcraft.getChannelNames()
+        };
       } else {
         status.soundcraft.connected = false;
       }
@@ -1940,6 +1996,20 @@ async function getNowPlaying() {
     const state = await sonos.getCurrentState();
     const volume = await sonos.getVolume();
     
+    // Fetch queue (next tracks)
+    let nextTracks = [];
+    try {
+      const queue = await sonos.getQueue();
+      if (queue && queue.items) {
+        nextTracks = queue.items.slice(0, 5).map(item => ({
+          title: item.title || 'Unknown',
+          artist: item.artist || item.creator || 'Unknown'
+        }));
+      }
+    } catch (err) {
+      // Ignore queue errors for now-playing
+    }
+
     let track = null;
     if (state === 'playing') {
       track = await sonos.currentTrack();
@@ -1949,6 +2019,7 @@ async function getNowPlaying() {
       state: state,
       volume: volume,
       maxVolume: config.get('maxVolume') || 75,
+      nextTracks,
       track: track ? {
         title: track.title || 'Unknown',
         artist: track.artist || 'Unknown',
