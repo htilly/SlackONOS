@@ -40,6 +40,8 @@ const utils = require('./utils');
 const process = require('process');
 const parseString = require('xml2js').parseString;
 const http = require('http');
+const https = require('https');
+const selfsigned = require('selfsigned');
 const AIHandler = require('./ai-handler');
 const voting = require('./voting');
 const musicHelper = require('./music-helper');
@@ -181,6 +183,34 @@ const logLevel = config.get('logLevel');
 /* Initialize Logger Early
 We have to wrap the Winston logger in this thin layer to satiate the SocketModeClient.
 Initialize early so it's available for all startup code. */
+// In-memory log buffer for real-time log viewing (last 1000 entries)
+const logBuffer = [];
+const MAX_LOG_BUFFER_SIZE = 1000;
+
+// Custom transport to capture logs in memory
+class MemoryLogTransport extends winston.transports.Console {
+  log(info, callback) {
+    // Format log entry
+    const level = info.level ? info.level.replace(/\u001b\[[0-9;]*m/g, '') : 'info';
+    const logEntry = {
+      timestamp: info.timestamp || new Date().toISOString(),
+      level: level,
+      message: info.message || String(info)
+    };
+    
+    // Add to buffer (will be handled by broadcastLog, but keep for initial buffer)
+    logBuffer.push(logEntry);
+    
+    // Keep buffer size limited
+    if (logBuffer.length > MAX_LOG_BUFFER_SIZE) {
+      logBuffer.shift(); // Remove oldest entry
+    }
+    
+    // Call parent to still output to console
+    super.log(info, callback);
+  }
+}
+
 const logger = new WinstonWrapper({
   level: logLevel,
   format: winston.format.combine(
@@ -188,7 +218,7 @@ const logger = new WinstonWrapper({
     winston.format.json()
   ),
   transports: [
-    new winston.transports.Console({
+    new MemoryLogTransport({
       format: winston.format.combine(
         winston.format.colorize(),
         winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // Add timestamp to console logs
@@ -199,6 +229,52 @@ const logger = new WinstonWrapper({
     }),
   ],
 });
+
+// Override logger methods to broadcast to SSE clients
+const originalDebug = logger.debug.bind(logger);
+const originalInfo = logger.info.bind(logger);
+const originalWarn = logger.warn.bind(logger);
+const originalError = logger.error.bind(logger);
+
+logger.debug = function(msg) {
+  originalDebug(msg);
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level: 'debug',
+    message: msg
+  };
+  broadcastLog(logEntry);
+};
+
+logger.info = function(msg) {
+  originalInfo(msg);
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level: 'info',
+    message: msg
+  };
+  broadcastLog(logEntry);
+};
+
+logger.warn = function(msg) {
+  originalWarn(msg);
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level: 'warn',
+    message: msg
+  };
+  broadcastLog(logEntry);
+};
+
+logger.error = function(msg) {
+  originalError(msg);
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level: 'error',
+    message: msg
+  };
+  broadcastLog(logEntry);
+};
 
 // Log any file migrations that occurred during startup
 migrationLogs.forEach(log => {
@@ -667,10 +743,65 @@ async function _checkSystemHealth() {
   return report;
 }
 
+// Load setup handler early so it's available for startup checks
+let setupHandler;
+try {
+  setupHandler = require('./lib/setup-handler');
+} catch (err) {
+  setupHandler = null;
+  if (typeof logger !== 'undefined') {
+    logger.warn('Setup handler not available:', err.message);
+  }
+}
+
+// Load auth handler
+let authHandler;
+try {
+  authHandler = require('./lib/auth-handler');
+} catch (err) {
+  authHandler = null;
+  if (typeof logger !== 'undefined') {
+    logger.warn('Auth handler not available:', err.message);
+  }
+}
+
 // Coordinated Startup Sequence
 (async () => {
   try {
     logger.info('Starting SlackONOS...');
+
+    // Check if setup is needed before initializing platforms
+    let setupStatus = { needed: false };
+    if (setupHandler) {
+      try {
+        setupStatus = await setupHandler.isSetupNeeded();
+      } catch (err) {
+        logger.warn('Could not check setup status:', err.message);
+        // Fallback: check config directly
+        const hasSlack = !!(config.get('slackAppToken') && config.get('token'));
+        const hasSpotify = !!(config.get('spotifyClientId') && config.get('spotifyClientSecret'));
+        const hasSonos = !!(config.get('sonos') && config.get('sonos') !== 'IP_TO_SONOS');
+        setupStatus = { needed: !(hasSlack && hasSpotify && hasSonos) };
+      }
+    } else {
+      // Fallback: check config directly if setupHandler not available
+      const hasSlack = !!(config.get('slackAppToken') && config.get('token'));
+      const hasSpotify = !!(config.get('spotifyClientId') && config.get('spotifyClientSecret'));
+      const hasSonos = !!(config.get('sonos') && config.get('sonos') !== 'IP_TO_SONOS');
+      setupStatus = { needed: !(hasSlack && hasSpotify && hasSonos) };
+    }
+    const hasSlack = slackBotToken && slackAppToken;
+    const hasDiscord = config.get('discordToken');
+
+    // If setup is needed and no platforms configured, start server only for setup wizard
+    if (setupStatus.needed && !hasSlack && !hasDiscord) {
+      logger.warn('⚠️  Configuration incomplete - starting in setup mode');
+      logger.info(`📝 Please complete setup at: http://${ipAddress}:${webPort}/setup`);
+      logger.info('   The bot will start normally once configuration is complete.');
+      // HTTP server is already started above, so we can exit gracefully here
+      // Don't throw error, just log and let server run for setup wizard
+      return; // Exit startup sequence but keep HTTP server running
+    }
 
     // Initialize Voting Module
     voting.initialize({
@@ -698,11 +829,8 @@ async function _checkSystemHealth() {
     });
 
     // Check that at least one platform is configured
-    const hasSlack = slackBotToken && slackAppToken;
-    const hasDiscord = config.get('discordToken');
-
     if (!hasSlack && !hasDiscord) {
-      throw new Error('No platform configured! Provide either Slack tokens (slackAppToken + token) or Discord token (discordToken)');
+      throw new Error('No platform configured! Provide either Slack tokens (slackAppToken + token) or Discord token (discordToken). Visit /setup to configure.');
     }
 
     // 2. Initialize Slack (if configured)
@@ -860,51 +988,1132 @@ async function _checkSystemHealth() {
     
   } catch (err) {
     logger.error('⛔️ STARTUP FAILED: ' + err.message);
-    process.exit(1);
+    // If HTTP server is running, keep it alive for setup wizard access
+    // Check if server was started (it's created after this async block)
+    setTimeout(() => {
+      if (httpServer && httpServer.listening) {
+        logger.warn('⚠️  HTTP server is still running - you can access the setup wizard to fix configuration');
+        logger.info(`   Setup wizard: http://${ipAddress}:${webPort}/setup`);
+        // Don't exit - keep server running for setup
+      } else {
+        process.exit(1);
+      }
+    }, 100); // Small delay to let HTTP server start
   }
 })();
 
 // ==========================================
-// SIMPLE HTTP SERVER FOR TTS
+// HTTP/HTTPS SERVER FOR TTS AND SETUP WIZARD
 // ==========================================
 const ttsEnabled = config.get('ttsEnabled') !== false; // Default to true for backward compatibility
 let httpServer = null;
+// setupHandler is already loaded above for startup checks
 
-if (ttsEnabled) {
-  httpServer = http.createServer((req, res) => {
-    // Parse URL to ignore query params (used for cache-busting)
-    const urlPath = req.url.split('?')[0];
+// Check for SSL configuration and auto-generate if needed
+const sslCertPath = config.get('sslCertPath');
+const sslKeyPath = config.get('sslKeyPath');
+const sslAutoGenerate = config.get('sslAutoGenerate') !== false; // Default to true
+let useHttps = false;
+let sslOptions = null;
 
-    if (urlPath === '/tts.mp3') {
-      const ttsFilePath = path.join(os.tmpdir(), 'sonos-tts.mp3');
+// Default paths for auto-generated certificates
+const defaultCertPath = path.join(__dirname, 'config', 'ssl', 'cert.pem');
+const defaultKeyPath = path.join(__dirname, 'config', 'ssl', 'key.pem');
 
-      if (fs.existsSync(ttsFilePath)) {
+/**
+ * Generate self-signed SSL certificate
+ */
+function generateSelfSignedCert(certPath, keyPath) {
+  try {
+    // Ensure SSL directory exists
+    const sslDir = path.dirname(certPath);
+    if (!fs.existsSync(sslDir)) {
+      fs.mkdirSync(sslDir, { recursive: true });
+    }
+
+    // Get hostname/IP for certificate
+    const hostname = ipAddress || 'localhost';
+    
+    // Generate certificate valid for 1 year
+    const attrs = [{ name: 'commonName', value: hostname }];
+    const pems = selfsigned.generate(attrs, {
+      days: 365,
+      keySize: 2048,
+      algorithm: 'sha256',
+      extensions: [
+        {
+          name: 'basicConstraints',
+          cA: true,
+        },
+        {
+          name: 'keyUsage',
+          keyCertSign: true,
+          digitalSignature: true,
+          nonRepudiation: true,
+          keyEncipherment: true,
+          dataEncipherment: true,
+        },
+        {
+          name: 'subjectAltName',
+          altNames: [
+            {
+              type: 2, // DNS
+              value: hostname,
+            },
+            {
+              type: 7, // IP
+              ip: hostname,
+            },
+            {
+              type: 2, // DNS
+              value: 'localhost',
+            },
+            {
+              type: 7, // IP
+              ip: '127.0.0.1',
+            },
+          ],
+        },
+      ],
+    });
+
+    // Write certificate and key to files
+    fs.writeFileSync(certPath, pems.cert, 'utf8');
+    fs.writeFileSync(keyPath, pems.private, 'utf8');
+
+    // Update config with paths
+    config.set('sslCertPath', certPath);
+    config.set('sslKeyPath', keyPath);
+    config.save((err) => {
+      if (err) {
+        if (typeof logger !== 'undefined') {
+          logger.warn(`Failed to save SSL paths to config: ${err.message}`);
+        }
+      }
+    });
+
+    return { cert: pems.cert, key: pems.private };
+} catch (err) {
+    throw new Error(`Failed to generate SSL certificate: ${err.message}`);
+  }
+}
+
+// Determine which certificate paths to use
+let finalCertPath = sslCertPath || defaultCertPath;
+let finalKeyPath = sslKeyPath || defaultKeyPath;
+
+// Check if certificates exist, or if we should auto-generate
+if (sslAutoGenerate && (!fs.existsSync(finalCertPath) || !fs.existsSync(finalKeyPath))) {
+  try {
+  if (typeof logger !== 'undefined') {
+      logger.info('🔒 Auto-generating self-signed SSL certificate...');
+    } else {
+      console.log('🔒 Auto-generating self-signed SSL certificate...');
+    }
+    
+    const generated = generateSelfSignedCert(finalCertPath, finalKeyPath);
+    sslOptions = {
+      cert: generated.cert,
+      key: generated.key
+    };
+    useHttps = true;
+    
+    if (typeof logger !== 'undefined') {
+      logger.info(`✅ SSL certificate generated: ${finalCertPath}`);
+      logger.info(`   ⚠️  This is a self-signed certificate. Browsers will show a security warning.`);
+      logger.info(`   For production, use a certificate from a trusted CA (Let's Encrypt, etc.)`);
+    } else {
+      console.log(`✅ SSL certificate generated: ${finalCertPath}`);
+      console.log(`   ⚠️  This is a self-signed certificate. Browsers will show a security warning.`);
+    }
+  } catch (err) {
+    if (typeof logger !== 'undefined') {
+      logger.error(`Failed to auto-generate SSL certificate: ${err.message}. Falling back to HTTP.`);
+    } else {
+      console.error(`Failed to auto-generate SSL certificate: ${err.message}. Falling back to HTTP.`);
+    }
+  }
+} else if (finalCertPath && finalKeyPath) {
+  // Try to load existing certificates
+  try {
+    if (fs.existsSync(finalCertPath) && fs.existsSync(finalKeyPath)) {
+      sslOptions = {
+        cert: fs.readFileSync(finalCertPath, 'utf8'),
+        key: fs.readFileSync(finalKeyPath, 'utf8')
+      };
+      useHttps = true;
+    } else {
+      if (typeof logger !== 'undefined') {
+        logger.warn(`SSL certificate files not found. Cert: ${finalCertPath}, Key: ${finalKeyPath}. Falling back to HTTP.`);
+      } else {
+        console.warn(`SSL certificate files not found. Cert: ${finalCertPath}, Key: ${finalKeyPath}. Falling back to HTTP.`);
+      }
+    }
+  } catch (err) {
+    if (typeof logger !== 'undefined') {
+      logger.error(`Error loading SSL certificates: ${err.message}. Falling back to HTTP.`);
+    } else {
+      console.error(`Error loading SSL certificates: ${err.message}. Falling back to HTTP.`);
+    }
+  }
+}
+
+// Create HTTP and HTTPS servers
+// If HTTPS is enabled, HTTP server will redirect to HTTPS
+// If HTTPS is not enabled, HTTP server handles all requests
+let httpsServer = null;
+
+// Main request handler (used by both HTTP and HTTPS servers)
+async function handleHttpRequest(req, res) {
+  try {
+    const url = require('url').parse(req.url, true);
+    const urlPath = url.pathname;
+
+    // Add security headers to all responses
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Content-Security-Policy', "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://cdn.jsdelivr.net; img-src 'self' data: https:;");
+
+    // Handle auth endpoints (login, logout) - no auth required, handle before other routes
+    if (urlPath === '/api/auth/login' && req.method === 'POST') {
+      if (authHandler) {
+        let body = '';
+        const chunks = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        body = Buffer.concat(chunks).toString();
+        await authHandler.handleLogin(req, res, body);
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Auth handler not available' }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/logout' && req.method === 'POST') {
+      if (authHandler) {
+        authHandler.handleLogout(req, res);
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Auth handler not available' }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/change-password' && req.method === 'POST') {
+      if (authHandler) {
+        // Verify authentication first
+        const authResult = authHandler.verifyAuth(req);
+        if (!authResult.authenticated) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
+          return;
+        }
+        
+        let body = '';
+        const chunks = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        body = Buffer.concat(chunks).toString();
+        await authHandler.handlePasswordChange(req, res, body);
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Auth handler not available' }));
+      }
+      return;
+    }
+
+    // WebAuthn endpoints
+    if (urlPath === '/api/auth/webauthn/register/options' && req.method === 'POST') {
+      try {
+        const webauthnHandler = require('./lib/webauthn-handler');
+        // Verify authentication first (must be logged in to register WebAuthn)
+        if (authHandler) {
+          const authResult = authHandler.verifyAuth(req);
+          if (!authResult.authenticated) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
+            return;
+          }
+        }
+        const options = await webauthnHandler.generateRegistrationOptions(req);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(options));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/webauthn/register/verify' && req.method === 'POST') {
+      try {
+        const webauthnHandler = require('./lib/webauthn-handler');
+        // Verify authentication first
+        if (authHandler) {
+          const authResult = authHandler.verifyAuth(req);
+          if (!authResult.authenticated) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
+            return;
+          }
+        }
+        let body = '';
+        const chunks = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        body = Buffer.concat(chunks).toString();
+        const result = await webauthnHandler.verifyRegistrationResponse(req, body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/webauthn/authenticate/options' && req.method === 'POST') {
+      try {
+        const webauthnHandler = require('./lib/webauthn-handler');
+        const options = await webauthnHandler.generateAuthenticationOptions(req);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(options));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/webauthn/authenticate/verify' && req.method === 'POST') {
+      try {
+        const webauthnHandler = require('./lib/webauthn-handler');
+        let body = '';
+        const chunks = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        body = Buffer.concat(chunks).toString();
+        const result = await webauthnHandler.verifyAuthenticationResponse(req, body);
+        
+        if (result.verified) {
+          // Create session
+          const sessionId = authHandler.createSession('admin');
+          const isSecure = req.headers['x-forwarded-proto'] === 'https' || 
+                           req.connection?.encrypted === true ||
+                           req.socket?.encrypted === true;
+          authHandler.setSessionCookie(res, sessionId, isSecure);
+        }
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/webauthn/credentials' && req.method === 'GET') {
+      try {
+        const webauthnHandler = require('./lib/webauthn-handler');
+        // Verify authentication first
+        if (authHandler) {
+          const authResult = authHandler.verifyAuth(req);
+          if (!authResult.authenticated) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
+            return;
+          }
+        }
+        const credentials = await webauthnHandler.getCredentials();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ credentials }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/webauthn/credentials' && req.method === 'DELETE') {
+      try {
+        const webauthnHandler = require('./lib/webauthn-handler');
+        // Verify authentication first
+        if (authHandler) {
+          const authResult = authHandler.verifyAuth(req);
+          if (!authResult.authenticated) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
+            return;
+          }
+        }
+        const url = require('url').parse(req.url, true);
+        const credentialID = url.query.credentialID;
+        if (!credentialID) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'credentialID required' }));
+          return;
+        }
+        const result = await webauthnHandler.deleteCredential(credentialID);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/webauthn/status' && req.method === 'GET') {
+      try {
+        const webauthnHandler = require('./lib/webauthn-handler');
+        const enabled = webauthnHandler.isWebAuthnEnabled();
+        const hasCreds = enabled ? await webauthnHandler.hasCredentials() : false;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ enabled, hasCredentials: hasCreds }));
+      } catch (err) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ enabled: false, hasCredentials: false }));
+      }
+      return;
+    }
+
+    // Handle login page (public)
+    if (urlPath === '/login' || urlPath === '/login/') {
+      const loginHtmlPath = path.join(__dirname, 'public', 'setup', 'login.html');
+      if (fs.existsSync(loginHtmlPath)) {
         res.writeHead(200, {
-          'Content-Type': 'audio/mpeg',
-          'Accept-Ranges': 'bytes',
-          'Cache-Control': 'no-cache, no-store, must-revalidate'
+          'Content-Type': 'text/html',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
         });
-        const stream = fs.createReadStream(ttsFilePath);
-        stream.pipe(res);
-        logger.info('Serving TTS file to Sonos');
+        res.end(fs.readFileSync(loginHtmlPath, 'utf8'));
       } else {
         res.writeHead(404);
-        res.end('TTS file not found');
+        res.end('Login page not found');
       }
-    } else if (req.url === '/') {
-      res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end('SlackONOS TTS Server');
+      return;
+    }
+
+    // Check authentication for protected routes
+    // Admin routes are always protected if password is set
+    // Setup route is protected only if password is set AND setup is complete
+    const isAdminRoute = urlPath.startsWith('/admin') || urlPath.startsWith('/api/admin/');
+    const isSetupRoute = urlPath === '/setup' || urlPath === '/setup/';
+
+    // Check if authentication is required
+    let requiresAuth = false;
+    
+    // Check if WebAuthn is enabled and has credentials
+    let webauthnRequired = false;
+    try {
+      const webauthnHandler = require('./lib/webauthn-handler');
+      if (webauthnHandler.isWebAuthnEnabled() && await webauthnHandler.hasCredentials()) {
+        webauthnRequired = true;
+      }
+    } catch (err) {
+      // WebAuthn handler not available, continue with password check
+    }
+    
+    if (authHandler && (authHandler.isPasswordSet() || webauthnRequired)) {
+      // Admin routes always require auth if password is set OR WebAuthn is enabled
+      if (isAdminRoute) {
+        requiresAuth = true;
+      }
+      
+      // Setup route requires auth only if setup is complete
+      if (isSetupRoute && setupHandler) {
+        try {
+          const setupStatus = await setupHandler.isSetupNeeded();
+          // If setup is not needed (complete), require auth
+          if (!setupStatus.needed) {
+            requiresAuth = true;
+          }
+        } catch (err) {
+          // If check fails, assume setup needed (no auth required)
+        }
+      }
+    }
+
+    // Verify authentication for protected routes
+    if (requiresAuth) {
+      const authResult = authHandler.verifyAuth(req);
+      if (!authResult.authenticated) {
+        // Redirect to login with return URL
+        const returnUrl = encodeURIComponent(urlPath + (url.search || ''));
+        res.writeHead(302, { 'Location': `/login?return=${returnUrl}` });
+        res.end();
+        return;
+      }
+    }
+
+  // Handle admin API endpoints
+  if (urlPath.startsWith('/api/admin/')) {
+    await handleAdminAPI(req, res, url);
+    return;
+  }
+
+  // Handle setup API endpoints
+  if (urlPath.startsWith('/api/setup/')) {
+    // Password setup endpoint is public (used during initial setup)
+    if (urlPath === '/api/setup/password-setup' && req.method === 'POST') {
+      if (authHandler) {
+        let body = '';
+        const chunks = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        body = Buffer.concat(chunks).toString();
+        await authHandler.handlePasswordSetup(req, res, body);
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Auth handler not available' }));
+      }
+      return;
+    }
+
+    // Other setup endpoints - check if password is required
+    if (authHandler && authHandler.isPasswordSet()) {
+      // Check if setup is complete
+      if (setupHandler) {
+        try {
+          const setupStatus = await setupHandler.isSetupNeeded();
+          // If setup is complete, require auth for setup API
+          if (!setupStatus.needed) {
+            const authResult = authHandler.verifyAuth(req);
+            if (!authResult.authenticated) {
+              res.writeHead(401, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Authentication required' }));
+              return;
+            }
+          }
+        } catch (err) {
+          // If check fails, allow access (setup might be in progress)
+        }
+      }
+    }
+
+    if (setupHandler) {
+      await setupHandler.handleSetupAPI(req, res, url);
+    } else {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Setup handler not available' }));
+    }
+    return;
+  }
+
+  // Handle admin page
+  if (urlPath === '/admin' || urlPath === '/admin/') {
+    const adminHtmlPath = path.join(__dirname, 'public', 'setup', 'admin.html');
+    if (fs.existsSync(adminHtmlPath)) {
+      res.writeHead(200, {
+        'Content-Type': 'text/html',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      });
+      res.end(fs.readFileSync(adminHtmlPath, 'utf8'));
     } else {
       res.writeHead(404);
+      res.end('Admin page not found');
+    }
+    return;
+  }
+
+  // Handle setup wizard pages
+  if (urlPath === '/setup' || urlPath === '/setup/') {
+    // FIRST: Check if password is set - if not, allow access to setup wizard to set password
+    if (authHandler && !authHandler.isPasswordSet()) {
+      // No password set - allow access to setup wizard (will force password setup)
+      const setupHtmlPath = path.join(__dirname, 'public', 'setup', 'index.html');
+      if (fs.existsSync(setupHtmlPath)) {
+        res.writeHead(200, {
+          'Content-Type': 'text/html',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        });
+        res.end(fs.readFileSync(setupHtmlPath, 'utf8'));
+      } else {
+        res.writeHead(404);
+        res.end('Setup wizard not found');
+      }
+      return;
+    }
+    
+    // Password is set, continue with normal checks
+    // Check for force parameter - if present, always show setup wizard
+    const force = url.query && url.query.force === 'true';
+    
+    if (!force) {
+      // Check if bot is configured and connected - if so, redirect to admin
+      const hasSlack = slack && slackBotToken && slackAppToken;
+      const hasDiscord = config.get('discordToken');
+      
+      if (hasSlack || hasDiscord) {
+        // Bot is configured, check if it's actually connected
+        try {
+          if (hasSlack && slack && typeof slack.isConnected === 'function' && slack.isConnected()) {
+            res.writeHead(302, { 'Location': '/admin' });
+            res.end();
+            return;
+          }
+          if (hasDiscord) {
+            const discordClient = DiscordSystem.getDiscordClient();
+            if (discordClient && discordClient.isReady()) {
+              res.writeHead(302, { 'Location': '/admin' });
+              res.end();
+              return;
+            }
+          }
+        } catch (err) {
+          // If check fails, show setup wizard
+        }
+      }
+    }
+    
+    const setupHtmlPath = path.join(__dirname, 'public', 'setup', 'index.html');
+    if (fs.existsSync(setupHtmlPath)) {
+      res.writeHead(200, {
+        'Content-Type': 'text/html',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      });
+      res.end(fs.readFileSync(setupHtmlPath, 'utf8'));
+    } else {
+      res.writeHead(404);
+      res.end('Setup wizard not found');
+    }
+    return;
+  }
+
+  // Serve setup static files (CSS, JS, images)
+  if (urlPath.startsWith('/setup/')) {
+    const relativePath = urlPath.replace('/setup/', '').split('?')[0]; // Remove query string
+    const filePath = path.join(__dirname, 'public', 'setup', relativePath);
+    // Security check: ensure path is within public/setup directory
+    const publicSetupDir = path.join(__dirname, 'public', 'setup');
+    
+    // Normalize paths for comparison
+    const normalizedFilePath = path.normalize(filePath);
+    const normalizedPublicDir = path.normalize(publicSetupDir);
+    
+    if (fs.existsSync(normalizedFilePath) && normalizedFilePath.startsWith(normalizedPublicDir)) {
+      const ext = path.extname(normalizedFilePath).toLowerCase();
+      const contentTypes = {
+        '.css': 'text/css; charset=utf-8',
+        '.js': 'application/javascript; charset=utf-8',
+        '.html': 'text/html; charset=utf-8',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml'
+      };
+      
+      const contentType = contentTypes[ext] || 'text/plain; charset=utf-8';
+      
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      });
+
+      // Read as buffer for images, utf8 for text files
+      const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.svg'].includes(ext);
+      try {
+      const content = isImage
+          ? fs.readFileSync(normalizedFilePath)
+          : fs.readFileSync(normalizedFilePath, 'utf8');
+      res.end(content);
+      } catch (err) {
+        logger.error(`Error reading setup file ${normalizedFilePath}:`, err);
+        res.writeHead(500);
+        res.end('Error reading file');
+      }
+    } else {
+      // Log for debugging
+      if (logger) {
+        logger.warn(`Setup file not found: ${normalizedFilePath} (requested: ${urlPath})`);
+      }
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not found');
     }
-  });
+    return;
+  }
 
-  httpServer.listen(webPort, () => {
-    logger.info(`📻 HTTP server for TTS listening on port ${webPort}`);
+  // Handle TTS endpoint (if enabled)
+  if (ttsEnabled && urlPath === '/tts.mp3') {
+    const ttsFilePath = path.join(os.tmpdir(), 'sonos-tts.mp3');
+    if (fs.existsSync(ttsFilePath)) {
+      res.writeHead(200, {
+        'Content-Type': 'audio/mpeg',
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      });
+      const stream = fs.createReadStream(ttsFilePath);
+      stream.pipe(res);
+      logger.info('Serving TTS file to Sonos');
+    } else {
+      res.writeHead(404);
+      res.end('TTS file not found');
+    }
+    return;
+  }
+
+  // Root endpoint
+  if (req.url === '/') {
+    // Check if bot is configured and connected - if so, redirect to admin
+    const hasSlack = slack && slackBotToken && slackAppToken;
+    const hasDiscord = config.get('discordToken');
+    
+    if (hasSlack || hasDiscord) {
+      try {
+        if (hasSlack && slack && typeof slack.isConnected === 'function' && slack.isConnected()) {
+          res.writeHead(302, { 'Location': '/admin' });
+          res.end();
+          return;
+        }
+        if (hasDiscord) {
+          const discordClient = DiscordSystem.getDiscordClient();
+          if (discordClient && discordClient.isReady()) {
+            res.writeHead(302, { 'Location': '/admin' });
+            res.end();
+            return;
+          }
+        }
+      } catch (err) {
+        // If check fails, continue to setup check
+      }
+    }
+    
+    // Check if setup is needed and redirect
+    if (setupHandler) {
+      try {
+        const setupStatus = await setupHandler.isSetupNeeded();
+        if (setupStatus.needed) {
+          res.writeHead(302, { 'Location': '/setup' });
+          res.end();
+          return;
+        }
+      } catch (err) {
+        // If setup check fails, just show status page
+      }
+    }
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('SlackONOS is running. Visit /setup to configure or /admin to manage.');
+    return;
+  }
+
+    // 404 for everything else
+    res.writeHead(404);
+    res.end('Not found');
+  } catch (err) {
+    logger.error('HTTP server error:', err);
+    if (!res.headersSent) {
+      res.writeHead(500);
+      res.end('Internal server error');
+    }
+  }
+}
+
+// Create HTTP server (always created, redirects to HTTPS if HTTPS is enabled)
+httpServer = http.createServer(async (req, res) => {
+  // If HTTPS is enabled, redirect all HTTP requests to HTTPS
+  if (useHttps && httpsServer) {
+    const host = req.headers.host || `${ipAddress}:${webPort}`;
+    const httpsPort = config.get('httpsPort') || 8443;
+    // Extract hostname (without port) and use configured HTTPS port
+    const hostname = host.split(':')[0];
+    const httpsUrl = `https://${hostname}:${httpsPort}${req.url}`;
+    res.writeHead(301, { 'Location': httpsUrl });
+    res.end();
+    return;
+  }
+  
+  // If HTTPS is not enabled, handle request normally
+  await handleHttpRequest(req, res);
+});
+
+// Create HTTPS server if SSL is configured
+if (useHttps && sslOptions) {
+  httpsServer = https.createServer(sslOptions, async (req, res) => {
+    await handleHttpRequest(req, res);
   });
-} else {
-  logger.info('📻 TTS HTTP server disabled (ttsEnabled = false)');
+}
+
+/**
+ * Handle admin API requests
+ */
+async function handleAdminAPI(req, res, url) {
+  const urlPath = url.pathname;
+  
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
+  
+  // Parse request body for POST requests
+  let body = '';
+  if (req.method === 'POST') {
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    body = Buffer.concat(chunks).toString();
+  }
+  
+  try {
+    // Get system status
+    if (urlPath === '/api/admin/status') {
+      const status = await getAdminStatus();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(status));
+      return;
+    }
+    
+    // Get current track and volume
+    if (urlPath === '/api/admin/now-playing') {
+      const nowPlaying = await getNowPlaying();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(nowPlaying));
+      return;
+    }
+    
+    // Get config values
+    if (urlPath === '/api/admin/config') {
+      const configData = getConfigForAdmin();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(configData));
+      return;
+    }
+    
+    // Update config value
+    if (urlPath === '/api/admin/config/update') {
+      const data = JSON.parse(body);
+      const result = await updateConfigValue(data.key, data.value);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+      return;
+    }
+    
+    // Get logs (SSE stream for real-time logs)
+    if (urlPath === '/api/admin/logs') {
+      handleLogStream(req, res);
+      return;
+    }
+    
+    // Get log buffer (for initial load)
+    if (urlPath === '/api/admin/logs/buffer') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ logs: logBuffer }));
+      return;
+    }
+    
+    // Unknown endpoint
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not found' }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: err.message }));
+  }
+}
+
+/**
+ * Get admin status for all integrations
+ */
+async function getAdminStatus() {
+  const status = {
+    slack: { configured: false, connected: false },
+    discord: { configured: false, connected: false },
+    spotify: { configured: false, connected: false },
+    sonos: { configured: false, connected: false },
+    soundcraft: { configured: false, connected: false }
+  };
+  
+  // Check Slack
+  if (slackAppToken && slackBotToken) {
+    status.slack.configured = true;
+    try {
+      if (slack && typeof slack.isConnected === 'function') {
+        status.slack.connected = slack.isConnected();
+      } else if (slack && slack.socket) {
+        // Fallback: try to check socket state
+        status.slack.connected = false;
+      }
+    } catch (err) {
+      status.slack.error = err.message;
+    }
+  }
+  
+  // Check Discord
+  if (config.get('discordToken')) {
+    status.discord.configured = true;
+    try {
+      const discordClient = DiscordSystem.getDiscordClient();
+      if (discordClient) {
+        status.discord.connected = discordClient.isReady() || false;
+      }
+    } catch (err) {
+      status.discord.error = err.message;
+    }
+  }
+  
+  // Check Spotify
+  const spotifyClientId = config.get('spotifyClientId');
+  const spotifyClientSecret = config.get('spotifyClientSecret');
+  if (spotifyClientId && spotifyClientSecret) {
+    status.spotify.configured = true;
+    try {
+      // Try a simple API call to check connection
+      await spotify.searchTrackList('test', 1);
+      status.spotify.connected = true;
+    } catch (err) {
+      status.spotify.connected = false;
+      status.spotify.error = err.message;
+    }
+  }
+  
+  // Check Sonos
+  const sonosIp = config.get('sonos');
+  if (sonosIp && sonosIp !== 'IP_TO_SONOS') {
+    status.sonos.configured = true;
+    try {
+      const deviceInfo = await sonos.deviceDescription();
+      status.sonos.connected = true;
+      status.sonos.deviceInfo = {
+        model: deviceInfo.modelDescription || 'Unknown',
+        room: deviceInfo.roomName || 'Unknown',
+        ip: sonosIp
+      };
+    } catch (err) {
+      status.sonos.connected = false;
+      status.sonos.error = err.message;
+    }
+  }
+  
+  // Check Soundcraft
+  if (config.get('soundcraftEnabled')) {
+    status.soundcraft.configured = true;
+    try {
+      if (soundcraft && soundcraft.isEnabled()) {
+        status.soundcraft.connected = true;
+        status.soundcraft.channels = soundcraft.getChannelNames();
+      } else {
+        status.soundcraft.connected = false;
+      }
+    } catch (err) {
+      status.soundcraft.connected = false;
+      status.soundcraft.error = err.message;
+    }
+  }
+  
+  return status;
+}
+
+/**
+ * Get current playing track and volume
+ */
+async function getNowPlaying() {
+  try {
+    const state = await sonos.getCurrentState();
+    const volume = await sonos.getVolume();
+    
+    let track = null;
+    if (state === 'playing') {
+      track = await sonos.currentTrack();
+    }
+    
+    return {
+      state: state,
+      volume: volume,
+      maxVolume: config.get('maxVolume') || 75,
+      track: track ? {
+        title: track.title || 'Unknown',
+        artist: track.artist || 'Unknown',
+        album: track.album || 'Unknown',
+        position: track.position || 0,
+        duration: track.duration || 0
+      } : null
+    };
+  } catch (err) {
+    return {
+      error: err.message,
+      state: 'unknown',
+      volume: null,
+      track: null
+    };
+  }
+}
+
+/**
+ * Get config values for admin (safe values only)
+ */
+function getConfigForAdmin() {
+  return {
+    adminChannel: config.get('adminChannel') || 'music-admin',
+    standardChannel: config.get('standardChannel') || 'music',
+    maxVolume: config.get('maxVolume') || 75,
+    market: config.get('market') || 'US',
+    gongLimit: config.get('gongLimit') || 3,
+    voteLimit: config.get('voteLimit') || 6,
+    voteImmuneLimit: config.get('voteImmuneLimit') || 6,
+    flushVoteLimit: config.get('flushVoteLimit') || 6,
+    ttsEnabled: config.get('ttsEnabled') !== false,
+    logLevel: config.get('logLevel') || 'info',
+    soundcraftEnabled: config.get('soundcraftEnabled') || false,
+    soundcraftIp: config.get('soundcraftIp') || '',
+    soundcraftChannels: config.get('soundcraftChannels') || []
+  };
+}
+
+/**
+ * Broadcast new logs to all connected SSE clients
+ */
+function broadcastLog(logEntry) {
+  // Add to buffer
+  logBuffer.push(logEntry);
+  
+  // Keep buffer size limited
+  if (logBuffer.length > MAX_LOG_BUFFER_SIZE) {
+    logBuffer.shift(); // Remove oldest entry
+  }
+  
+  // Broadcast to all connected SSE clients
+  if (global.logStreamClients && global.logStreamClients.size > 0) {
+    const message = `data: ${JSON.stringify({ type: 'log', ...logEntry })}\n\n`;
+    global.logStreamClients.forEach(client => {
+      try {
+        client.write(message);
+      } catch (err) {
+        // Client disconnected, remove it
+        global.logStreamClients.delete(client);
+      }
+    });
+  }
+}
+
+/**
+ * Handle Server-Sent Events stream for real-time logs
+ */
+function handleLogStream(req, res) {
+  // Set headers for SSE
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+  
+  // Send initial connection message
+  res.write('data: {"type":"connected"}\n\n');
+  
+  // Send existing logs from buffer
+  logBuffer.forEach(log => {
+    res.write(`data: ${JSON.stringify({ type: 'log', ...log })}\n\n`);
+  });
+  
+  // Store reference to this client
+  if (!global.logStreamClients) {
+    global.logStreamClients = new Set();
+  }
+  global.logStreamClients.add(res);
+  
+  // Keep connection alive with heartbeat
+  const heartbeatInterval = setInterval(() => {
+    try {
+      res.write(': heartbeat\n\n');
+    } catch (err) {
+      // Client disconnected
+      clearInterval(heartbeatInterval);
+      if (global.logStreamClients) global.logStreamClients.delete(res);
+    }
+  }, 30000); // Every 30 seconds
+  
+  // Clean up on client disconnect
+  req.on('close', () => {
+    clearInterval(heartbeatInterval);
+    if (global.logStreamClients) global.logStreamClients.delete(res);
+  });
+}
+
+/**
+ * Update a config value
+ */
+async function updateConfigValue(key, value) {
+  try {
+    // Validate key is allowed to be updated
+    const allowedKeys = [
+      'adminChannel', 'standardChannel', 'maxVolume', 'market',
+      'gongLimit', 'voteLimit', 'voteImmuneLimit', 'flushVoteLimit',
+      'ttsEnabled', 'logLevel', 'soundcraftEnabled', 'soundcraftIp', 'soundcraftChannels',
+      'webauthnEnabled', 'webauthnRpName', 'webauthnRpId', 'webauthnOrigin'
+    ];
+    
+    if (!allowedKeys.includes(key)) {
+      return { success: false, error: 'Key not allowed to be updated via admin' };
+    }
+    
+    // Update in memory
+    config.set(key, value);
+    
+    // Save to file
+    config.save((err) => {
+      if (err) {
+        logger.error('Failed to save config:', err);
+      } else {
+        logger.info(`Config updated via admin: ${key} = ${value}`);
+      }
+    });
+    
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+// Start HTTP server immediately (before platform initialization)
+// This ensures setup wizard is always accessible
+httpServer.listen(webPort, () => {
+  if (useHttps) {
+    logger.info(`📻 HTTP server listening on port ${webPort} (redirecting to HTTPS)`);
+  } else {
+  logger.info(`📻 HTTP server listening on port ${webPort}`);
+  }
+  if (ttsEnabled) {
+    logger.info(`   TTS endpoint: http://${ipAddress}:${webPort}/tts.mp3`);
+  }
+  logger.info(`   Setup wizard: http://${ipAddress}:${webPort}/setup`);
+  
+  // Start platform initialization after server is ready
+  // This is done in the startup sequence below
+});
+
+// Start HTTPS server if SSL is configured
+if (useHttps && httpsServer) {
+  const httpsPort = config.get('httpsPort') || 8443;
+  httpsServer.listen(httpsPort, () => {
+    logger.info(`🔒 HTTPS server listening on port ${httpsPort}`);
+    if (ttsEnabled) {
+      logger.info(`   TTS endpoint: https://${ipAddress}:${httpsPort}/tts.mp3`);
+    }
+    logger.info(`   Setup wizard: https://${ipAddress}:${httpsPort}/setup`);
+  });
 }
 
 // ==========================================

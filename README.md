@@ -78,11 +78,24 @@ Use the `telemetry` admin command in Slack (admin channel) to view current statu
 
 ## Quick Start
 
+### 🚀 Web-Based Setup Wizard (Recommended)
+
+**The easiest way to set up SlackONOS!**
+
+1. Start SlackONOS: `npm install && node index.js`
+2. Open your browser: `http://localhost:8181/setup` (or `http://YOUR_SERVER_IP:8181/setup`)
+3. Follow the interactive wizard to configure:
+   - Slack tokens (auto-validated)
+   - Sonos device (auto-discovered)
+   - Spotify credentials (auto-validated)
+   - Discord (optional)
+4. Save and restart - you're done!
+
 **What You Need:**
 1. A Sonos speaker configured with Spotify
 2. A Slack bot token **OR** Discord bot token (or both!)
 3. A server running Node.js
-4. Static IP address for your Sonos speaker
+4. Static IP address for your Sonos speaker (or use auto-discovery)
 5. Spotify Developer credentials (Client ID & Secret) from https://developer.spotify.com/dashboard/applications
 
 **Docker Installation (Recommended)**
@@ -95,7 +108,16 @@ services:
     restart: unless-stopped
     volumes:
       - /PATH_TO_CONFIG_FOLDER:/app/config
+    ports:
+      - "8181:8181"  # HTTP (redirectar)
+      - "8443:8443"  # HTTPS (faktiska förfrågningar)
+    # Optional: Use host network for better Sonos discovery
+    # network_mode: "host"
 ```
+
+After starting the container, access the setup wizard at:
+- HTTP: `http://localhost:8181/setup` (redirects to HTTPS if SSL is enabled)
+- HTTPS: `https://localhost:8443/setup` (if SSL certificates are configured)
 
 📖 **[Complete Discord Setup Guide](DISCORD.md)** - Step-by-step Discord bot configuration
 

@@ -14,8 +14,12 @@ module.exports = function SlackSystem({ botToken, appToken, logger, onCommand })
         autoReconnectEnabled: true // Enable automatic reconnection
     });
 
+    // Track connection state
+    let isConnected = false;
+    
     // Handle disconnections gracefully
     socket.on('disconnect', (event) => {
+        isConnected = false;
         logger.warn(`Socket Mode disconnected: ${event?.reason || 'unknown reason'}`);
     });
 
@@ -24,7 +28,13 @@ module.exports = function SlackSystem({ botToken, appToken, logger, onCommand })
     });
 
     socket.on('reconnect', () => {
+        isConnected = true;
         logger.info('Socket Mode reconnected successfully');
+    });
+    
+    // Mark as connected when socket starts
+    socket.on('ready', () => {
+        isConnected = true;
     });
 
     // ==========================================
@@ -38,6 +48,7 @@ module.exports = function SlackSystem({ botToken, appToken, logger, onCommand })
             logger.info(`Bot user ID loaded: ${botUserId}`);
 
             await socket.start();
+            isConnected = true;
             logger.info("Socket Mode connected");
         } catch (error) {
             logger.error(`Failed to initialize Slack: ${error.message}`);
@@ -110,6 +121,8 @@ module.exports = function SlackSystem({ botToken, appToken, logger, onCommand })
     return {
         init,
         web,
+        socket, // Export socket for connection checking
+        isConnected: () => isConnected, // Helper to check connection status
         // Helper to send messages
         sendMessage: async (text, channelId, options = {}) => {
             // Basic heuristic: Slack channel IDs usually start with C, D, G, or W etc.

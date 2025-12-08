@@ -5,8 +5,13 @@ services:
     image: htilly/slackonos:latest
     restart: unless-stopped
     environment:
+      # Optional: Override config with environment variables
       - HOST_IP=192.168.1.100  # Replace with your Docker host's IP address (required for TTS to work)
+      # - NODE_ENV=production
     volumes:
       - PATH_TO_CONFIG_FOLDER/slackonos/config:/app/config
     ports:
-      - "8080:8080"  # HTTP server for TTS (webPort from config)
+      - "8181:8181"  # HTTP (redirectar)
+      - "8443:8443"  # HTTPS (faktiska förfrågningar)
+    # Optional: Use host network for better Sonos discovery
+    # network_mode: "host"
