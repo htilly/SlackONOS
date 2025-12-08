@@ -41,7 +41,7 @@ let voteTimer = null;
 // DEPENDENCIES (injected)
 // ==========================================
 
-let logger = console;
+let logger = null;
 let sendMessage = async () => {};
 let sonos = null;
 let getCurrentTrackTitle = async () => null;
@@ -63,16 +63,20 @@ let voteMessages = ['Voted!'];
  * @param {Object} deps - Dependencies
  */
 function initialize(deps) {
-  logger = deps.logger || console;
+  if (!deps.logger) {
+    throw new Error('Voting module requires a logger to be injected');
+  }
+
+  logger = deps.logger;
   sendMessage = deps.sendMessage || (async () => {});
   sonos = deps.sonos || null;
   getCurrentTrackTitle = deps.getCurrentTrackTitle || (async () => null);
   logUserAction = deps.logUserAction || (async () => {});
-  
+
   // Load random messages
   if (deps.gongMessages) gongMessages = deps.gongMessages;
   if (deps.voteMessages) voteMessages = deps.voteMessages;
-  
+
   logger.info('✅ Voting module initialized');
 }
 

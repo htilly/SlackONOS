@@ -1,18 +1,6 @@
 'use strict'
 
-const config = require('nconf')
-const winston = require('winston')
-
-config.argv()
-    .env()
-    .file({ file: 'config.json' })
-    .defaults({
-        'logLevel': 'info',
-    })
-
-const logLevel = config.get('logLevel')
-
-module.exports = function (config) {
+module.exports = function (config, injectedLogger) {
     if (module.exports.instance) {
         return module.exports.instance
     }
@@ -21,14 +9,13 @@ module.exports = function (config) {
     let accessToken
     let accessTokenExpires = 0
 
-    /* Initialize Logger */
-    const logger = winston.createLogger({
-        level: logLevel,
-        format: winston.format.json(),
-        transports: [
-            new winston.transports.Console({ format: winston.format.combine(winston.format.colorize(), winston.format.simple()) })
-        ]
-    });
+    // Use injected logger or create a fallback
+    const logger = injectedLogger || {
+        info: console.log,
+        warn: console.warn,
+        error: console.error,
+        debug: console.debug
+    };
 
     async function _getAccessToken() {
         if (accessToken && accessTokenExpires > new Date().getTime()) {

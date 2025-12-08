@@ -42,25 +42,13 @@ const cleanupInterval = setInterval(cleanupOldTrackMessages, TRACK_MESSAGE_CLEAN
 // Keep the interval from preventing Node.js shutdown
 cleanupInterval.unref();
 
-// We accept an injected logger (recommended). If not provided we create a minimal one.
+// Logger must be injected - no fallback to ensure consistent logging
 async function initializeDiscord(config, messageHandler, injectedLogger) {
-    let logger = injectedLogger;
-    if (!logger) {
-        try {
-            logger = new WinstonWrapper({
-                level: (config && config.logLevel) || 'info',
-                format: require('winston').format.simple(),
-                transports: [new (require('winston').transports.Console)()]
-            });
-        } catch (e) {
-            logger = {
-                info: console.log,
-                warn: console.warn,
-                error: console.error,
-                debug: console.debug
-            }; // last-resort fallback
-        }
+    if (!injectedLogger) {
+        throw new Error('Discord integration requires an injected logger');
     }
+
+    const logger = injectedLogger;
 
     // store logger globally for other functions
     discordLogger = logger;
@@ -88,7 +76,7 @@ async function initializeDiscord(config, messageHandler, injectedLogger) {
                 logger.info(`✅ Discord bot logged in as ${client.user.tag}`);
                 logger.info(`   Bot user ID: ${botUserId}`);
             } catch (e) {
-                console.error('Discord ready logging failed:', e.message);
+                logger.error('Discord ready logging failed:', e.message);
             }
         });
 

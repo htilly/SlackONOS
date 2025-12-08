@@ -1,5 +1,6 @@
 const fs = require('fs');
 // --- MIGRATION: Move legacy message/help files to /app/templates/ if found ---
+// Note: Uses console.log since this runs before logger is initialized
 const legacyFiles = [
   { old: 'config/gong.txt', new: 'templates/messages/gong.txt' },
   { old: 'config/vote.txt', new: 'templates/messages/vote.txt' },
@@ -12,6 +13,7 @@ const legacyFiles = [
   { old: 'helpText.txt', new: 'templates/help/helpText.txt' },
   { old: 'helpTextAdmin.txt', new: 'templates/help/helpTextAdmin.txt' },
 ];
+const migrationLogs = [];
 for (const file of legacyFiles) {
   try {
     if (fs.existsSync(file.old)) {
@@ -21,12 +23,10 @@ for (const file of legacyFiles) {
         fs.mkdirSync(targetDir, { recursive: true });
       }
       fs.renameSync(file.old, file.new);
-      // eslint-disable-next-line no-console
-      console.log(`[SlackONOS MIGRATION] Moved ${file.old} → ${file.new}`);
+      migrationLogs.push({ level: 'info', msg: `Moved ${file.old} → ${file.new}` });
     }
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(`[SlackONOS MIGRATION] Failed to move ${file.old}: ${err.message}`);
+    migrationLogs.push({ level: 'error', msg: `Failed to move ${file.old}: ${err.message}` });
   }
 }
 const os = require('os');
@@ -85,7 +85,12 @@ function loadBlacklist() {
       return JSON.parse(data);
     }
   } catch (err) {
-    console.error('Error loading blacklist:', err);
+    // Logger may not be initialized yet during early startup, use console as fallback
+    if (typeof logger !== 'undefined') {
+      logger.error('Error loading blacklist:', err);
+    } else {
+      console.error('Error loading blacklist:', err);
+    }
   }
   return [];
 }
@@ -107,7 +112,12 @@ function loadTrackBlacklist() {
       return JSON.parse(data);
     }
   } catch (err) {
-    console.error('Error loading track blacklist:', err);
+    // Logger may not be initialized yet during early startup, use console as fallback
+    if (typeof logger !== 'undefined') {
+      logger.error('Error loading track blacklist:', err);
+    } else {
+      console.error('Error loading track blacklist:', err);
+    }
   }
   return [];
 }
@@ -168,6 +178,37 @@ let maxVolume = config.get('maxVolume');
 let voteTimeLimitMinutes = config.get('voteTimeLimitMinutes') || 5;
 const logLevel = config.get('logLevel');
 
+/* Initialize Logger Early
+We have to wrap the Winston logger in this thin layer to satiate the SocketModeClient.
+Initialize early so it's available for all startup code. */
+const logger = new WinstonWrapper({
+  level: logLevel,
+  format: winston.format.combine(
+    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // Add timestamp
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // Add timestamp to console logs
+        winston.format.printf(({ timestamp, level, message }) => {
+          return `[${timestamp}] ${level}: ${message}`;
+        })
+      ),
+    }),
+  ],
+});
+
+// Log any file migrations that occurred during startup
+migrationLogs.forEach(log => {
+  if (log.level === 'error') {
+    logger.error(`[MIGRATION] ${log.msg}`);
+  } else {
+    logger.info(`[MIGRATION] ${log.msg}`);
+  }
+});
+
 //Spotify Config Values
 const market = config.get('market');
 const clientId = config.get('spotifyClientId');
@@ -224,27 +265,6 @@ if (blacklist.length === 0) {
   }
 }
 
-/* Initialize Logger
-We have to wrap the Winston logger in this thin layer to satiate the SocketModeClient */
-const logger = new WinstonWrapper({
-  level: logLevel,
-  format: winston.format.combine(
-    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // Add timestamp
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // Add timestamp to console logs
-        winston.format.printf(({ timestamp, level, message }) => {
-          return `[${timestamp}] ${level}: ${message}`;
-        })
-      ),
-    }),
-  ],
-});
-
 /* Initialize Sonos */
 const SONOS = require('sonos');
 const Sonos = SONOS.Sonos;
@@ -282,7 +302,7 @@ const spotify = Spotify({
   clientSecret: clientSecret,
   market: market,
   logger: logger,
-});
+}, logger);
 
 /* Initialize Soundcraft Handler */
 const SoundcraftHandler = require('./soundcraft-handler');
