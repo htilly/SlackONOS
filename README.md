@@ -69,7 +69,7 @@ Or, disable telemetry instantly from Slack (admin channel):
 setconfig telemetryEnabled false
 ```
 
-📖 **[Full Telemetry Documentation](TELEMETRY.md)** - Details, privacy info, and self-hosting options
+📖 **[Full Telemetry Documentation](docs/TELEMETRY.md)** - Details, privacy info, and self-hosting options
 
 
 Use the `telemetry` admin command in Slack (admin channel) to view current status and what data is being sent.
@@ -119,11 +119,11 @@ After starting the container, access the setup wizard at:
 - HTTP: `http://localhost:8181/setup` (redirects to HTTPS if SSL is enabled)
 - HTTPS: `https://localhost:8443/setup` (if SSL certificates are configured)
 
-📖 **[Complete Discord Setup Guide](DISCORD.md)** - Step-by-step Discord bot configuration
+📖 **[Complete Discord Setup Guide](docs/DISCORD.md)** - Step-by-step Discord bot configuration
 
-📖 **[Complete Slack Setup Guide](SLACK.md)** - Socket Mode Slack bot setup (tokens, scopes, events)
+📖 **[Complete Slack Setup Guide](docs/SLACK.md)** - Socket Mode Slack bot setup (tokens, scopes, events)
 
-🎛️ **[Soundcraft Ui24R Integration](SOUNDCRAFT.md)** - Control mixer volume directly from Slack/Discord
+🎛️ **[Soundcraft Ui24R Integration](docs/SOUNDCRAFT.md)** - Control mixer volume directly from Slack/Discord
 
 ---
 
@@ -416,7 +416,7 @@ The bot queues song requests and plays them in order. If enough people dislike t
 
 For detailed installation instructions, see the [INSTALL](INSTALL) file.
 
-For Discord-specific setup, see the **[Discord Setup Guide](DISCORD.md)**.
+For Discord-specific setup, see the **[Discord Setup Guide](docs/DISCORD.md)**.
 
 **Wiki:** https://github.com/htilly/SlackONOS/wiki
 
@@ -429,7 +429,7 @@ Contributions are welcome! Please feel free to submit pull requests, report bugs
 **Development:**
 - Run tests: `npm test`
 - Docker build: `docker build -t slackonos .`
-- See [TESTING.md](TESTING.md) for test workflow information
+- See [TESTING.md](docs/TESTING.md) for test workflow information
 
 ---
 

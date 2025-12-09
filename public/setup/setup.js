@@ -7,6 +7,7 @@ let configData = {};
 let selectedPlatforms = new Set(['slack']); // Default to Slack
 let currentPage = 'welcome';
 let configValues = null; // Cache for config values
+let actualCredentials = null; // Cache for actual credentials to avoid redundant API calls
 
 const pageOrder = [
   'welcome',
@@ -289,6 +290,29 @@ async function loadConfigValues() {
 }
 
 /**
+ * Load actual credentials from server (cached to avoid redundant API calls)
+ */
+async function loadActualCredentials() {
+  if (actualCredentials) {
+    return actualCredentials; // Return cached credentials
+  }
+
+  try {
+    const credResponse = await fetch(`${API_BASE}/actual-credentials`);
+    const credData = await credResponse.json();
+
+    if (credData.exists && credData.values) {
+      actualCredentials = credData.values; // Cache the result
+      return actualCredentials;
+    }
+  } catch (err) {
+    console.warn('Could not load actual credentials:', err);
+  }
+
+  return null;
+}
+
+/**
  * Check if a value is masked (contains ***)
  */
 function isMaskedValue(value) {
@@ -408,6 +432,7 @@ async function populateConfigFields(pageId) {
     case 'spotify':
       const spotifyClientIdInput = document.getElementById('spotify-client-id');
       const spotifyClientSecretInput = document.getElementById('spotify-client-secret');
+      const spotifyMarketSelect = document.getElementById('spotify-market');
       
       if (spotifyClientIdInput && configValues.spotifyClientId) {
         spotifyClientIdInput.value = configValues.spotifyClientId;
@@ -416,6 +441,10 @@ async function populateConfigFields(pageId) {
       if (spotifyClientSecretInput && configValues.spotifyClientSecret) {
         spotifyClientSecretInput.value = configValues.spotifyClientSecret;
         createCredentialToggle('spotify-client-secret', configValues.spotifyClientSecret);
+      }
+      // Set market/region if it exists in config
+      if (spotifyMarketSelect && configValues.market) {
+        spotifyMarketSelect.value = configValues.market;
       }
       break;
   }
@@ -587,30 +616,47 @@ async function discoverSonos() {
   }
 
   try {
-    const response = await fetch(`${API_BASE}/discover-sonos`);
-    const data = await response.json();
+    // Add 15-second timeout to prevent indefinite waiting
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
 
-    if (data.success && data.devices.length > 0) {
-      list.innerHTML = data.devices.map(device => `
-        <div class="device-item" data-ip="${device.ip}">
-          <strong>${device.name}</strong>
-          <small>${device.model} - ${device.ip}</small>
-        </div>
-      `).join('');
-
-      document.querySelectorAll('.device-item').forEach(item => {
-        item.addEventListener('click', () => {
-          document.querySelectorAll('.device-item').forEach(i => i.classList.remove('selected'));
-          item.classList.add('selected');
-          const ipInput = document.getElementById('sonos-ip');
-          if (ipInput) ipInput.value = item.dataset.ip;
-        });
+    try {
+      const response = await fetch(`${API_BASE}/discover-sonos`, {
+        signal: controller.signal
       });
-    } else {
-      if (errorDiv) {
-        errorDiv.textContent = 'Inga Sonos-enheter hittades. Kontrollera att de är på och på samma nätverk.';
-        errorDiv.classList.add('error');
+      clearTimeout(timeout);
+      const data = await response.json();
+
+      if (data.success && data.devices.length > 0) {
+        list.innerHTML = data.devices.map(device => `
+          <div class="device-item" data-ip="${device.ip}">
+            <strong>${device.name}</strong>
+            <small>${device.model} - ${device.ip}</small>
+          </div>
+        `).join('');
+
+        // Use event delegation instead of individual listeners (more efficient)
+        list.addEventListener('click', (e) => {
+          const deviceItem = e.target.closest('.device-item');
+          if (!deviceItem) return;
+
+          document.querySelectorAll('.device-item').forEach(i => i.classList.remove('selected'));
+          deviceItem.classList.add('selected');
+          const ipInput = document.getElementById('sonos-ip');
+          if (ipInput) ipInput.value = deviceItem.dataset.ip;
+        });
+      } else {
+        if (errorDiv) {
+          errorDiv.textContent = 'Inga Sonos-enheter hittades. Kontrollera att de är på och på samma nätverk.';
+          errorDiv.classList.add('error');
+        }
       }
+    } catch (fetchErr) {
+      clearTimeout(timeout);
+      if (fetchErr.name === 'AbortError') {
+        throw new Error('Timeout: Upptäckt tog för lång tid (15s)');
+      }
+      throw fetchErr;
     }
   } catch (err) {
     if (errorDiv) {

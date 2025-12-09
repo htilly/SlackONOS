@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SlackONOS Admin</title>
+  <!-- Preload CDN scripts for faster loading -->
+  <link rel="preload" as="script" href="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@9.0.0/dist/bundle/index.umd.min.js">
   <link rel="stylesheet" href="/setup/setup.css">
   <style>
     .admin-container {
@@ -142,11 +144,12 @@
     }
     
     .config-item {
-      display: flex;
+      display: grid;
+      grid-template-columns: 200px 1fr auto;
       align-items: center;
-      justify-content: space-between;
-      padding: 1rem;
-      margin-bottom: 1rem;
+      gap: 1rem;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.75rem;
       background: rgba(255, 255, 255, 0.03);
       border-radius: 8px;
       border: 1px solid rgba(255, 255, 255, 0.05);
@@ -154,18 +157,19 @@
     
     .config-item label {
       font-weight: 600;
-      flex: 1;
+      font-size: 0.95rem;
     }
     
     .config-item input,
     .config-item select {
-      flex: 2;
-      padding: 0.5rem;
+      max-width: 300px;
+      min-width: 150px;
+      padding: 0.5rem 0.75rem;
       background: rgba(255, 255, 255, 0.1);
       border: 1px solid rgba(255, 255, 255, 0.2);
       border-radius: 6px;
       color: #fff;
-      font-size: 1rem;
+      font-size: 0.95rem;
     }
     
     .config-item input:focus,
@@ -175,15 +179,22 @@
       box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.2);
     }
     
+    .config-item > div {
+      grid-column: 1 / -1;
+      margin-top: 0.25rem;
+    }
+    
     .btn-save {
       background: linear-gradient(135deg, #8a2be2, #1e90ff);
       border: none;
-      padding: 0.5rem 1.5rem;
+      padding: 0.5rem 1rem;
       border-radius: 6px;
       color: #fff;
       font-weight: 600;
+      font-size: 0.9rem;
       cursor: pointer;
       transition: transform 0.2s ease, box-shadow 0.2s ease;
+      white-space: nowrap;
     }
     
     .btn-save:hover {
@@ -382,10 +393,19 @@
         </div>
       </div>
       
-      <!-- WebAuthn Settings Info -->
+      <!-- WebAuthn Settings Toggle -->
       <div id="webauthn-settings" style="margin-bottom: 1rem; padding: 1rem; background: rgba(255, 255, 255, 0.03); border-radius: 8px; display: none;">
-        <div style="font-size: 0.85rem; color: rgba(255,255,255,0.7); line-height: 1.4;">
-          <strong>WebAuthn Configuration:</strong> User verification is set to <strong>preferred</strong> (not required) for maximum compatibility. This allows both Touch ID/Face ID and USB security keys to work without requiring PIN entry, ensuring the widest range of authenticators are supported.
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+          <div style="flex: 1;">
+            <strong style="display: block; margin-bottom: 0.25rem;">Require User Verification (PIN/Biometric)</strong>
+            <small style="color: rgba(255,255,255,0.6); font-size: 0.85rem;">
+              When enabled, requires PIN for Yubikey or biometric for Touch ID. Disable for touch-only security keys.
+            </small>
+          </div>
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input type="checkbox" id="webauthn-require-uv" style="width: 18px; height: 18px; cursor: pointer;">
+            <span id="webauthn-uv-status" style="font-size: 0.9rem; font-weight: 600;"></span>
+          </label>
         </div>
       </div>
 

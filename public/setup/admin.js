@@ -424,28 +424,38 @@ function setupRefreshButton() {
 /**
  * Start Server-Sent Events stream for real-time updates
  */
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+
 function startEventStream() {
   // Close existing connection if any
   if (eventSource) {
     eventSource.close();
   }
-  
+
+  // Stop if max reconnection attempts reached
+  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    console.warn(`Max SSE reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Falling back to polling.`);
+    return;
+  }
+
   // Connect to SSE endpoint
   eventSource = new EventSource(`${API_BASE}/events`);
-  
+
   eventSource.onopen = () => {
     console.log('Connected to real-time updates');
+    reconnectAttempts = 0; // Reset counter on successful connection
   };
-  
+
   eventSource.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
-      
+
       if (data.type === 'connected') {
         console.log('Event stream connected');
         return;
       }
-      
+
       if (data.type === 'status') {
         // Update status display
         updateStatusDisplay(data.data);
@@ -457,18 +467,23 @@ function startEventStream() {
       console.error('Error parsing event data:', err);
     }
   };
-  
+
   eventSource.onerror = (err) => {
     console.error('Event stream error:', err);
-    // Attempt to reconnect after 5 seconds
+    reconnectAttempts++;
+
+    // Exponential backoff: 5s, 10s, 20s, etc. (max 60s)
+    const backoffTime = Math.min(5000 * Math.pow(2, reconnectAttempts - 1), 60000);
+
+    // Attempt to reconnect with exponential backoff
     setTimeout(() => {
       if (eventSource && eventSource.readyState === EventSource.CLOSED) {
-        console.log('Reconnecting to event stream...');
+        console.log(`Reconnecting to event stream (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
         startEventStream();
       }
-    }, 5000);
+    }, backoffTime);
   };
-  
+
   // Clean up on page unload
   window.addEventListener('beforeunload', () => {
     if (eventSource) {
@@ -995,6 +1010,7 @@ async function setupWebAuthn() {
       // Load credentials if enabled
       if (data.enabled) {
         await loadWebAuthnCredentials();
+        await loadWebAuthnUserVerificationSetting();
       } else {
         if (credentialsList) credentialsList.innerHTML = '';
       }
@@ -1005,6 +1021,66 @@ async function setupWebAuthn() {
         statusDiv.style.color = '#f87171';
       }
     }
+  }
+
+  // Load user verification setting
+  async function loadWebAuthnUserVerificationSetting() {
+    try {
+      const response = await fetch(`${API_BASE}/config-values`);
+      const data = await response.json();
+
+      const checkbox = document.getElementById('webauthn-require-uv');
+      const statusSpan = document.getElementById('webauthn-uv-status');
+
+      if (checkbox && statusSpan && data.exists && data.values) {
+        const requireUV = data.values.webauthnRequireUserVerification === true;
+        checkbox.checked = requireUV;
+        statusSpan.textContent = requireUV ? 'Required' : 'Optional';
+        statusSpan.style.color = requireUV ? '#fbbf24' : '#4ade80';
+      }
+    } catch (err) {
+      console.error('Error loading user verification setting:', err);
+    }
+  }
+
+  // Save user verification setting
+  async function saveWebAuthnUserVerificationSetting(requireUV) {
+    try {
+      const response = await fetch(`${API_BASE}/save-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          config: { webauthnRequireUserVerification: requireUV }
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        const statusSpan = document.getElementById('webauthn-uv-status');
+        if (statusSpan) {
+          statusSpan.textContent = requireUV ? 'Required' : 'Optional';
+          statusSpan.style.color = requireUV ? '#fbbf24' : '#4ade80';
+        }
+        showWebAuthnMessage(messageDiv,
+          `✓ Setting saved. ${requireUV ? 'PIN/biometric now required.' : 'Touch-only now allowed.'} Re-register keys if needed.`,
+          'success'
+        );
+      } else {
+        throw new Error(data.error || 'Failed to save setting');
+      }
+    } catch (err) {
+      console.error('Error saving user verification setting:', err);
+      showWebAuthnMessage(messageDiv, 'Failed to save setting: ' + err.message, 'error');
+    }
+  }
+
+  // Setup checkbox handler
+  const uvCheckbox = document.getElementById('webauthn-require-uv');
+  if (uvCheckbox) {
+    uvCheckbox.addEventListener('change', () => {
+      saveWebAuthnUserVerificationSetting(uvCheckbox.checked);
+    });
   }
 
 
