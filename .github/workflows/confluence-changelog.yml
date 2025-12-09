@@ -55,10 +55,10 @@ jobs:
         VERSION="${{ github.event.release.tag_name }}"
         # Remove 'v' prefix if present
         VERSION_NUM="${VERSION#v}"
-        
+
         # Try to extract the changelog section for this version
         # Look for the version header and extract until the next version header
-        CHANGELOG_SECTION=$(awk "/## \[${VERSION_NUM}\]/{found=1; next} /## \[/{if(found) exit} found{print}" CHANGELOG.md)
+        CHANGELOG_SECTION=$(awk "/## \[${VERSION_NUM}\]/{found=1; next} /## \[/{if(found) exit} found{print}" docs/CHANGELOG.md)
         
         if [ -z "$CHANGELOG_SECTION" ]; then
           # Fallback to release body if no changelog section found
