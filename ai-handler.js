@@ -14,7 +14,7 @@ let lastErrorTS = null;
 let lastErrorMessage = null;
 
 // User conversation context - keeps last suggestion for follow-ups
-// Format: { userName: { lastSuggestion: 'command', timestamp: Date, context: 'string' } }
+// Format: { userName: { lastSuggestion: 'command', timestamp: Date, context: 'string', suggestedAction: {...} } }
 const userContext = {};
 const CONTEXT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const CONTEXT_CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
@@ -162,12 +162,14 @@ async function initialize(loggerInstance) {
  * @param {string} userName - Username
  * @param {string} suggestion - Suggested command
  * @param {string} context - Context description
+ * @param {Object} suggestedAction - Optional suggestedAction object to preserve args structure
  */
-function setUserContext(userName, suggestion, context) {
+function setUserContext(userName, suggestion, context, suggestedAction = null) {
   userContext[userName] = {
     lastSuggestion: suggestion,
     timestamp: Date.now(),
-    context: context
+    context: context,
+    suggestedAction: suggestedAction // Store the full suggestedAction object to preserve args structure
   };
   logger.debug(`Set context for ${userName}: ${suggestion} - ${context}`);
 }
@@ -222,14 +224,22 @@ CRITICAL: If the user now says ANYTHING that sounds like agreement or confirmati
 - "gör det", "ja", "ok gör det", "kör", "varsågod", "snälla", "spela"
 - Or ANY short affirmative response
 
-Then IMMEDIATELY execute the suggested command! Return:
+Then IMMEDIATELY execute the suggested command! 
+${ctx.suggestedAction ? `Use the stored suggestedAction object directly:
+{
+  "command": "${ctx.suggestedAction.command}",
+  "args": ${JSON.stringify(ctx.suggestedAction.args)},
+  "confidence": 0.95,
+  "reasoning": "User confirmed previous suggestion",
+  "summary": "You got it! Playing those tunes now! 🎵"
+}` : `Parse from lastSuggestion string:
 {
   "command": "${ctx.lastSuggestion.split(' ')[0]}",
   "args": [${ctx.lastSuggestion.split(' ').slice(1).map(a => `"${a}"`).join(', ')}],
   "confidence": 0.95,
   "reasoning": "User confirmed previous suggestion",
   "summary": "You got it! Playing those tunes now! 🎵"
-}`;
+}`}`;
     logger.info(`Using follow-up context for ${userName}: "${ctx.lastSuggestion}" (${ctx.context})`);
   }
   

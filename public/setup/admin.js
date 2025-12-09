@@ -1,7 +1,9 @@
 const API_BASE = '/api/admin';
 
-// Auto-refresh interval (30 seconds)
+// Auto-refresh interval (30 seconds) - kept as fallback
 let refreshInterval = null;
+// SSE connection for real-time updates
+let eventSource = null;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
@@ -13,7 +15,9 @@ document.addEventListener('DOMContentLoaded', () => {
   loadAllData();
   setupRefreshButton();
   setupLogViewer();
-  startAutoRefresh();
+  startEventStream(); // Use real-time updates instead of polling
+  // Keep auto-refresh as fallback (longer interval)
+  startAutoRefresh(60000); // Fallback refresh every 60 seconds
 });
 
 /**
@@ -263,6 +267,7 @@ async function loadConfig() {
       { key: 'logLevel', label: 'Log Level', type: 'select', options: ['debug', 'info', 'warn', 'error'], description: 'Logging verbosity level' },
       { key: 'defaultTheme', label: 'Default Theme', type: 'text', description: 'Default music theme (e.g., lounge, club, office)' },
       { key: 'themePercentage', label: 'Theme Percentage', type: 'number', min: 0, max: 100, description: 'Percentage of theme tracks to mix in (0-100)' },
+      { key: 'openaiApiKey', label: 'OpenAI API Key', type: 'text', description: 'OpenAI API key for natural language parsing (starts with sk-)' },
       { key: 'aiModel', label: 'AI Model', type: 'select', options: ['gpt-4o', 'gpt-4o-mini', 'gpt-4', 'gpt-3.5-turbo'], description: 'OpenAI model for natural language parsing' },
       { key: 'soundcraftEnabled', label: 'Soundcraft Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable Soundcraft mixer integration' },
       { key: 'soundcraftIp', label: 'Soundcraft IP Address', type: 'text', description: 'IP address of Soundcraft mixer' }
@@ -308,8 +313,20 @@ function createConfigItem(item, value) {
     const attrs = [];
     if (item.min !== undefined) attrs.push(`min="${item.min}"`);
     if (item.max !== undefined) attrs.push(`max="${item.max}"`);
+    
     const displayValue = value !== null && value !== undefined ? value : '';
-    inputHTML = `<input type="${inputType}" id="config-${item.key}" value="${escapeHtml(displayValue)}" ${attrs.join(' ')}>`;
+    
+    // Use password type for sensitive fields (API keys, tokens, secrets)
+    // Password type will mask the value automatically, but we keep the actual value
+    const isSensitive = item.key.includes('ApiKey') || item.key.includes('Token') || item.key.includes('Secret');
+    const finalInputType = isSensitive ? 'password' : inputType;
+    
+    // Add placeholder for empty sensitive fields
+    if (isSensitive && !displayValue) {
+      attrs.push(`placeholder="Enter ${item.label.toLowerCase()}"`);
+    }
+    
+    inputHTML = `<input type="${finalInputType}" id="config-${item.key}" value="${escapeHtml(displayValue)}" ${attrs.join(' ')}>`;
   }
   
   const description = item.description ? `<div style="font-size: 0.85rem; color: rgba(255,255,255,0.6); margin-top: 0.25rem;">${item.description}</div>` : '';
@@ -404,10 +421,143 @@ function setupRefreshButton() {
 /**
  * Start auto-refresh
  */
-function startAutoRefresh() {
+/**
+ * Start Server-Sent Events stream for real-time updates
+ */
+function startEventStream() {
+  // Close existing connection if any
+  if (eventSource) {
+    eventSource.close();
+  }
+  
+  // Connect to SSE endpoint
+  eventSource = new EventSource(`${API_BASE}/events`);
+  
+  eventSource.onopen = () => {
+    console.log('Connected to real-time updates');
+  };
+  
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      
+      if (data.type === 'connected') {
+        console.log('Event stream connected');
+        return;
+      }
+      
+      if (data.type === 'status') {
+        // Update status display
+        updateStatusDisplay(data.data);
+      } else if (data.type === 'nowPlaying') {
+        // Update now playing display
+        updateNowPlayingDisplay(data.data);
+      }
+    } catch (err) {
+      console.error('Error parsing event data:', err);
+    }
+  };
+  
+  eventSource.onerror = (err) => {
+    console.error('Event stream error:', err);
+    // Attempt to reconnect after 5 seconds
+    setTimeout(() => {
+      if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+        console.log('Reconnecting to event stream...');
+        startEventStream();
+      }
+    }, 5000);
+  };
+  
+  // Clean up on page unload
+  window.addEventListener('beforeunload', () => {
+    if (eventSource) {
+      eventSource.close();
+    }
+  });
+}
+
+/**
+ * Update status display with new data
+ */
+function updateStatusDisplay(status) {
+  // Reuse existing loadStatus logic but with provided data
+  const statusGrid = document.getElementById('status-grid');
+  if (!statusGrid) return;
+  
+  statusGrid.innerHTML = '';
+  
+  const integrations = [
+    { key: 'slack', name: 'Slack', icon: '💬' },
+    { key: 'discord', name: 'Discord', icon: '🎮' },
+    { key: 'spotify', name: 'Spotify', icon: '🎵' },
+    { key: 'sonos', name: 'Sonos', icon: '🔊' },
+  ];
+  
+  integrations.forEach(integration => {
+    const statusData = status[integration.key] || {};
+    const isConnected = statusData.connected === true;
+    const isConfigured = statusData.configured === true;
+    
+    const card = document.createElement('div');
+    card.className = 'status-card';
+    card.innerHTML = `
+      <div class="status-icon">${integration.icon}</div>
+      <div class="status-info">
+        <div class="status-name">${integration.name}</div>
+        <div class="status-status ${isConnected ? 'connected' : isConfigured ? 'error' : 'not-configured'}">
+          ${isConnected ? 'Connected' : isConfigured ? 'Error' : 'Not Configured'}
+        </div>
+      </div>
+    `;
+    statusGrid.appendChild(card);
+  });
+}
+
+/**
+ * Update now playing display with new data
+ */
+function updateNowPlayingDisplay(data) {
+  const nowPlayingDiv = document.getElementById('now-playing');
+  if (!nowPlayingDiv) return;
+  
+  if (data.track) {
+    nowPlayingDiv.innerHTML = `
+      <div class="now-playing-track">
+        <strong>${escapeHtml(data.track.title)}</strong>
+        <span class="now-playing-artist">by ${escapeHtml(data.track.artist)}</span>
+      </div>
+      <div class="now-playing-state">
+        <span class="state-badge ${data.state}">${data.state}</span>
+        <span class="volume-info">Volume: ${data.volume}%</span>
+      </div>
+      ${data.nextTracks && data.nextTracks.length > 0 ? `
+        <div class="up-next">
+          <strong>Up Next:</strong>
+          <ul>
+            ${data.nextTracks.map(t => `<li><strong>${escapeHtml(t.title)}</strong> <span style="color: rgba(255,255,255,0.7);">— ${escapeHtml(t.artist)}</span></li>`).join('')}
+          </ul>
+        </div>
+      ` : ''}
+    `;
+  } else {
+    nowPlayingDiv.innerHTML = `
+      <div class="now-playing-state">
+        <span class="state-badge ${data.state}">${data.state}</span>
+        <span class="volume-info">Volume: ${data.volume}%</span>
+      </div>
+      <p>No track currently playing</p>
+    `;
+  }
+}
+
+function startAutoRefresh(interval = 30000) {
+  if (refreshInterval) {
+    clearInterval(refreshInterval);
+  }
   refreshInterval = setInterval(() => {
     loadAllData();
-  }, 30000); // Refresh every 30 seconds
+  }, interval);
 }
 
 // Setup config collapse
@@ -830,9 +980,6 @@ async function setupWebAuthn() {
           // Show settings section when enabled
           const settingsDiv = document.getElementById('webauthn-settings');
           if (settingsDiv) settingsDiv.style.display = 'block';
-          
-          // Load user verification setting
-          await loadWebAuthnUserVerificationSetting();
         } else {
           statusDiv.textContent = 'Disabled';
           statusDiv.style.color = '#f87171';
@@ -860,61 +1007,6 @@ async function setupWebAuthn() {
     }
   }
 
-  // Load WebAuthn user verification setting
-  async function loadWebAuthnUserVerificationSetting() {
-    try {
-      const response = await fetch(`${API_BASE}/config`);
-      if (response.status === 401) {
-        window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
-        return;
-      }
-      const config = await response.json();
-      const checkbox = document.getElementById('webauthn-require-user-verification');
-      if (checkbox && config.webauthnRequireUserVerification !== undefined) {
-        checkbox.checked = config.webauthnRequireUserVerification === true;
-      }
-    } catch (err) {
-      console.error('Error loading WebAuthn user verification setting:', err);
-    }
-  }
-
-  // Handle user verification setting change
-  const userVerificationCheckbox = document.getElementById('webauthn-require-user-verification');
-  userVerificationCheckbox?.addEventListener('change', async (e) => {
-    try {
-      const response = await fetch(`${API_BASE}/config/update`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          key: 'webauthnRequireUserVerification', 
-          value: e.target.checked 
-        })
-      });
-      
-      if (response.status === 401) {
-        window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
-        return;
-      }
-      
-      const data = await response.json();
-      if (data.success) {
-        showWebAuthnMessage(messageDiv, 
-          e.target.checked 
-            ? '✓ PIN requirement enabled. New security keys will require PIN entry.' 
-            : '✓ PIN requirement disabled. Security keys can authenticate without PIN.',
-          'success'
-        );
-      } else {
-        showWebAuthnMessage(messageDiv, data.error || 'Failed to update setting', 'error');
-        // Revert checkbox on error
-        e.target.checked = !e.target.checked;
-      }
-    } catch (err) {
-      showWebAuthnMessage(messageDiv, 'Error updating setting: ' + err.message, 'error');
-      // Revert checkbox on error
-      e.target.checked = !e.target.checked;
-    }
-  });
 
   // Load WebAuthn credentials
   async function loadWebAuthnCredentials() {

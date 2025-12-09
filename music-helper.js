@@ -105,10 +105,18 @@ async function multiSearch(query, targetCount) {
       if (results && results.length) {
         allResults = allResults.concat(results);
         logger.info(`Music helper: search "${searchVariants[i]}" returned ${results.length} results (total: ${allResults.length})`);
+      } else {
+        logger.debug(`Music helper: search "${searchVariants[i]}" returned no results`);
       }
     } catch (searchErr) {
-      logger.warn(`Music helper: search variant failed: ${searchErr.message}`);
+      logger.warn(`Music helper: search variant "${searchVariants[i]}" failed: ${searchErr.message}`);
+      // Continue to next variant even if one fails
     }
+  }
+  
+  // If no results found, log warning for debugging
+  if (allResults.length === 0) {
+    logger.warn(`Music helper: multiSearch found no results for query "${query}" after trying ${searchVariants.length} variants`);
   }
   
   return allResults;

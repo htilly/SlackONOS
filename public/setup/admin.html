@@ -382,29 +382,10 @@
         </div>
       </div>
       
-      <!-- User Verification Setting -->
+      <!-- WebAuthn Settings Info -->
       <div id="webauthn-settings" style="margin-bottom: 1rem; padding: 1rem; background: rgba(255, 255, 255, 0.03); border-radius: 8px; display: none;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;">
-          <div style="flex: 1;">
-            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-              <input type="checkbox" id="webauthn-require-user-verification" style="width: 18px; height: 18px; cursor: pointer;">
-              <div>
-                <strong style="display: block; margin-bottom: 0.25rem;">Require PIN for Security Keys</strong>
-                <div style="font-size: 0.85rem; color: rgba(255,255,255,0.7); line-height: 1.4;">
-                  <strong>Default: Enabled</strong> (requires PIN for hardware keys or biometrics for Touch ID/Face ID - more secure)
-                  <br><br>
-                  When enabled, user verification is required during registration and authentication:
-                  <ul style="margin: 0.5rem 0; padding-left: 1.5rem;">
-                    <li><strong>Hardware keys (Yubikey, etc.):</strong> Will require PIN entry</li>
-                    <li><strong>Platform authenticators (Touch ID/Face ID):</strong> Will require biometric verification (fingerprint/face scan)</li>
-                  </ul>
-                  Both PIN and biometrics count as user verification. This provides stronger security by ensuring the user is present and verified. Chrome will show both Touch ID/Face ID and USB security key options when registering.
-                  <br><br>
-                  <strong>When to disable:</strong> Only if you need maximum compatibility with older authenticators that don't support user verification.
-                </div>
-              </div>
-            </label>
-          </div>
+        <div style="font-size: 0.85rem; color: rgba(255,255,255,0.7); line-height: 1.4;">
+          <strong>WebAuthn Configuration:</strong> User verification is set to <strong>preferred</strong> (not required) for maximum compatibility. This allows both Touch ID/Face ID and USB security keys to work without requiring PIN entry, ensuring the widest range of authenticators are supported.
         </div>
       </div>
 

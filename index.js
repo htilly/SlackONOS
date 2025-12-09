@@ -187,6 +187,15 @@ Initialize early so it's available for all startup code. */
 const logBuffer = [];
 const MAX_LOG_BUFFER_SIZE = 1000;
 
+// Global status update SSE clients
+if (!global.statusStreamClients) {
+  global.statusStreamClients = new Set();
+}
+
+// Track current track for change detection
+let lastTrackInfo = null;
+let statusPollInterval = null;
+
 // Custom transport to capture logs in memory
 class MemoryLogTransport extends winston.transports.Console {
   log(info, callback) {
@@ -982,9 +991,18 @@ try {
 
     logger.info('🚀 System startup complete.');
     
+    // Start polling for track changes to broadcast to admin UI
+    startStatusPolling();
+    
     // Register shutdown handlers for graceful telemetry tracking
     const gracefulShutdown = async (signal) => {
       logger.info(`${signal} received. Sending shutdown telemetry...`);
+      
+      // Stop status polling
+      if (statusPollInterval) {
+        clearInterval(statusPollInterval);
+        statusPollInterval = null;
+      }
       
       if (telemetry) {
         await telemetry.trackShutdown(require('./package.json').version, releaseVersion);
@@ -1867,6 +1885,12 @@ async function handleAdminAPI(req, res, url) {
       return;
     }
     
+    // Get status/now playing updates (SSE stream for real-time updates)
+    if (urlPath === '/api/admin/events') {
+      handleStatusStream(req, res);
+      return;
+    }
+
     // Get logs (SSE stream for real-time logs)
     if (urlPath === '/api/admin/logs') {
       handleLogStream(req, res);
@@ -2093,11 +2117,12 @@ function getConfigForAdmin() {
     sonos: config.get('sonos') || '',
     defaultTheme: config.get('defaultTheme') || '',
     themePercentage: config.get('themePercentage') || 0,
+    openaiApiKey: config.get('openaiApiKey') || '',
     aiModel: config.get('aiModel') || 'gpt-4o',
     soundcraftEnabled: config.get('soundcraftEnabled') || false,
     soundcraftIp: config.get('soundcraftIp') || '',
     soundcraftChannels: config.get('soundcraftChannels') || [],
-    webauthnRequireUserVerification: config.get('webauthnRequireUserVerification') !== false
+    webauthnRequireUserVerification: config.get('webauthnRequireUserVerification') === true // Default: false for maximum compatibility
   };
 }
 
@@ -2125,6 +2150,124 @@ function broadcastLog(logEntry) {
       }
     });
   }
+}
+
+/**
+ * Broadcast status/now playing updates to all connected SSE clients
+ */
+function broadcastStatusUpdate(type, data) {
+  if (global.statusStreamClients && global.statusStreamClients.size > 0) {
+    const message = `data: ${JSON.stringify({ type, ...data })}\n\n`;
+    global.statusStreamClients.forEach(client => {
+      try {
+        client.write(message);
+      } catch (err) {
+        // Client disconnected, remove it
+        global.statusStreamClients.delete(client);
+      }
+    });
+  }
+}
+
+/**
+ * Start polling for track changes and status updates
+ */
+function startStatusPolling() {
+  if (statusPollInterval) {
+    clearInterval(statusPollInterval);
+  }
+  
+  // Check if Sonos is configured before starting polling
+  const sonosIp = config.get('sonos');
+  if (!sonosIp || sonosIp === 'IP_TO_SONOS') {
+    logger.debug('Status polling not started - Sonos not configured');
+    return;
+  }
+  
+  // Poll every 2 seconds for track changes
+  statusPollInterval = setInterval(async () => {
+    try {
+      const nowPlaying = await getNowPlaying();
+      const currentTrackId = nowPlaying.track 
+        ? `${nowPlaying.track.title}|${nowPlaying.track.artist}|${nowPlaying.track.queuePosition || 0}`
+        : null;
+      
+      // Check if track changed
+      if (currentTrackId !== lastTrackInfo) {
+        lastTrackInfo = currentTrackId;
+        broadcastStatusUpdate('nowPlaying', { data: nowPlaying });
+      }
+      
+      // Also check for status changes (every 30 seconds)
+      if (!global.lastStatusCheck || Date.now() - global.lastStatusCheck > 30000) {
+        global.lastStatusCheck = Date.now();
+        const status = await getAdminStatus();
+        broadcastStatusUpdate('status', { data: status });
+      }
+    } catch (err) {
+      // Silently ignore polling errors (Sonos might be disconnected)
+      if (logger && logger.debug) {
+        logger.debug('Status polling error (non-critical):', err.message);
+      }
+    }
+  }, 2000); // Poll every 2 seconds
+  
+  // Don't prevent Node.js shutdown
+  if (statusPollInterval && statusPollInterval.unref) {
+    statusPollInterval.unref();
+  }
+}
+
+/**
+ * Handle Server-Sent Events stream for real-time status/now playing updates
+ */
+function handleStatusStream(req, res) {
+  // Set headers for SSE
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+  
+  // Send initial connection message
+  res.write('data: {"type":"connected"}\n\n');
+  
+  // Send initial status and now playing data
+  (async () => {
+    try {
+      const status = await getAdminStatus();
+      res.write(`data: ${JSON.stringify({ type: 'status', data: status })}\n\n`);
+      
+      const nowPlaying = await getNowPlaying();
+      res.write(`data: ${JSON.stringify({ type: 'nowPlaying', data: nowPlaying })}\n\n`);
+    } catch (err) {
+      logger.error('Error sending initial status data:', err);
+    }
+  })();
+  
+  // Store reference to this client
+  if (!global.statusStreamClients) {
+    global.statusStreamClients = new Set();
+  }
+  global.statusStreamClients.add(res);
+  
+  // Keep connection alive with heartbeat
+  const heartbeatInterval = setInterval(() => {
+    try {
+      res.write(': heartbeat\n\n');
+    } catch (err) {
+      // Client disconnected
+      clearInterval(heartbeatInterval);
+      if (global.statusStreamClients) global.statusStreamClients.delete(res);
+    }
+  }, 30000); // Every 30 seconds
+  
+  // Clean up on client disconnect
+  req.on('close', () => {
+    clearInterval(heartbeatInterval);
+    if (global.statusStreamClients) global.statusStreamClients.delete(res);
+  });
 }
 
 /**
@@ -2180,8 +2323,10 @@ async function updateConfigValue(key, value) {
     const allowedKeys = [
       'adminChannel', 'standardChannel', 'maxVolume', 'market',
       'gongLimit', 'voteLimit', 'voteImmuneLimit', 'flushVoteLimit',
-      'ttsEnabled', 'logLevel', 'soundcraftEnabled', 'soundcraftIp', 'soundcraftChannels',
-      'webauthnEnabled', 'webauthnRpName', 'webauthnRpId', 'webauthnOrigin'
+      'voteTimeLimitMinutes', 'ttsEnabled', 'logLevel', 'ipAddress',
+      'webPort', 'httpsPort', 'sonos', 'defaultTheme', 'themePercentage',
+      'openaiApiKey', 'aiModel', 'soundcraftEnabled', 'soundcraftIp', 'soundcraftChannels',
+      'webauthnEnabled', 'webauthnRpName', 'webauthnRpId', 'webauthnOrigin', 'webauthnRequireUserVerification'
     ];
     
     if (!allowedKeys.includes(key)) {
@@ -2469,43 +2614,73 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
   }
 
   try {
-    const parsed = await AIHandler.parseNaturalLanguage(cleanText, userName);
-
-    if (!parsed) {
-      logger.warn(`AI parsing returned null for: "${cleanText}"`);
-      _slackMessage('🤖 Sorry, I couldn\'t understand that. Try `help` to see available commands!', channel);
-      _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, reasoning: 'none', reason: 'parse_null' });
-      return;
-    }
-
-    // Handle "chat" command FIRST - direct responses to simple questions/greetings
-    // This bypasses confidence check since chat responses are always valid
-    if (parsed.command === 'chat' && parsed.response) {
-      logger.info(`AI chat response: "${cleanText}" → "${parsed.response}"`);
-      _slackMessage(parsed.response, channel);
-
-      // If chat includes a music suggestion, save it for follow-up
-      if (parsed.suggestedAction && parsed.suggestedAction.command) {
-        const suggestion = `${parsed.suggestedAction.command} ${parsed.suggestedAction.args.join(' ')}`;
-        const description = parsed.suggestedAction.description || suggestion;
-        AIHandler.setUserContext(userName, suggestion, `offered to play ${description}`);
-        logger.info(`Chat suggestion saved for ${userName}: "${suggestion}" (${description})`);
+    let parsed = null;
+    
+    // Check if user is confirming a previous suggestion BEFORE parsing
+    const ctx = AIHandler.getUserContext(userName);
+    if (ctx && ctx.suggestedAction) {
+      // Check if this looks like a confirmation
+      const confirmationPattern = /\b(ok|yes|do it|sure|yeah|yep|please|go ahead|play it|gör det|ja|kör|varsågod|snälla|spela)\b/i;
+      if (confirmationPattern.test(cleanText)) {
+        logger.info(`User "${userName}" confirmed suggested action: ${ctx.suggestedAction.command} ${ctx.suggestedAction.args.join(' ')}`);
+        
+        // Use the stored suggestedAction directly to preserve args structure
+        parsed = {
+          command: ctx.suggestedAction.command,
+          args: ctx.suggestedAction.args,
+          confidence: 0.95,
+          reasoning: 'User confirmed previous suggestion',
+          summary: 'You got it! Playing those tunes now! 🎵'
+        };
+        
+        // Clear context since we're executing it
+        AIHandler.clearUserContext(userName);
       }
-      return;
     }
+    
+    // If not a confirmation, proceed with normal AI parsing
+    if (!parsed) {
+      parsed = await AIHandler.parseNaturalLanguage(cleanText, userName);
 
-    // Check confidence threshold (only for non-chat commands)
-    if (parsed.confidence < 0.5) {
-      logger.info(`Low confidence (${parsed.confidence}) for: "${cleanText}" → ${parsed.command}`);
-      _slackMessage(`🤔 Not sure I understood. Did you mean: \`${parsed.command} ${parsed.args.join(' ')}\`?\nTry \`help\` for available commands.`, channel);
-      _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, parsed, reasoning: parsed.reasoning, reason: 'low_confidence' });
-      return;
-    }
+      if (!parsed) {
+        logger.warn(`AI parsing returned null for: "${cleanText}"`);
+        _slackMessage('🤖 Sorry, I couldn\'t understand that. Try `help` to see available commands!', channel);
+        _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, reasoning: 'none', reason: 'parse_null' });
+        return;
+      }
 
-    // Log successful AI parse
-    logger.info(`✨ AI parsed: "${cleanText}" → ${parsed.command} [${parsed.args.join(', ')}] (${(parsed.confidence * 100).toFixed(0)}%)`);
-    // Send short DJ-style summary before executing
-    if (parsed.summary) {
+      // Handle "chat" command FIRST - direct responses to simple questions/greetings
+      // This bypasses confidence check since chat responses are always valid
+      if (parsed.command === 'chat' && parsed.response) {
+        logger.info(`AI chat response: "${cleanText}" → "${parsed.response}"`);
+        _slackMessage(parsed.response, channel);
+
+        // If chat includes a music suggestion, save it for follow-up
+        if (parsed.suggestedAction && parsed.suggestedAction.command) {
+          const suggestion = `${parsed.suggestedAction.command} ${parsed.suggestedAction.args.join(' ')}`;
+          const description = parsed.suggestedAction.description || suggestion;
+          AIHandler.setUserContext(userName, suggestion, `offered to play ${description}`, parsed.suggestedAction);
+          logger.info(`Chat suggestion saved for ${userName}: "${suggestion}" (${description})`);
+        }
+        return;
+      }
+
+      // Check confidence threshold (only for non-chat commands)
+      if (parsed.confidence < 0.5) {
+        logger.info(`Low confidence (${parsed.confidence}) for: "${cleanText}" → ${parsed.command}`);
+        _slackMessage(`🤔 Not sure I understood. Did you mean: \`${parsed.command} ${parsed.args.join(' ')}\`?\nTry \`help\` for available commands.`, channel);
+        _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, parsed, reasoning: parsed.reasoning, reason: 'low_confidence' });
+        return;
+      }
+
+      // Log successful AI parse
+      logger.info(`✨ AI parsed: "${cleanText}" → ${parsed.command} [${parsed.args.join(', ')}] (${(parsed.confidence * 100).toFixed(0)}%)`);
+      // Send short DJ-style summary before executing
+      if (parsed.summary) {
+        _slackMessage(parsed.summary, channel);
+      }
+    } else {
+      // Confirmed action - send summary and continue
       _slackMessage(parsed.summary, channel);
     }
 

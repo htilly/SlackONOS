@@ -45,6 +45,6 @@
     "webauthnRpName": "SlackONOS",
     "webauthnRpId": "localhost",
     "webauthnOrigin": "",
-    "webauthnRequireUserVerification": true,
-    "_comment_webauthn": "WebAuthn/FIDO2 Configuration: Set webauthnEnabled to true to enable passwordless authentication. When enabled and credentials are registered, password login is disabled. webauthnRpId should match your domain (e.g., 'example.com' for production). webauthnOrigin is auto-detected if empty. webauthnRequireUserVerification defaults to true (requires PIN for hardware keys like Yubikey, or biometrics for Touch ID/Face ID - more secure). Set to false to allow authenticators without user verification (less secure but more compatible). Chrome will show both Touch ID/Face ID and USB security key options when authenticatorAttachment is not specified."
+    "webauthnRequireUserVerification": false,
+    "_comment_webauthn": "WebAuthn/FIDO2 Configuration: Set webauthnEnabled to true to enable passwordless authentication. When enabled and credentials are registered, password login is disabled. webauthnRpId should match your domain (e.g., 'example.com' for production). webauthnOrigin is auto-detected if empty. webauthnRequireUserVerification defaults to false for maximum compatibility (allows authenticators without user verification). Set to true to require PIN for hardware keys like Yubikey, or biometrics for Touch ID/Face ID (more secure but less compatible). Chrome will show both Touch ID/Face ID and USB security key options when authenticatorAttachment is not specified."
 }

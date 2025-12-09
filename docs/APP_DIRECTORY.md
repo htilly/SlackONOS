@@ -231,6 +231,52 @@ Perfect for offices, shared spaces, and music lovers who want fair queue control
 
 **Recommendation:** Start with Option A - self-hosted with improved OAuth setup flow.
 
+## ⚠️ Viktigt: OAuth kräver publikt tillgänglig URL
+
+**Socket Mode vs. OAuth:**
+
+- ✅ **Socket Mode** (nuvarande setup): Kräver INGA publika endpoints - fungerar perfekt bakom brandvägg/NAT
+- ❌ **OAuth för App Directory**: Kräver en publikt tillgänglig redirect URL för callback
+
+**BESLUT:** OAuth har tagits bort från SlackONOS eftersom det kräver publikt tillgänglig URL, vilket inte är kompatibelt med self-hosted installationer bakom brandvägg.
+
+**Alternativ för App Directory (om OAuth behövs i framtiden):**
+
+### 1. Separerad OAuth Proxy Service
+Kör en liten OAuth-proxy server på en publikt tillgänglig domän:
+- Proxy hanterar bara OAuth flow
+- Exchangerar tokens och skickar vidare till användarens lokala app
+- Eller sparar tokens i en delad databas som användaren kan hämta
+
+**Fördelar:**
+- Stabil, permanent URL
+- Huvudappen kan vara helt privat
+- Skalbar lösning
+
+**Nackdelar:**
+- Kräver extra server/domän
+- Mer komplex setup
+
+### 2. Manuell Installation (Nuvarande - Rekommenderat)
+Fortsätt med manuell installation via Socket Mode:
+- Användare skapar app manuellt i Slack
+- Kopierar tokens till config.json
+- Ingen publikt tillgänglig URL behövs
+
+**Fördelar:**
+- ✅ Fungerar perfekt bakom brandvägg
+- ✅ Ingen extra infrastruktur
+- ✅ Full kontroll
+- ✅ Ingen säkerhetsrisk från publika endpoints
+
+**Nackdelar:**
+- Mindre användarvänligt för App Directory
+- Inte tillgängligt via App Directory "Add to Slack" knapp
+
+**Rekommendation:**
+- För nuvarande användning: Manuell installation (fungerar perfekt!)
+- För App Directory: Överväg separerad OAuth-proxy service om OAuth behövs
+
 ### Configuration Complexity
 
 App Directory apps typically need:
@@ -245,16 +291,89 @@ App Directory apps typically need:
 - Setup wizard still needed for Sonos/Spotify
 - Can be accessed after installation via `/setup` endpoint
 
+## Checklista för Slack App Directory
+
+### ✅ Redan Klart
+- [x] Socket Mode support (krävs för App Directory)
+- [x] App manifest (`app.manifest.json`) - finns men behöver uppdateras
+- [x] Privacy Policy (`docs/PRIVACY_POLICY.md`) - finns
+- [x] Terms of Service (`docs/TERMS_OF_SERVICE.md`) - finns
+- [x] Required Slack scopes konfigurerade
+- [x] Event subscriptions konfigurerade
+
+### ⚠️ Kräver Implementation
+
+#### 1. OAuth Flow (KRITISKT) ❌ INTE IMPLEMENTERAT
+- [ ] OAuth kräver publikt tillgänglig URL - inte kompatibelt med self-hosted bakom brandvägg
+- [ ] **BESLUT:** Manuell installation via Socket Mode används istället (fungerar perfekt utan publika endpoints)
+- [ ] För App Directory: Överväg separerad OAuth-proxy service eller tunneltjänst om OAuth behövs
+
+#### 2. Multi-Workspace Support (KRITISKT)
+- [ ] Workspace-specific config storage
+  - Alternativ A: `config/workspaces/{workspace_id}.json`
+  - Alternativ B: Database (SQLite/PostgreSQL)
+- [ ] Workspace ID tracking
+- [ ] Per-workspace Sonos/Spotify configuration
+- [ ] Workspace context i alla requests
+
+#### 3. SSL/HTTPS (KRITISKT för App Directory)
+- [x] HTTPS support finns redan
+- [ ] Säkerställ att OAuth redirect URLs använder HTTPS
+- [ ] CA-issued certificate (inte self-signed för production)
+- [ ] Validera att alla endpoints fungerar över HTTPS
+- [ ] **VIKTIGT:** OAuth callback måste vara publikt tillgänglig (se alternativ ovan)
+
+#### 4. App Manifest Uppdateringar
+- [ ] Uppdatera `app.manifest.json` med korrekt redirect URL
+- [ ] Verifiera alla scopes
+- [ ] Verifiera event subscriptions
+- [ ] Lägg till support email/URL
+
+#### 5. Security Review
+- [ ] Genomför säkerhetsgranskning
+- [ ] Dokumentera datahantering
+- [ ] Säkerställ GDPR-kompatibilitet
+- [ ] Review av OAuth implementation
+
+#### 6. App Listing Content
+- [ ] App name och tagline
+- [ ] Detailed description
+- [ ] Feature highlights
+- [ ] Screenshots (minst 3-5):
+  - Setup wizard
+  - Bot i action (Slack channel)
+  - Queue management
+  - Voting interface
+  - Admin panel
+- [ ] Support information (email/URL)
+- [ ] Category selection
+- [ ] Pricing information (gratis/self-hosted)
+
+#### 7. Testing
+- [ ] Testa OAuth flow från början till slut
+- [ ] Testa med flera workspaces
+- [ ] Testa installation från App Directory
+- [ ] Testa uninstallation
+- [ ] Testa alla scopes och events
+- [ ] Load testing för multi-workspace
+
+#### 8. Documentation
+- [ ] Installation guide för App Directory
+- [ ] Setup guide efter installation
+- [ ] Troubleshooting guide
+- [ ] Support channels dokumenterade
+
 ## Next Steps
 
 1. ✅ Research requirements (this document)
-2. ⏳ Create app manifest
-3. ⏳ Implement OAuth flow
-4. ⏳ Add multi-workspace support
-5. ⏳ Create privacy policy
-6. ⏳ Create terms of service
-7. ⏳ Prepare app listing content
-8. ⏳ Submit for review
+2. ⏳ Implementera OAuth flow (PRIORITET 1)
+3. ⏳ Implementera multi-workspace support (PRIORITET 1)
+4. ⏳ Uppdatera app manifest med korrekta URLs
+5. ⏳ Säkerställ SSL/HTTPS för production
+6. ⏳ Förbered app listing content och screenshots
+7. ⏳ Genomför security review
+8. ⏳ Testa hela flowet
+9. ⏳ Submit for review
 
 ## Resources
 
