@@ -37,7 +37,7 @@
     "@slack/rtm-api": "^7.0.4",
     "@slack/socket-mode": "^2.0.5",
     "@slack/web-api": "^7.12.0",
-    "@simplewebauthn/server": "^9.0.0",
+    "@simplewebauthn/server": "^13.2.2",
     "bcrypt": "^5.1.1",
     "discord.js": "^14.17.3",
     "selfsigned": "^2.1.1",
