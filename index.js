@@ -5295,9 +5295,10 @@ async function _tts(input, channel) {
     const currentPosition = currentTrack ? currentTrack.queuePosition : 1;
     const ttsPosition = currentPosition + 1;
 
-    // Use HTTPS if available, otherwise fall back to HTTP (with cache-busting timestamp)
-    const protocol = useHttps ? 'https' : 'http';
-    const port = useHttps ? (config.get('httpsPort') || 8443) : webPort;
+    // Always use HTTP for TTS (Sonos doesn't trust self-signed certificates)
+    // TTS is only used on local network, so HTTP is sufficient
+    const protocol = 'http';
+    const port = webPort;
     const uri = `${protocol}://${ipAddress}:${port}/tts.mp3?t=${Date.now()}`;
     logger.info('Queuing TTS file from: ' + uri + ' at position ' + ttsPosition);
 
