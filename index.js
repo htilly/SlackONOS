@@ -2084,12 +2084,20 @@ function getConfigForAdmin() {
     voteLimit: config.get('voteLimit') || 6,
     voteImmuneLimit: config.get('voteImmuneLimit') || 6,
     flushVoteLimit: config.get('flushVoteLimit') || 6,
+    voteTimeLimitMinutes: config.get('voteTimeLimitMinutes') || 2,
     ttsEnabled: config.get('ttsEnabled') !== false,
     logLevel: config.get('logLevel') || 'info',
+    ipAddress: config.get('ipAddress') || '',
+    webPort: config.get('webPort') || 8181,
+    httpsPort: config.get('httpsPort') || 8443,
+    sonos: config.get('sonos') || '',
+    defaultTheme: config.get('defaultTheme') || '',
+    themePercentage: config.get('themePercentage') || 0,
+    aiModel: config.get('aiModel') || 'gpt-4o',
     soundcraftEnabled: config.get('soundcraftEnabled') || false,
     soundcraftIp: config.get('soundcraftIp') || '',
     soundcraftChannels: config.get('soundcraftChannels') || [],
-    webauthnRequireUserVerification: config.get('webauthnRequireUserVerification') === true
+    webauthnRequireUserVerification: config.get('webauthnRequireUserVerification') !== false
   };
 }
 

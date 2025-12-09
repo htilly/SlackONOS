@@ -246,16 +246,26 @@ async function loadConfig() {
     
     // Define config items that can be edited
     const editableConfig = [
-      { key: 'adminChannel', label: 'Admin Channel', type: 'text' },
-      { key: 'standardChannel', label: 'Standard Channel', type: 'text' },
-      { key: 'maxVolume', label: 'Max Volume', type: 'number', min: 1, max: 100 },
-      { key: 'market', label: 'Market', type: 'select', options: ['US', 'EU', 'SE', 'NO', 'DK', 'FI'] },
-      { key: 'gongLimit', label: 'Gong Limit', type: 'number', min: 1 },
-      { key: 'voteLimit', label: 'Vote Limit', type: 'number', min: 1 },
-      { key: 'voteImmuneLimit', label: 'Vote Immune Limit', type: 'number', min: 1 },
-      { key: 'flushVoteLimit', label: 'Flush Vote Limit', type: 'number', min: 1 },
-      { key: 'ttsEnabled', label: 'TTS Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }] },
-      { key: 'logLevel', label: 'Log Level', type: 'select', options: ['debug', 'info', 'warn', 'error'] }
+      { key: 'adminChannel', label: 'Admin Channel', type: 'text', description: 'Slack channel ID or name for admin commands' },
+      { key: 'standardChannel', label: 'Standard Channel', type: 'text', description: 'Slack channel ID or name for regular users' },
+      { key: 'maxVolume', label: 'Max Volume', type: 'number', min: 1, max: 100, description: 'Maximum volume level (1-100)' },
+      { key: 'market', label: 'Market', type: 'select', options: ['US', 'EU', 'SE', 'NO', 'DK', 'FI'], description: 'Spotify market region' },
+      { key: 'gongLimit', label: 'Gong Limit', type: 'number', min: 1, description: 'Number of votes needed to skip current track' },
+      { key: 'voteLimit', label: 'Vote Limit', type: 'number', min: 1, description: 'Number of votes needed to move track up in queue' },
+      { key: 'voteImmuneLimit', label: 'Vote Immune Limit', type: 'number', min: 1, description: 'Votes needed to make track immune to gong' },
+      { key: 'flushVoteLimit', label: 'Flush Vote Limit', type: 'number', min: 1, description: 'Number of votes needed to clear entire queue' },
+      { key: 'voteTimeLimitMinutes', label: 'Vote Time Limit (minutes)', type: 'number', min: 1, description: 'How long votes remain valid' },
+      { key: 'ipAddress', label: 'Host IP Address', type: 'text', description: 'Server IP address (required for TTS - Sonos must be able to reach this)' },
+      { key: 'webPort', label: 'HTTP Port', type: 'number', min: 1, max: 65535, description: 'Port for HTTP server' },
+      { key: 'httpsPort', label: 'HTTPS Port', type: 'number', min: 1, max: 65535, description: 'Port for HTTPS server' },
+      { key: 'sonos', label: 'Sonos IP Address', type: 'text', description: 'IP address of Sonos speaker' },
+      { key: 'ttsEnabled', label: 'TTS Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable text-to-speech announcements' },
+      { key: 'logLevel', label: 'Log Level', type: 'select', options: ['debug', 'info', 'warn', 'error'], description: 'Logging verbosity level' },
+      { key: 'defaultTheme', label: 'Default Theme', type: 'text', description: 'Default music theme (e.g., lounge, club, office)' },
+      { key: 'themePercentage', label: 'Theme Percentage', type: 'number', min: 0, max: 100, description: 'Percentage of theme tracks to mix in (0-100)' },
+      { key: 'aiModel', label: 'AI Model', type: 'select', options: ['gpt-4o', 'gpt-4o-mini', 'gpt-4', 'gpt-3.5-turbo'], description: 'OpenAI model for natural language parsing' },
+      { key: 'soundcraftEnabled', label: 'Soundcraft Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable Soundcraft mixer integration' },
+      { key: 'soundcraftIp', label: 'Soundcraft IP Address', type: 'text', description: 'IP address of Soundcraft mixer' }
     ];
     
     editableConfig.forEach(item => {
@@ -298,13 +308,17 @@ function createConfigItem(item, value) {
     const attrs = [];
     if (item.min !== undefined) attrs.push(`min="${item.min}"`);
     if (item.max !== undefined) attrs.push(`max="${item.max}"`);
-    inputHTML = `<input type="${inputType}" id="config-${item.key}" value="${escapeHtml(value)}" ${attrs.join(' ')}>`;
+    const displayValue = value !== null && value !== undefined ? value : '';
+    inputHTML = `<input type="${inputType}" id="config-${item.key}" value="${escapeHtml(displayValue)}" ${attrs.join(' ')}>`;
   }
+  
+  const description = item.description ? `<div style="font-size: 0.85rem; color: rgba(255,255,255,0.6); margin-top: 0.25rem;">${item.description}</div>` : '';
   
   div.innerHTML = `
     <label for="config-${item.key}">${item.label}:</label>
     ${inputHTML}
     <button class="btn-save" onclick="saveConfig('${item.key}')">Save</button>
+    ${description}
     <div id="config-${item.key}-message"></div>
   `;
   

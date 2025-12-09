@@ -391,16 +391,16 @@
               <div>
                 <strong style="display: block; margin-bottom: 0.25rem;">Require PIN for Security Keys</strong>
                 <div style="font-size: 0.85rem; color: rgba(255,255,255,0.7); line-height: 1.4;">
-                  <strong>Default: Disabled</strong> (most compatible - works with Touch ID/Face ID, Yubikey, and other authenticators)
+                  <strong>Default: Enabled</strong> (requires PIN for hardware keys or biometrics for Touch ID/Face ID - more secure)
                   <br><br>
                   When enabled, user verification is required during registration and authentication:
                   <ul style="margin: 0.5rem 0; padding-left: 1.5rem;">
                     <li><strong>Hardware keys (Yubikey, etc.):</strong> Will require PIN entry</li>
                     <li><strong>Platform authenticators (Touch ID/Face ID):</strong> Will require biometric verification (fingerprint/face scan)</li>
                   </ul>
-                  Both PIN and biometrics count as user verification. This provides stronger security by ensuring the user is present and verified.
+                  Both PIN and biometrics count as user verification. This provides stronger security by ensuring the user is present and verified. Chrome will show both Touch ID/Face ID and USB security key options when registering.
                   <br><br>
-                  <strong>When to enable:</strong> If you want to enforce user verification for all authentication attempts, regardless of authenticator type.
+                  <strong>When to disable:</strong> Only if you need maximum compatibility with older authenticators that don't support user verification.
                 </div>
               </div>
             </label>
