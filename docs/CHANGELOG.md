@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [2.0.1] - 2025-12-09
+
+### 🐛 Bug Fixes
+- **TTS HTTPS Issue** - Fixed TTS (text-to-speech) to always use HTTP instead of HTTPS
+  - Sonos devices don't trust self-signed SSL certificates
+  - TTS now uses HTTP endpoint which works reliably on local network
+  - HTTPS remains available for setup wizard and admin interface
+
+### 🔧 Improvements
+- **Test Workflow** - Added master branch to test workflow for proper branch protection
+- **Test Fixes** - Fixed boundary condition test timing issue in memory management tests
+
 ## [2.0.0] - 2024-12-09
 
 ### 🚀 Performance (Major)
