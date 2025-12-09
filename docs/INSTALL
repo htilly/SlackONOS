@@ -1,15 +1,33 @@
 # Installation
 
-In order to get the bot up and running you need to do the following.
+## 🚀 Quick Setup (Recommended)
 
-## Pre-requisit
+**Use the web-based setup wizard for the easiest installation experience!**
+
+1. Install dependencies: `npm install`
+2. Start SlackONOS: `node index.js`
+3. Open your browser: `http://localhost:8181/setup`
+4. Follow the interactive wizard to configure all integrations
+5. Save and restart SlackONOS
+
+The setup wizard will:
+- ✅ Guide you through each step
+- ✅ Auto-discover Sonos devices on your network
+- ✅ Validate Slack, Spotify, and Discord tokens
+- ✅ Generate your configuration automatically
+
+## Manual Installation
+
+If you prefer to configure manually or need more control:
+
+### Pre-requisites
 
 1: #Slack-group with admin rights
 2: A server / machine that can run node.js
 3: A working Sonos player configured with Spotify
-4: You need to know the IP of your Sonos player.
+4: You need to know the IP of your Sonos player (or use auto-discovery in the wizard)
 
-Note: In order to get Text-to-speach working you need to know the IP of the host running SlackONOS as well as having a TCP port (in setting) open for traffic from the Sonos to the device.
+Note: In order to get Text-to-speech working you need to know the IP of the host running SlackONOS as well as having a TCP port (in setting) open for traffic from the Sonos to the device.
 
 ## Slack App (v2.0+ - Socket Mode Required)
 

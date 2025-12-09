@@ -3,8 +3,11 @@
 ARG TARGETPLATFORM
 FROM --platform=$TARGETPLATFORM node:22-slim AS base
 
-# Clear npm cache to reduce image size and avoid potential issues
-RUN npm cache clean --force
+# System deps needed for native builds (e.g., bcrypt) and git optional deps
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3 build-essential && \
+    rm -rf /var/lib/apt/lists/* && \
+    npm cache clean --force
 
 # Set the working directory for your application
 WORKDIR /app

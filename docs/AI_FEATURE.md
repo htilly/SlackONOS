@@ -253,7 +253,7 @@ Potential improvements:
 - [ ] Cache common requests to reduce API calls
 - [ ] Add user-specific language preferences
 - [ ] Support for playlist creation via conversation
-- [ ] Multi-turn conversations for complex requests
+- [x] Multi-turn conversations for complex requests (✅ Implemented - context memory with follow-up support)
 - [ ] Local LLM support (Ollama) as alternative to OpenAI
 
 ## Branch Information

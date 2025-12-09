@@ -1,0 +1,49 @@
+{
+  "display_information": {
+    "name": "SlackONOS",
+    "description": "Democratic music bot for controlling Sonos speakers with community voting",
+    "background_color": "#667eea",
+    "long_description": "SlackONOS lets teams control Sonos speakers with Spotify integration. Features community voting, democratic skip tracking, and seamless Slack integration. Perfect for offices, shared spaces, and music lovers who want fair queue control."
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "SlackONOS",
+      "always_online": true
+    },
+    "socket_mode": true
+  },
+  "oauth_config": {
+    "redirect_urls": [
+      "https://your-domain.com/slack/oauth/callback"
+    ],
+    "scopes": {
+      "bot": [
+        "app_mentions:read",
+        "chat:write",
+        "channels:read",
+        "channels:history",
+        "groups:read",
+        "groups:history"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "bot_events": [
+        "app_mention",
+        "message.channels",
+        "message.groups"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": false
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": true,
+    "token_rotation_enabled": false
+  }
+}
+
+
+
+

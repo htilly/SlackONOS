@@ -14,25 +14,41 @@ let discordLogger = null; // module-level logger reference
 let reactionHandler = null; // handler for reaction events
 const trackMessages = new Map(); // Map message IDs to track info for reactions
 
-// We accept an injected logger (recommended). If not provided we create a minimal one.
-async function initializeDiscord(config, messageHandler, injectedLogger) {
-    let logger = injectedLogger;
-    if (!logger) {
-        try {
-            logger = new WinstonWrapper({
-                level: (config && config.logLevel) || 'info',
-                format: require('winston').format.simple(),
-                transports: [new (require('winston').transports.Console)()]
-            });
-        } catch (e) {
-            logger = {
-                info: console.log,
-                warn: console.warn,
-                error: console.error,
-                debug: console.debug
-            }; // last-resort fallback
+// Cleanup old trackMessages entries every 10 minutes to prevent memory leak
+// Entries older than 1 hour are removed (reactions on older tracks are unlikely)
+const TRACK_MESSAGE_CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const TRACK_MESSAGE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
+
+function cleanupOldTrackMessages() {
+    const now = Date.now();
+    const cutoff = now - TRACK_MESSAGE_MAX_AGE_MS;
+    let removedCount = 0;
+
+    for (const [messageId, data] of trackMessages.entries()) {
+        if (data.timestamp < cutoff) {
+            trackMessages.delete(messageId);
+            removedCount++;
         }
     }
+
+    if (removedCount > 0 && discordLogger) {
+        discordLogger.debug(`[DISCORD] Cleaned up ${removedCount} old track messages from memory`);
+    }
+}
+
+// Start cleanup interval when module loads
+const cleanupInterval = setInterval(cleanupOldTrackMessages, TRACK_MESSAGE_CLEANUP_INTERVAL_MS);
+
+// Keep the interval from preventing Node.js shutdown
+cleanupInterval.unref();
+
+// Logger must be injected - no fallback to ensure consistent logging
+async function initializeDiscord(config, messageHandler, injectedLogger) {
+    if (!injectedLogger) {
+        throw new Error('Discord integration requires an injected logger');
+    }
+
+    const logger = injectedLogger;
 
     // store logger globally for other functions
     discordLogger = logger;
@@ -60,7 +76,7 @@ async function initializeDiscord(config, messageHandler, injectedLogger) {
                 logger.info(`✅ Discord bot logged in as ${client.user.tag}`);
                 logger.info(`   Bot user ID: ${botUserId}`);
             } catch (e) {
-                console.error('Discord ready logging failed:', e.message);
+                logger.error('Discord ready logging failed:', e.message);
             }
         });
 

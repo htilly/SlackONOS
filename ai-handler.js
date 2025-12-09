@@ -14,9 +14,33 @@ let lastErrorTS = null;
 let lastErrorMessage = null;
 
 // User conversation context - keeps last suggestion for follow-ups
-// Format: { userName: { lastSuggestion: 'command', timestamp: Date, context: 'string' } }
+// Format: { userName: { lastSuggestion: 'command', timestamp: Date, context: 'string', suggestedAction: {...} } }
 const userContext = {};
 const CONTEXT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const CONTEXT_CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+
+// Periodic cleanup of expired user contexts to prevent memory leak
+function cleanupExpiredContexts() {
+  const now = Date.now();
+  let removedCount = 0;
+
+  for (const userName in userContext) {
+    if (now - userContext[userName].timestamp > CONTEXT_TIMEOUT_MS) {
+      delete userContext[userName];
+      removedCount++;
+    }
+  }
+
+  if (removedCount > 0 && logger) {
+    logger.debug(`[AI] Cleaned up ${removedCount} expired user contexts from memory`);
+  }
+}
+
+// Start periodic cleanup when module loads
+const contextCleanupInterval = setInterval(cleanupExpiredContexts, CONTEXT_CLEANUP_INTERVAL_MS);
+
+// Keep the interval from preventing Node.js shutdown
+contextCleanupInterval.unref();
 
 /**
  * Get seasonal context for AI prompt based on current date
@@ -138,12 +162,14 @@ async function initialize(loggerInstance) {
  * @param {string} userName - Username
  * @param {string} suggestion - Suggested command
  * @param {string} context - Context description
+ * @param {Object} suggestedAction - Optional suggestedAction object to preserve args structure
  */
-function setUserContext(userName, suggestion, context) {
+function setUserContext(userName, suggestion, context, suggestedAction = null) {
   userContext[userName] = {
     lastSuggestion: suggestion,
     timestamp: Date.now(),
-    context: context
+    context: context,
+    suggestedAction: suggestedAction // Store the full suggestedAction object to preserve args structure
   };
   logger.debug(`Set context for ${userName}: ${suggestion} - ${context}`);
 }
@@ -198,14 +224,22 @@ CRITICAL: If the user now says ANYTHING that sounds like agreement or confirmati
 - "gör det", "ja", "ok gör det", "kör", "varsågod", "snälla", "spela"
 - Or ANY short affirmative response
 
-Then IMMEDIATELY execute the suggested command! Return:
+Then IMMEDIATELY execute the suggested command! 
+${ctx.suggestedAction ? `Use the stored suggestedAction object directly:
+{
+  "command": "${ctx.suggestedAction.command}",
+  "args": ${JSON.stringify(ctx.suggestedAction.args)},
+  "confidence": 0.95,
+  "reasoning": "User confirmed previous suggestion",
+  "summary": "You got it! Playing those tunes now! 🎵"
+}` : `Parse from lastSuggestion string:
 {
   "command": "${ctx.lastSuggestion.split(' ')[0]}",
   "args": [${ctx.lastSuggestion.split(' ').slice(1).map(a => `"${a}"`).join(', ')}],
   "confidence": 0.95,
   "reasoning": "User confirmed previous suggestion",
   "summary": "You got it! Playing those tunes now! 🎵"
-}`;
+}`}`;
     logger.info(`Using follow-up context for ${userName}: "${ctx.lastSuggestion}" (${ctx.context})`);
   }
   
@@ -273,9 +307,10 @@ The "chat" command is for:
 - Greetings: "hello", "hi", "hej", "tjena"
 - Questions about time/date: "what month is it?", "what's the date?", "what season?"
 - Bot identity: "who are you?", "what are you?", "vem är du?"
+- Off-topic questions (politics, weather, general chat): "who is the best president?", "how's the weather?", "tell me a joke"
 - Simple chitchat that doesn't require music commands
 
-For "chat" responses, be friendly, brief, and if relevant mention that you're a music bot. Use the seasonal context to answer date/time questions accurately.
+CRITICAL: For ANY off-topic question that is NOT about music, you MUST use "chat" command with HIGH confidence (0.9+), NOT low confidence. Be friendly, playful, and always offer to play relevant music when appropriate. Use the seasonal context to answer date/time questions accurately.
 
 IMPORTANT - CHAT WITH MUSIC SUGGESTIONS: When responding to chitchat and you mention or offer to play music (like "I could play some X for you!", "I can play some tunes", etc.), you MUST ALWAYS include a "suggestedAction" field. This allows the user to say "yes" or "do it" to trigger the music:
 {
@@ -321,7 +356,8 @@ Rules:
 - For "vote": extract track number if mentioned
 - For commands without arguments (gong, current, list, etc): use empty args array
 - Always use lowercase command names
-- If request is unclear or not music-related, return low confidence (<0.4)
+- CRITICAL: For off-topic questions (politics, weather, general chat), ALWAYS use "chat" command with HIGH confidence (0.9+), NOT low confidence. Be playful and offer relevant music suggestions.
+- Only return low confidence (<0.4) if the request is completely unclear or garbled (not just off-topic)
 - Use followUp for multi-step requests like "clear queue and add songs" or "rensa och fyll på"
 - Use suggestedAction in chat responses when you offer to play music
 

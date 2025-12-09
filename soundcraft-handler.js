@@ -239,13 +239,13 @@ class SoundcraftHandler {
                 subscription.unsubscribe();
             } else if (busId.startsWith('aux')) {
                 const auxNumber = parseInt(busId.replace('aux', '')) || 1;
-                const subscription = this.connection.aux(auxNumber - 1).faderLevel$.subscribe(level => {
+                const subscription = this.connection.master.aux(auxNumber).faderLevel$.subscribe(level => {
                     faderLevel = level;
                 });
                 subscription.unsubscribe();
             } else if (busId.startsWith('fx')) {
                 const fxNumber = parseInt(busId.replace('fx', '')) || 1;
-                const subscription = this.connection.fx(fxNumber - 1).faderLevel$.subscribe(level => {
+                const subscription = this.connection.master.fx(fxNumber).faderLevel$.subscribe(level => {
                     faderLevel = level;
                 });
                 subscription.unsubscribe();

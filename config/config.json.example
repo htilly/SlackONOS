@@ -15,7 +15,13 @@
     "discordChannels": ["DISCORD_CHANNEL_ID_1", "DISCORD_CHANNEL_ID_2"],
     "discordAdminRoles": ["DJ", "Music Admin", "Admin"],
     "openaiApiKey": "sk-proj-...",
+    "ttsEnabled": true,
     "webPort" : "8080",
+    "httpsPort": 8443,
+    "sslAutoGenerate": true,
+    "sslCertPath": "",
+    "sslKeyPath": "",
+    "_comment_ssl": "SSL Configuration: Set sslAutoGenerate to true (default) to auto-generate self-signed certificates. Set to false and provide sslCertPath/sslKeyPath to use your own certificates. Leave paths empty to use default location (config/ssl/cert.pem and config/ssl/key.pem). httpsPort defaults to 8443 if not specified. For production, consider using port 443 (requires root/admin) or a reverse proxy (nginx/Apache) on port 443 that forwards to these ports.",
     "aiPrompt": "You are a funny, upbeat DJ for a Slack music bot controlling Sonos. Reply with a super short, playful one-liner that confirms what you'll do, using casual humor and emojis when appropriate.",
     "aiModel": "gpt-4o",
     "defaultTheme": "lounge",
@@ -34,5 +40,11 @@
         "master": "master",
         "reception": "aux3",
         "sub": "aux8"
-    }
+    },
+    "webauthnEnabled": false,
+    "webauthnRpName": "SlackONOS",
+    "webauthnRpId": "localhost",
+    "webauthnOrigin": "",
+    "webauthnRequireUserVerification": false,
+    "_comment_webauthn": "WebAuthn/FIDO2 Configuration: Set webauthnEnabled to true to enable passwordless authentication. When enabled and credentials are registered, password login is disabled. webauthnRpId should match your domain (e.g., 'example.com' for production). webauthnOrigin is auto-detected if empty. webauthnRequireUserVerification defaults to false for maximum compatibility (allows authenticators without user verification). Set to true to require PIN for hardware keys like Yubikey, or biometrics for Touch ID/Face ID (more secure but less compatible). Chrome will show both Touch ID/Face ID and USB security key options when authenticatorAttachment is not specified."
 }

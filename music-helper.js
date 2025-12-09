@@ -83,6 +83,18 @@ function normalizeTrackName(name) {
 }
 
 /**
+ * Validate Spotify URI format
+ * @param {string} uri - Spotify URI to validate
+ * @returns {boolean} - True if valid
+ */
+function isValidSpotifyUri(uri) {
+  if (!uri || typeof uri !== 'string') return false;
+  // Spotify URI format: spotify:track:22 characters base62
+  const uriPattern = /^spotify:(track|album|playlist|artist):[a-zA-Z0-9]{22}$/;
+  return uriPattern.test(uri);
+}
+
+/**
  * Search Spotify with multiple query variants to get enough results
  * @param {string} query - Search query
  * @param {number} targetCount - How many unique tracks we want
@@ -105,10 +117,18 @@ async function multiSearch(query, targetCount) {
       if (results && results.length) {
         allResults = allResults.concat(results);
         logger.info(`Music helper: search "${searchVariants[i]}" returned ${results.length} results (total: ${allResults.length})`);
+      } else {
+        logger.debug(`Music helper: search "${searchVariants[i]}" returned no results`);
       }
     } catch (searchErr) {
-      logger.warn(`Music helper: search variant failed: ${searchErr.message}`);
+      logger.warn(`Music helper: search variant "${searchVariants[i]}" failed: ${searchErr.message}`);
+      // Continue to next variant even if one fails
     }
+  }
+  
+  // If no results found, log warning for debugging
+  if (allResults.length === 0) {
+    logger.warn(`Music helper: multiSearch found no results for query "${query}" after trying ${searchVariants.length} variants`);
   }
   
   return allResults;
@@ -124,13 +144,19 @@ function deduplicateTracks(tracks, existingKeys = new Set()) {
   const seen = new Set(existingKeys);
   
   return (tracks || [])
-    .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
     .filter(t => {
+      // Filter out tracks without valid URI
+      if (!t.uri || !isValidSpotifyUri(t.uri)) {
+        logger.debug(`Music helper: filtering out track without valid URI: "${t.name}" by ${t.artist || 'unknown'}`);
+        return false;
+      }
+      
       const key = normalizeTrackName(t.name) + '|' + (t.artist || '').toLowerCase();
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
-    });
+    })
+    .sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
 }
 
 /**
@@ -231,30 +257,65 @@ async function searchTracks(query, count, options = {}) {
  * Queue tracks to Sonos
  * @param {Object} sonos - Sonos device instance
  * @param {Array} tracks - Array of track objects with uri property
- * @returns {Promise<number>} - Number of successfully queued tracks
+ * @returns {Promise<{added: number, skipped: Array}>} - Number of successfully queued tracks and skipped tracks
  */
 async function queueTracks(sonos, tracks) {
   let added = 0;
   let skipped = [];
+  let failed = [];
   
   for (const t of tracks) {
     // Check blacklist if checker is available
     if (isTrackBlacklisted && isTrackBlacklisted(t.name, t.artist)) {
       logger.info(`Music helper: skipping blacklisted track "${t.name}" by ${t.artist}`);
-      skipped.push({ name: t.name, artist: t.artist });
+      skipped.push({ name: t.name, artist: t.artist, reason: 'blacklisted' });
+      continue;
+    }
+    
+    // Validate URI format
+    if (!t.uri || !isValidSpotifyUri(t.uri)) {
+      logger.warn(`Music helper: invalid URI for "${t.name}" by ${t.artist}: ${t.uri || 'missing'}`);
+      failed.push({ name: t.name, artist: t.artist, reason: 'invalid_uri', uri: t.uri });
       continue;
     }
     
     try {
       await sonos.queue(t.uri);
       added++;
+      logger.debug(`Music helper: successfully queued "${t.name}" by ${t.artist} (${t.uri})`);
     } catch (e) {
-      logger.warn(`Music helper: queue failed for "${t.name}": ${e.message}`);
+      // Extract error code from UPnP error if available
+      let errorCode = null;
+      let errorDetails = e.message || String(e);
+      
+      // Try to extract UPnP error code from error message
+      const upnpErrorMatch = errorDetails.match(/errorCode[>](\d+)[<]/);
+      if (upnpErrorMatch) {
+        errorCode = upnpErrorMatch[1];
+      }
+      
+      // Log detailed error information
+      if (errorCode === '800') {
+        logger.warn(`Music helper: queue failed for "${t.name}" by ${t.artist} - UPnP error 800 (Invalid Action/Args). URI: ${t.uri}. This usually means the track is not available in your region or has been removed from Spotify.`);
+      } else {
+        logger.warn(`Music helper: queue failed for "${t.name}" by ${t.artist}: ${errorDetails}${errorCode ? ` (error code: ${errorCode})` : ''}. URI: ${t.uri}`);
+      }
+      
+      failed.push({ 
+        name: t.name, 
+        artist: t.artist, 
+        reason: 'queue_failed', 
+        uri: t.uri,
+        error: errorDetails,
+        errorCode: errorCode
+      });
     }
   }
   
-  logger.info(`Music helper: queued ${added}/${tracks.length} tracks (skipped ${skipped.length} blacklisted)`);
-  return { added, skipped };
+  const totalSkipped = skipped.length + failed.length;
+  logger.info(`Music helper: queued ${added}/${tracks.length} tracks (skipped ${skipped.length} blacklisted, ${failed.length} failed)`);
+  
+  return { added, skipped: skipped.concat(failed) };
 }
 
 /**
@@ -302,10 +363,26 @@ async function searchAndQueue(sonos, query, count, options = {}) {
     logger.info(`Music helper: current state = ${state}`);
     wasPlaying = (state === 'playing' || state === 'transitioning');
     
-    // If stopped, flush queue first
+    // If stopped, ensure queue is active source and flush
     if (!wasPlaying) {
-      logger.info('Music helper: player stopped - flushing queue first');
-      await sonos.flush();
+      logger.info('Music helper: player stopped - ensuring queue is active and flushing');
+      try {
+        // Stop any active playback to force Sonos to use queue
+        try {
+          await sonos.stop();
+          await new Promise(resolve => setTimeout(resolve, 300));
+        } catch (stopErr) {
+          // Ignore stop errors (might already be stopped)
+          logger.debug('Music helper: stop command result (may already be stopped): ' + stopErr.message);
+        }
+        
+        // Flush queue to start fresh
+        await sonos.flush();
+        await new Promise(resolve => setTimeout(resolve, 300));
+        logger.info('Music helper: queue flushed and ready');
+      } catch (flushErr) {
+        logger.warn('Music helper: could not flush queue: ' + flushErr.message);
+      }
     }
   } catch (stateErr) {
     logger.warn('Music helper: could not check state: ' + stateErr.message);
@@ -317,9 +394,21 @@ async function searchAndQueue(sonos, query, count, options = {}) {
   // Start playback if wasn't playing
   if (autoPlay && !wasPlaying && queueResult.added > 0) {
     try {
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Ensure queue is the active source before starting playback
+      try {
+        await sonos.stop();
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (stopErr) {
+        // Ignore stop errors (might already be stopped)
+        logger.debug('Music helper: stop before play (may already be stopped): ' + stopErr.message);
+      }
+      
+      // Wait a moment to ensure queue is ready
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Start playback from queue
       await sonos.play();
-      logger.info('Music helper: started playback');
+      logger.info('Music helper: started playback from queue');
     } catch (playErr) {
       logger.warn('Music helper: could not start playback: ' + playErr.message);
     }
@@ -356,5 +445,6 @@ module.exports = {
   deduplicateTracks,
   normalizeTrackName,
   getBoosters,
-  BOOSTERS
+  BOOSTERS,
+  isValidSpotifyUri
 };

@@ -1,5 +1,6 @@
 const fs = require('fs');
 // --- MIGRATION: Move legacy message/help files to /app/templates/ if found ---
+// Note: Uses console.log since this runs before logger is initialized
 const legacyFiles = [
   { old: 'config/gong.txt', new: 'templates/messages/gong.txt' },
   { old: 'config/vote.txt', new: 'templates/messages/vote.txt' },
@@ -12,6 +13,7 @@ const legacyFiles = [
   { old: 'helpText.txt', new: 'templates/help/helpText.txt' },
   { old: 'helpTextAdmin.txt', new: 'templates/help/helpTextAdmin.txt' },
 ];
+const migrationLogs = [];
 for (const file of legacyFiles) {
   try {
     if (fs.existsSync(file.old)) {
@@ -21,12 +23,10 @@ for (const file of legacyFiles) {
         fs.mkdirSync(targetDir, { recursive: true });
       }
       fs.renameSync(file.old, file.new);
-      // eslint-disable-next-line no-console
-      console.log(`[SlackONOS MIGRATION] Moved ${file.old} → ${file.new}`);
+      migrationLogs.push({ level: 'info', msg: `Moved ${file.old} → ${file.new}` });
     }
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(`[SlackONOS MIGRATION] Failed to move ${file.old}: ${err.message}`);
+    migrationLogs.push({ level: 'error', msg: `Failed to move ${file.old}: ${err.message}` });
   }
 }
 const os = require('os');
@@ -40,6 +40,8 @@ const utils = require('./utils');
 const process = require('process');
 const parseString = require('xml2js').parseString;
 const http = require('http');
+const https = require('https');
+const selfsigned = require('selfsigned');
 const AIHandler = require('./ai-handler');
 const voting = require('./voting');
 const musicHelper = require('./music-helper');
@@ -85,15 +87,20 @@ function loadBlacklist() {
       return JSON.parse(data);
     }
   } catch (err) {
-    console.error('Error loading blacklist:', err);
+    // Logger may not be initialized yet during early startup, use console as fallback
+    if (typeof logger !== 'undefined') {
+      logger.error('Error loading blacklist:', err);
+    } else {
+      console.error('Error loading blacklist:', err);
+    }
   }
   return [];
 }
 
 // Helper to save user blacklist
-function saveBlacklist(list) {
+async function saveBlacklist(list) {
   try {
-    fs.writeFileSync(blacklistFile, JSON.stringify(list, null, 2));
+    await fs.promises.writeFile(blacklistFile, JSON.stringify(list, null, 2));
   } catch (err) {
     logger.error('Error saving blacklist:', err);
   }
@@ -107,15 +114,20 @@ function loadTrackBlacklist() {
       return JSON.parse(data);
     }
   } catch (err) {
-    console.error('Error loading track blacklist:', err);
+    // Logger may not be initialized yet during early startup, use console as fallback
+    if (typeof logger !== 'undefined') {
+      logger.error('Error loading track blacklist:', err);
+    } else {
+      console.error('Error loading track blacklist:', err);
+    }
   }
   return [];
 }
 
 // Helper to save track blacklist
-function saveTrackBlacklist(list) {
+async function saveTrackBlacklist(list) {
   try {
-    fs.writeFileSync(trackBlacklistFile, JSON.stringify(list, null, 2));
+    await fs.promises.writeFile(trackBlacklistFile, JSON.stringify(list, null, 2));
   } catch (err) {
     logger.error('Error saving track blacklist:', err);
   }
@@ -168,6 +180,120 @@ let maxVolume = config.get('maxVolume');
 let voteTimeLimitMinutes = config.get('voteTimeLimitMinutes') || 5;
 const logLevel = config.get('logLevel');
 
+/* Initialize Logger Early
+We have to wrap the Winston logger in this thin layer to satiate the SocketModeClient.
+Initialize early so it's available for all startup code. */
+// In-memory log buffer for real-time log viewing (last 1000 entries)
+const logBuffer = [];
+const MAX_LOG_BUFFER_SIZE = 1000;
+
+// Global status update SSE clients
+if (!global.statusStreamClients) {
+  global.statusStreamClients = new Set();
+}
+
+// Track current track for change detection
+let lastTrackInfo = null;
+let statusPollInterval = null;
+
+// Custom transport to capture logs in memory
+class MemoryLogTransport extends winston.transports.Console {
+  log(info, callback) {
+    // Format log entry
+    const level = info.level ? info.level.replace(/\u001b\[[0-9;]*m/g, '') : 'info';
+    const logEntry = {
+      timestamp: info.timestamp || new Date().toISOString(),
+      level: level,
+      message: info.message || String(info)
+    };
+    
+    // Add to buffer (will be handled by broadcastLog, but keep for initial buffer)
+    logBuffer.push(logEntry);
+    
+    // Keep buffer size limited
+    if (logBuffer.length > MAX_LOG_BUFFER_SIZE) {
+      logBuffer.shift(); // Remove oldest entry
+    }
+    
+    // Call parent to still output to console
+    super.log(info, callback);
+  }
+}
+
+const logger = new WinstonWrapper({
+  level: logLevel,
+  format: winston.format.combine(
+    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // Add timestamp
+    winston.format.json()
+  ),
+  transports: [
+    new MemoryLogTransport({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // Add timestamp to console logs
+        winston.format.printf(({ timestamp, level, message }) => {
+          return `[${timestamp}] ${level}: ${message}`;
+        })
+      ),
+    }),
+  ],
+});
+
+// Override logger methods to broadcast to SSE clients
+const originalDebug = logger.debug.bind(logger);
+const originalInfo = logger.info.bind(logger);
+const originalWarn = logger.warn.bind(logger);
+const originalError = logger.error.bind(logger);
+
+logger.debug = function(msg) {
+  originalDebug(msg);
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level: 'debug',
+    message: msg
+  };
+  broadcastLog(logEntry);
+};
+
+logger.info = function(msg) {
+  originalInfo(msg);
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level: 'info',
+    message: msg
+  };
+  broadcastLog(logEntry);
+};
+
+logger.warn = function(msg) {
+  originalWarn(msg);
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level: 'warn',
+    message: msg
+  };
+  broadcastLog(logEntry);
+};
+
+logger.error = function(msg) {
+  originalError(msg);
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level: 'error',
+    message: msg
+  };
+  broadcastLog(logEntry);
+};
+
+// Log any file migrations that occurred during startup
+migrationLogs.forEach(log => {
+  if (log.level === 'error') {
+    logger.error(`[MIGRATION] ${log.msg}`);
+  } else {
+    logger.info(`[MIGRATION] ${log.msg}`);
+  }
+});
+
 //Spotify Config Values
 const market = config.get('market');
 const clientId = config.get('spotifyClientId');
@@ -178,6 +304,49 @@ let searchLimit = config.get('searchLimit');
 const sonosIp = config.get('sonos');
 const webPort = config.get('webPort');
 let ipAddress = config.get('ipAddress');
+
+// Ensure ipAddress exists in config (set to empty string if missing)
+if (ipAddress === undefined || ipAddress === null) {
+  ipAddress = '';
+  config.set('ipAddress', '');
+  config.save((err) => {
+    if (err) {
+      logger.warn(`Failed to save ipAddress to config: ${err.message}`);
+    }
+  });
+}
+
+// Auto-detect IP address if not configured or set to placeholder
+if (!ipAddress || ipAddress === 'IP_HOST' || ipAddress === '') {
+  // First, check for HOST_IP environment variable (Docker best practice)
+  if (process.env.HOST_IP) {
+    ipAddress = process.env.HOST_IP;
+    logger.info(`Using HOST_IP from environment: ${ipAddress}`);
+  } else {
+    // Try to auto-detect from network interfaces
+    const networkInterfaces = os.networkInterfaces();
+    for (const interfaceName in networkInterfaces) {
+      const interfaces = networkInterfaces[interfaceName];
+      for (const iface of interfaces) {
+        // Skip internal (loopback) and non-IPv4 addresses
+        // Also skip Docker bridge interfaces (172.17.x.x, 172.18.x.x, etc.)
+        if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('172.')) {
+          ipAddress = iface.address;
+          logger.info(`Auto-detected IP address: ${ipAddress}`);
+          break;
+        }
+      }
+      if (ipAddress && ipAddress !== 'IP_HOST' && ipAddress !== '') break;
+    }
+
+    // Don't set fallback to 127.0.0.1 - leave empty if not found
+    // This will cause TTS validation to fail with proper error message
+    if (!ipAddress || ipAddress === 'IP_HOST') {
+      ipAddress = '';
+      logger.warn('⚠️  Could not auto-detect IP address. Configure ipAddress in config.json or set HOST_IP environment variable for TTS to work.');
+    }
+  }
+}
 
 //Slack Config
 const slackAppToken = config.get('slackAppToken');
@@ -192,27 +361,6 @@ if (blacklist.length === 0) {
     saveBlacklist(blacklist); // Save to new file
   }
 }
-
-/* Initialize Logger
-We have to wrap the Winston logger in this thin layer to satiate the SocketModeClient */
-const logger = new WinstonWrapper({
-  level: logLevel,
-  format: winston.format.combine(
-    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // Add timestamp
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // Add timestamp to console logs
-        winston.format.printf(({ timestamp, level, message }) => {
-          return `[${timestamp}] ${level}: ${message}`;
-        })
-      ),
-    }),
-  ],
-});
 
 /* Initialize Sonos */
 const SONOS = require('sonos');
@@ -251,7 +399,7 @@ const spotify = Spotify({
   clientSecret: clientSecret,
   market: market,
   logger: logger,
-});
+}, logger);
 
 /* Initialize Soundcraft Handler */
 const SoundcraftHandler = require('./soundcraft-handler');
@@ -616,10 +764,65 @@ async function _checkSystemHealth() {
   return report;
 }
 
+// Load setup handler early so it's available for startup checks
+let setupHandler;
+try {
+  setupHandler = require('./lib/setup-handler');
+} catch (err) {
+  setupHandler = null;
+  if (typeof logger !== 'undefined') {
+    logger.warn('Setup handler not available:', err.message);
+  }
+}
+
+// Load auth handler
+let authHandler;
+try {
+  authHandler = require('./lib/auth-handler');
+} catch (err) {
+  authHandler = null;
+  if (typeof logger !== 'undefined') {
+    logger.warn('Auth handler not available:', err.message);
+  }
+}
+
 // Coordinated Startup Sequence
 (async () => {
   try {
     logger.info('Starting SlackONOS...');
+
+    // Check if setup is needed before initializing platforms
+    let setupStatus = { needed: false };
+    if (setupHandler) {
+      try {
+        setupStatus = await setupHandler.isSetupNeeded();
+      } catch (err) {
+        logger.warn('Could not check setup status:', err.message);
+        // Fallback: check config directly
+        const hasSlack = !!(config.get('slackAppToken') && config.get('token'));
+        const hasSpotify = !!(config.get('spotifyClientId') && config.get('spotifyClientSecret'));
+        const hasSonos = !!(config.get('sonos') && config.get('sonos') !== 'IP_TO_SONOS');
+        setupStatus = { needed: !(hasSlack && hasSpotify && hasSonos) };
+      }
+    } else {
+      // Fallback: check config directly if setupHandler not available
+      const hasSlack = !!(config.get('slackAppToken') && config.get('token'));
+      const hasSpotify = !!(config.get('spotifyClientId') && config.get('spotifyClientSecret'));
+      const hasSonos = !!(config.get('sonos') && config.get('sonos') !== 'IP_TO_SONOS');
+      setupStatus = { needed: !(hasSlack && hasSpotify && hasSonos) };
+    }
+    const hasSlack = slackBotToken && slackAppToken;
+    const hasDiscord = config.get('discordToken');
+
+    // If setup is needed and no platforms configured, start server only for setup wizard
+    if (setupStatus.needed && !hasSlack && !hasDiscord) {
+      logger.warn('⚠️  Configuration incomplete - starting in setup mode');
+      logger.info(`📝 Please complete setup at: http://${ipAddress}:${webPort}/setup`);
+      logger.info('   The bot will start normally once configuration is complete.');
+      // HTTP server is already started above, so we can exit gracefully here
+      // Don't throw error, just log and let server run for setup wizard
+      return; // Exit startup sequence but keep HTTP server running
+    }
 
     // Initialize Voting Module
     voting.initialize({
@@ -647,11 +850,8 @@ async function _checkSystemHealth() {
     });
 
     // Check that at least one platform is configured
-    const hasSlack = slackBotToken && slackAppToken;
-    const hasDiscord = config.get('discordToken');
-
     if (!hasSlack && !hasDiscord) {
-      throw new Error('No platform configured! Provide either Slack tokens (slackAppToken + token) or Discord token (discordToken)');
+      throw new Error('No platform configured! Provide either Slack tokens (slackAppToken + token) or Discord token (discordToken). Visit /setup to configure.');
     }
 
     // 2. Initialize Slack (if configured)
@@ -791,9 +991,18 @@ async function _checkSystemHealth() {
 
     logger.info('🚀 System startup complete.');
     
+    // Start polling for track changes to broadcast to admin UI
+    startStatusPolling();
+    
     // Register shutdown handlers for graceful telemetry tracking
     const gracefulShutdown = async (signal) => {
       logger.info(`${signal} received. Sending shutdown telemetry...`);
+      
+      // Stop status polling
+      if (statusPollInterval) {
+        clearInterval(statusPollInterval);
+        statusPollInterval = null;
+      }
       
       if (telemetry) {
         await telemetry.trackShutdown(require('./package.json').version, releaseVersion);
@@ -809,20 +1018,682 @@ async function _checkSystemHealth() {
     
   } catch (err) {
     logger.error('⛔️ STARTUP FAILED: ' + err.message);
-    process.exit(1);
+    // If HTTP server is running, keep it alive for setup wizard access
+    // Check if server was started (it's created after this async block)
+    setTimeout(() => {
+      if (httpServer && httpServer.listening) {
+        logger.warn('⚠️  HTTP server is still running - you can access the setup wizard to fix configuration');
+        logger.info(`   Setup wizard: http://${ipAddress}:${webPort}/setup`);
+        // Don't exit - keep server running for setup
+      } else {
+        process.exit(1);
+      }
+    }, 100); // Small delay to let HTTP server start
   }
 })();
 
 // ==========================================
-// SIMPLE HTTP SERVER FOR TTS
+// HTTP/HTTPS SERVER FOR TTS AND SETUP WIZARD
 // ==========================================
-const httpServer = http.createServer((req, res) => {
-  // Parse URL to ignore query params (used for cache-busting)
-  const urlPath = req.url.split('?')[0];
+const ttsEnabled = config.get('ttsEnabled') !== false; // Default to true for backward compatibility
+let httpServer = null;
+// setupHandler is already loaded above for startup checks
 
-  if (urlPath === '/tts.mp3') {
+// Check for SSL configuration and auto-generate if needed
+const sslCertPath = config.get('sslCertPath');
+const sslKeyPath = config.get('sslKeyPath');
+const sslAutoGenerate = config.get('sslAutoGenerate') !== false; // Default to true
+let useHttps = false;
+let sslOptions = null;
+
+// Default paths for auto-generated certificates
+const defaultCertPath = path.join(__dirname, 'config', 'ssl', 'cert.pem');
+const defaultKeyPath = path.join(__dirname, 'config', 'ssl', 'key.pem');
+
+/**
+ * Generate self-signed SSL certificate
+ */
+async function generateSelfSignedCert(certPath, keyPath) {
+  try {
+    // Ensure SSL directory exists
+    const sslDir = path.dirname(certPath);
+    try {
+      await fs.promises.mkdir(sslDir, { recursive: true });
+    } catch (err) {
+      // Directory might already exist, ignore
+    }
+
+    // Get hostname/IP for certificate
+    const hostname = ipAddress || 'localhost';
+
+    // Generate certificate valid for 1 year
+    const attrs = [{ name: 'commonName', value: hostname }];
+    const pems = selfsigned.generate(attrs, {
+      days: 365,
+      keySize: 2048,
+      algorithm: 'sha256',
+      extensions: [
+        {
+          name: 'basicConstraints',
+          cA: true,
+        },
+        {
+          name: 'keyUsage',
+          keyCertSign: true,
+          digitalSignature: true,
+          nonRepudiation: true,
+          keyEncipherment: true,
+          dataEncipherment: true,
+        },
+        {
+          name: 'subjectAltName',
+          altNames: [
+            {
+              type: 2, // DNS
+              value: hostname,
+            },
+            {
+              type: 7, // IP
+              ip: hostname,
+            },
+            {
+              type: 2, // DNS
+              value: 'localhost',
+            },
+            {
+              type: 7, // IP
+              ip: '127.0.0.1',
+            },
+          ],
+        },
+      ],
+    });
+
+    // Write certificate and key to files (async)
+    await Promise.all([
+      fs.promises.writeFile(certPath, pems.cert, 'utf8'),
+      fs.promises.writeFile(keyPath, pems.private, 'utf8')
+    ]);
+
+    // Update config with paths
+    config.set('sslCertPath', certPath);
+    config.set('sslKeyPath', keyPath);
+    config.save((err) => {
+      if (err) {
+        if (typeof logger !== 'undefined') {
+          logger.warn(`Failed to save SSL paths to config: ${err.message}`);
+        }
+      }
+    });
+
+    return { cert: pems.cert, key: pems.private };
+} catch (err) {
+    throw new Error(`Failed to generate SSL certificate: ${err.message}`);
+  }
+}
+
+// Determine which certificate paths to use
+let finalCertPath = sslCertPath || defaultCertPath;
+let finalKeyPath = sslKeyPath || defaultKeyPath;
+
+// Check if certificates exist, or if we should auto-generate
+if (sslAutoGenerate && (!fs.existsSync(finalCertPath) || !fs.existsSync(finalKeyPath))) {
+  try {
+  if (typeof logger !== 'undefined') {
+      logger.info('🔒 Auto-generating self-signed SSL certificate...');
+    } else {
+      console.log('🔒 Auto-generating self-signed SSL certificate...');
+    }
+    
+    const generated = generateSelfSignedCert(finalCertPath, finalKeyPath);
+    sslOptions = {
+      cert: generated.cert,
+      key: generated.key
+    };
+    useHttps = true;
+    
+    if (typeof logger !== 'undefined') {
+      logger.info(`✅ SSL certificate generated: ${finalCertPath}`);
+      logger.info(`   ⚠️  This is a self-signed certificate. Browsers will show a security warning.`);
+      logger.info(`   For production, use a certificate from a trusted CA (Let's Encrypt, etc.)`);
+    } else {
+      console.log(`✅ SSL certificate generated: ${finalCertPath}`);
+      console.log(`   ⚠️  This is a self-signed certificate. Browsers will show a security warning.`);
+    }
+  } catch (err) {
+    if (typeof logger !== 'undefined') {
+      logger.error(`Failed to auto-generate SSL certificate: ${err.message}. Falling back to HTTP.`);
+    } else {
+      console.error(`Failed to auto-generate SSL certificate: ${err.message}. Falling back to HTTP.`);
+    }
+  }
+} else if (finalCertPath && finalKeyPath) {
+  // Try to load existing certificates
+  try {
+    if (fs.existsSync(finalCertPath) && fs.existsSync(finalKeyPath)) {
+      sslOptions = {
+        cert: fs.readFileSync(finalCertPath, 'utf8'),
+        key: fs.readFileSync(finalKeyPath, 'utf8')
+      };
+      useHttps = true;
+    } else {
+      if (typeof logger !== 'undefined') {
+        logger.warn(`SSL certificate files not found. Cert: ${finalCertPath}, Key: ${finalKeyPath}. Falling back to HTTP.`);
+      } else {
+        console.warn(`SSL certificate files not found. Cert: ${finalCertPath}, Key: ${finalKeyPath}. Falling back to HTTP.`);
+      }
+    }
+  } catch (err) {
+    if (typeof logger !== 'undefined') {
+      logger.error(`Error loading SSL certificates: ${err.message}. Falling back to HTTP.`);
+    } else {
+      console.error(`Error loading SSL certificates: ${err.message}. Falling back to HTTP.`);
+    }
+  }
+}
+
+// Create HTTP and HTTPS servers
+// If HTTPS is enabled, HTTP server will redirect to HTTPS
+// If HTTPS is not enabled, HTTP server handles all requests
+let httpsServer = null;
+
+// Main request handler (used by both HTTP and HTTPS servers)
+async function handleHttpRequest(req, res) {
+  try {
+    const url = require('url').parse(req.url, true);
+    const urlPath = url.pathname;
+
+    // Add security headers to all responses
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Content-Security-Policy', "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://cdn.jsdelivr.net; img-src 'self' data: https:;");
+
+    // Handle auth endpoints (login, logout) - no auth required, handle before other routes
+    if (urlPath === '/api/auth/login' && req.method === 'POST') {
+      if (authHandler) {
+        let body = '';
+        const chunks = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        body = Buffer.concat(chunks).toString();
+        await authHandler.handleLogin(req, res, body);
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Auth handler not available' }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/logout' && req.method === 'POST') {
+      if (authHandler) {
+        authHandler.handleLogout(req, res);
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Auth handler not available' }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/change-password' && req.method === 'POST') {
+      if (authHandler) {
+        // Verify authentication first
+        const authResult = authHandler.verifyAuth(req);
+        if (!authResult.authenticated) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
+          return;
+        }
+        
+        let body = '';
+        const chunks = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        body = Buffer.concat(chunks).toString();
+        await authHandler.handlePasswordChange(req, res, body);
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Auth handler not available' }));
+      }
+      return;
+    }
+
+    // WebAuthn endpoints
+    if (urlPath === '/api/auth/webauthn/register/options' && req.method === 'POST') {
+      try {
+        const webauthnHandler = require('./lib/webauthn-handler');
+        // Verify authentication first (must be logged in to register WebAuthn)
+        if (authHandler) {
+          const authResult = authHandler.verifyAuth(req);
+          if (!authResult.authenticated) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
+            return;
+          }
+        }
+        const options = await webauthnHandler.generateRegistrationOptions(req);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(options));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/webauthn/register/verify' && req.method === 'POST') {
+      try {
+        const webauthnHandler = require('./lib/webauthn-handler');
+        // Verify authentication first
+        if (authHandler) {
+          const authResult = authHandler.verifyAuth(req);
+          if (!authResult.authenticated) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
+            return;
+          }
+        }
+        let body = '';
+        const chunks = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        body = Buffer.concat(chunks).toString();
+        const result = await webauthnHandler.verifyRegistrationResponse(req, body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/webauthn/authenticate/options' && req.method === 'POST') {
+      try {
+        const webauthnHandler = require('./lib/webauthn-handler');
+        const options = await webauthnHandler.generateAuthenticationOptions(req);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(options));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/webauthn/authenticate/verify' && req.method === 'POST') {
+      try {
+        const webauthnHandler = require('./lib/webauthn-handler');
+        let body = '';
+        const chunks = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        body = Buffer.concat(chunks).toString();
+        const result = await webauthnHandler.verifyAuthenticationResponse(req, body);
+        
+        if (result.verified) {
+          // Create session
+          const sessionId = authHandler.createSession('admin');
+          const isSecure = req.headers['x-forwarded-proto'] === 'https' || 
+                           req.connection?.encrypted === true ||
+                           req.socket?.encrypted === true;
+          authHandler.setSessionCookie(res, sessionId, isSecure);
+        }
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/webauthn/credentials' && req.method === 'GET') {
+      try {
+        const webauthnHandler = require('./lib/webauthn-handler');
+        // Verify authentication first
+        if (authHandler) {
+          const authResult = authHandler.verifyAuth(req);
+          if (!authResult.authenticated) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
+            return;
+          }
+        }
+        const credentials = await webauthnHandler.getCredentials();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ credentials }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/webauthn/credentials' && req.method === 'DELETE') {
+      try {
+        const webauthnHandler = require('./lib/webauthn-handler');
+        // Verify authentication first
+        if (authHandler) {
+          const authResult = authHandler.verifyAuth(req);
+          if (!authResult.authenticated) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
+            return;
+          }
+        }
+        const url = require('url').parse(req.url, true);
+        const credentialID = url.query.credentialID;
+        if (!credentialID) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'credentialID required' }));
+          return;
+        }
+        const result = await webauthnHandler.deleteCredential(credentialID);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/auth/webauthn/status' && req.method === 'GET') {
+      try {
+        const webauthnHandler = require('./lib/webauthn-handler');
+        const enabled = webauthnHandler.isWebAuthnEnabled();
+        const hasCreds = enabled ? await webauthnHandler.hasCredentials() : false;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ enabled, hasCredentials: hasCreds }));
+      } catch (err) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ enabled: false, hasCredentials: false }));
+      }
+      return;
+    }
+
+    // Handle login page (public)
+    if (urlPath === '/login' || urlPath === '/login/') {
+      const loginHtmlPath = path.join(__dirname, 'public', 'setup', 'login.html');
+      if (fs.existsSync(loginHtmlPath)) {
+        res.writeHead(200, {
+          'Content-Type': 'text/html',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        });
+        res.end(fs.readFileSync(loginHtmlPath, 'utf8'));
+      } else {
+        res.writeHead(404);
+        res.end('Login page not found');
+      }
+      return;
+    }
+
+    // Check authentication for protected routes
+    // Admin routes are always protected if password is set
+    // Setup route is protected only if password is set AND setup is complete
+    const isAdminRoute = urlPath.startsWith('/admin') || urlPath.startsWith('/api/admin/');
+    const isSetupRoute = urlPath === '/setup' || urlPath === '/setup/';
+    const isSetupApiRoute = urlPath.startsWith('/api/setup/');
+
+    // Check if authentication is required
+    let requiresAuth = false;
+    let webauthnEnabledWithCreds = false;
+    try {
+      const webauthnHandler = require('./lib/webauthn-handler');
+      webauthnEnabledWithCreds = webauthnHandler.isWebAuthnEnabled() && await webauthnHandler.hasCredentials();
+    } catch (err) {
+      // ignore
+    }
+    const passwordSet = authHandler ? authHandler.isPasswordSet() : false;
+    const hasAuthMethod = passwordSet || webauthnEnabledWithCreds;
+
+    // If admin route and neither password nor WebAuthn creds are set, block access and force setup
+    if (isAdminRoute) {
+      if (!hasAuthMethod) {
+        if (urlPath.startsWith('/api/admin/')) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Admin access blocked until a password or WebAuthn credential is configured. Visit /setup to set one.' }));
+        } else {
+          res.writeHead(302, { Location: '/setup?force=true' });
+          res.end();
+        }
+        return;
+      }
+    }
+
+    // Admin routes always require auth (unless we blocked earlier for missing password/creds)
+    if (isAdminRoute) {
+      requiresAuth = true;
+    }
+
+    // Setup page and setup APIs require auth as soon as an auth method exists
+    if ((isSetupRoute || isSetupApiRoute) && hasAuthMethod) {
+      // Allow password bootstrap endpoint when no auth method; otherwise require auth
+      if (!(urlPath === '/api/setup/password-setup' && !hasAuthMethod)) {
+        requiresAuth = true;
+      }
+    }
+
+    // Verify authentication for protected routes
+    if (requiresAuth) {
+      const authResult = authHandler.verifyAuth(req);
+      if (!authResult.authenticated) {
+        // Redirect to login with return URL
+        const returnUrl = encodeURIComponent(urlPath + (url.search || ''));
+        res.writeHead(302, { 'Location': `/login?return=${returnUrl}` });
+        res.end();
+        return;
+      }
+    }
+
+  // Handle admin API endpoints
+  if (urlPath.startsWith('/api/admin/')) {
+    await handleAdminAPI(req, res, url);
+    return;
+  }
+
+  // Handle setup API endpoints
+  if (urlPath.startsWith('/api/setup/')) {
+    // Password setup endpoint is public (used during initial setup)
+    if (urlPath === '/api/setup/password-setup' && req.method === 'POST') {
+      if (authHandler) {
+        let body = '';
+        const chunks = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        body = Buffer.concat(chunks).toString();
+        await authHandler.handlePasswordSetup(req, res, body);
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Auth handler not available' }));
+      }
+      return;
+    }
+
+    // Other setup endpoints - check if password is required
+    if (authHandler && authHandler.isPasswordSet()) {
+      // Check if setup is complete
+      if (setupHandler) {
+        try {
+          const setupStatus = await setupHandler.isSetupNeeded();
+          // If setup is complete, require auth for setup API
+          if (!setupStatus.needed) {
+            const authResult = authHandler.verifyAuth(req);
+            if (!authResult.authenticated) {
+              res.writeHead(401, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Authentication required' }));
+              return;
+            }
+          }
+        } catch (err) {
+          // If check fails, allow access (setup might be in progress)
+        }
+      }
+    }
+
+    if (setupHandler) {
+      await setupHandler.handleSetupAPI(req, res, url);
+    } else {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Setup handler not available' }));
+    }
+    return;
+  }
+
+  // Handle admin page
+  if (urlPath === '/admin' || urlPath === '/admin/') {
+    const adminHtmlPath = path.join(__dirname, 'public', 'setup', 'admin.html');
+    if (fs.existsSync(adminHtmlPath)) {
+      res.writeHead(200, {
+        'Content-Type': 'text/html',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      });
+      res.end(fs.readFileSync(adminHtmlPath, 'utf8'));
+    } else {
+      res.writeHead(404);
+      res.end('Admin page not found');
+    }
+    return;
+  }
+
+  // Handle setup wizard pages
+  if (urlPath === '/setup' || urlPath === '/setup/') {
+    // FIRST: Check if password is set - if not, allow access to setup wizard to set password
+    if (authHandler && !authHandler.isPasswordSet()) {
+      // No password set - allow access to setup wizard (will force password setup)
+      const setupHtmlPath = path.join(__dirname, 'public', 'setup', 'index.html');
+      if (fs.existsSync(setupHtmlPath)) {
+        res.writeHead(200, {
+          'Content-Type': 'text/html',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        });
+        res.end(fs.readFileSync(setupHtmlPath, 'utf8'));
+      } else {
+        res.writeHead(404);
+        res.end('Setup wizard not found');
+      }
+      return;
+    }
+    
+    // Password is set, continue with normal checks
+    // Check for force parameter - if present, always show setup wizard
+    const force = url.query && url.query.force === 'true';
+    
+    if (!force) {
+      // Check if bot is configured and connected - if so, redirect to admin
+      const hasSlack = slack && slackBotToken && slackAppToken;
+      const hasDiscord = config.get('discordToken');
+      
+      if (hasSlack || hasDiscord) {
+        // Bot is configured, check if it's actually connected
+        try {
+          if (hasSlack && slack && typeof slack.isConnected === 'function' && slack.isConnected()) {
+            res.writeHead(302, { 'Location': '/admin' });
+            res.end();
+            return;
+          }
+          if (hasDiscord) {
+            const discordClient = DiscordSystem.getDiscordClient();
+            if (discordClient && discordClient.isReady()) {
+              res.writeHead(302, { 'Location': '/admin' });
+              res.end();
+              return;
+            }
+          }
+        } catch (err) {
+          // If check fails, show setup wizard
+        }
+      }
+    }
+    
+    const setupHtmlPath = path.join(__dirname, 'public', 'setup', 'index.html');
+    if (fs.existsSync(setupHtmlPath)) {
+      res.writeHead(200, {
+        'Content-Type': 'text/html',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      });
+      res.end(fs.readFileSync(setupHtmlPath, 'utf8'));
+    } else {
+      res.writeHead(404);
+      res.end('Setup wizard not found');
+    }
+    return;
+  }
+
+  // Serve setup static files (CSS, JS, images)
+  if (urlPath.startsWith('/setup/')) {
+    const relativePath = urlPath.replace('/setup/', '').split('?')[0]; // Remove query string
+    const filePath = path.join(__dirname, 'public', 'setup', relativePath);
+    // Security check: ensure path is within public/setup directory
+    const publicSetupDir = path.join(__dirname, 'public', 'setup');
+    
+    // Normalize paths for comparison
+    const normalizedFilePath = path.normalize(filePath);
+    const normalizedPublicDir = path.normalize(publicSetupDir);
+    
+    if (fs.existsSync(normalizedFilePath) && normalizedFilePath.startsWith(normalizedPublicDir)) {
+      const ext = path.extname(normalizedFilePath).toLowerCase();
+      const contentTypes = {
+        '.css': 'text/css; charset=utf-8',
+        '.js': 'application/javascript; charset=utf-8',
+        '.html': 'text/html; charset=utf-8',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml'
+      };
+      
+      const contentType = contentTypes[ext] || 'text/plain; charset=utf-8';
+      
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      });
+
+      // Read as buffer for images, utf8 for text files
+      const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.svg'].includes(ext);
+      try {
+      const content = isImage
+          ? fs.readFileSync(normalizedFilePath)
+          : fs.readFileSync(normalizedFilePath, 'utf8');
+      res.end(content);
+      } catch (err) {
+        logger.error(`Error reading setup file ${normalizedFilePath}:`, err);
+        res.writeHead(500);
+        res.end('Error reading file');
+      }
+    } else {
+      // Log for debugging
+      if (logger) {
+        logger.warn(`Setup file not found: ${normalizedFilePath} (requested: ${urlPath})`);
+      }
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not found');
+    }
+    return;
+  }
+
+  // Handle TTS endpoint (if enabled)
+  if (ttsEnabled && urlPath === '/tts.mp3') {
     const ttsFilePath = path.join(os.tmpdir(), 'sonos-tts.mp3');
-
     if (fs.existsSync(ttsFilePath)) {
       res.writeHead(200, {
         'Content-Type': 'audio/mpeg',
@@ -836,18 +1707,705 @@ const httpServer = http.createServer((req, res) => {
       res.writeHead(404);
       res.end('TTS file not found');
     }
-  } else if (req.url === '/') {
+    return;
+  }
+
+  // Root endpoint
+  if (req.url === '/') {
+    // Check if bot is configured and connected - if so, redirect to admin
+    const hasSlack = slack && slackBotToken && slackAppToken;
+    const hasDiscord = config.get('discordToken');
+    
+    if (hasSlack || hasDiscord) {
+      try {
+        if (hasSlack && slack && typeof slack.isConnected === 'function' && slack.isConnected()) {
+          res.writeHead(302, { 'Location': '/admin' });
+          res.end();
+          return;
+        }
+        if (hasDiscord) {
+          const discordClient = DiscordSystem.getDiscordClient();
+          if (discordClient && discordClient.isReady()) {
+            res.writeHead(302, { 'Location': '/admin' });
+            res.end();
+            return;
+          }
+        }
+      } catch (err) {
+        // If check fails, continue to setup check
+      }
+    }
+    
+    // Check if setup is needed and redirect
+    if (setupHandler) {
+      try {
+        const setupStatus = await setupHandler.isSetupNeeded();
+        if (setupStatus.needed) {
+          res.writeHead(302, { 'Location': '/setup' });
+          res.end();
+          return;
+        }
+      } catch (err) {
+        // If setup check fails, just show status page
+      }
+    }
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('SlackONOS TTS Server');
-  } else {
+    res.end('SlackONOS is running. Visit /setup to configure or /admin to manage.');
+    return;
+  }
+
+    // 404 for everything else
     res.writeHead(404);
     res.end('Not found');
+  } catch (err) {
+    logger.error('HTTP server error:', err);
+    if (!res.headersSent) {
+      res.writeHead(500);
+      res.end('Internal server error');
+    }
   }
+}
+
+// Create HTTP server (always created, redirects to HTTPS if HTTPS is enabled)
+httpServer = http.createServer(async (req, res) => {
+  // If HTTPS is enabled, redirect all HTTP requests to HTTPS
+  if (useHttps && httpsServer) {
+    const host = req.headers.host || `${ipAddress}:${webPort}`;
+    const httpsPort = config.get('httpsPort') || 8443;
+    // Extract hostname (without port) and use configured HTTPS port
+    const hostname = host.split(':')[0];
+    const httpsUrl = `https://${hostname}:${httpsPort}${req.url}`;
+    res.writeHead(301, { 'Location': httpsUrl });
+    res.end();
+    return;
+  }
+  
+  // If HTTPS is not enabled, handle request normally
+  await handleHttpRequest(req, res);
 });
 
+// Create HTTPS server if SSL is configured
+if (useHttps && sslOptions) {
+  httpsServer = https.createServer(sslOptions, async (req, res) => {
+    await handleHttpRequest(req, res);
+  });
+}
+
+/**
+ * Handle admin API requests
+ */
+async function handleAdminAPI(req, res, url) {
+  const urlPath = url.pathname;
+  
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
+  
+  // Parse request body for POST requests
+  let body = '';
+  if (req.method === 'POST') {
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    body = Buffer.concat(chunks).toString();
+  }
+  
+  try {
+    // Get system status
+    if (urlPath === '/api/admin/status') {
+      const status = await getAdminStatus();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(status));
+      return;
+    }
+    
+    // Get current track and volume
+    if (urlPath === '/api/admin/now-playing') {
+      const nowPlaying = await getNowPlaying();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(nowPlaying));
+      return;
+    }
+
+    // Playback controls
+    if (urlPath === '/api/admin/play' && req.method === 'POST') {
+      try {
+        await sonos.play();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/admin/pause' && req.method === 'POST') {
+      try {
+        await sonos.pause();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (urlPath === '/api/admin/stop' && req.method === 'POST') {
+      try {
+        await sonos.stop();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+    
+    // Get config values
+    if (urlPath === '/api/admin/config') {
+      const configData = getConfigForAdmin();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(configData));
+      return;
+    }
+    
+    // Update config value
+    if (urlPath === '/api/admin/config/update') {
+      const data = JSON.parse(body);
+      const result = await updateConfigValue(data.key, data.value);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+      return;
+    }
+    
+    // Get status/now playing updates (SSE stream for real-time updates)
+    if (urlPath === '/api/admin/events') {
+      handleStatusStream(req, res);
+      return;
+    }
+
+    // Get logs (SSE stream for real-time logs)
+    if (urlPath === '/api/admin/logs') {
+      handleLogStream(req, res);
+      return;
+    }
+
+    // Client-side WebAuthn log relay
+    if (urlPath === '/api/admin/webauthn-log' && req.method === 'POST') {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const msg = payload.message || 'WebAuthn client log';
+        const meta = payload.meta || {};
+        if (logger && typeof logger.info === 'function') {
+          logger.info(`[WEBAUTHN_CLIENT] ${msg} ${JSON.stringify(meta)}`);
+        } else {
+          console.log('[WEBAUTHN_CLIENT]', msg, meta);
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        if (logger) logger.error('Failed to record WebAuthn client log: ' + err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+      return;
+    }
+    
+    // Get log buffer (for initial load)
+    if (urlPath === '/api/admin/logs/buffer') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ logs: logBuffer }));
+      return;
+    }
+    
+    // Unknown endpoint
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not found' }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: err.message }));
+  }
+}
+
+/**
+ * Get admin status for all integrations
+ */
+async function getAdminStatus() {
+  const status = {
+    slack: { configured: false, connected: false },
+    discord: { configured: false, connected: false },
+    spotify: { configured: false, connected: false },
+    sonos: { configured: false, connected: false },
+    soundcraft: { configured: false, connected: false }
+  };
+  
+  // Check Slack
+  if (slackAppToken && slackBotToken) {
+    status.slack.configured = true;
+    try {
+      if (slack && typeof slack.isConnected === 'function') {
+        status.slack.connected = slack.isConnected();
+      } else if (slack && slack.socket) {
+        // Fallback: try to check socket state
+        status.slack.connected = false;
+      }
+      status.slack.details = {
+        adminChannel: config.get('adminChannel') || 'N/A',
+        standardChannel: config.get('standardChannel') || 'N/A'
+      };
+    } catch (err) {
+      status.slack.error = err.message;
+    }
+  }
+  
+  // Check Discord
+  if (config.get('discordToken')) {
+    status.discord.configured = true;
+    try {
+      const discordClient = DiscordSystem.getDiscordClient();
+      if (discordClient) {
+        status.discord.connected = discordClient.isReady() || false;
+        status.discord.details = {
+          guilds: discordClient.guilds?.cache?.size || 0
+        };
+      }
+    } catch (err) {
+      status.discord.error = err.message;
+    }
+  }
+  
+  // Check Spotify
+  const spotifyClientId = config.get('spotifyClientId');
+  const spotifyClientSecret = config.get('spotifyClientSecret');
+  if (spotifyClientId && spotifyClientSecret) {
+    status.spotify.configured = true;
+    try {
+      // Try a simple API call to check connection
+      await spotify.searchTrackList('test', 1);
+      status.spotify.connected = true;
+      status.spotify.details = {
+        market: config.get('market') || 'N/A',
+        clientId: spotifyClientId ? spotifyClientId.slice(0,6) + '…' : 'N/A'
+      };
+    } catch (err) {
+      status.spotify.connected = false;
+      status.spotify.error = err.message;
+    }
+  }
+  
+  // Check Sonos
+  const sonosIp = config.get('sonos');
+  if (sonosIp && sonosIp !== 'IP_TO_SONOS') {
+    status.sonos.configured = true;
+    try {
+      const deviceInfo = await sonos.deviceDescription();
+      status.sonos.connected = true;
+      status.sonos.deviceInfo = {
+        model: deviceInfo.modelDescription || 'Unknown',
+        room: deviceInfo.roomName || 'Unknown',
+        ip: sonosIp
+      };
+      status.sonos.details = {
+        softwareVersion: deviceInfo.softwareVersion || 'Unknown',
+        hardwareVersion: deviceInfo.hardwareVersion || 'Unknown'
+      };
+    } catch (err) {
+      status.sonos.connected = false;
+      status.sonos.error = err.message;
+    }
+  }
+  
+  // Check Soundcraft
+  if (config.get('soundcraftEnabled')) {
+    status.soundcraft.configured = true;
+    try {
+      if (soundcraft && soundcraft.isEnabled()) {
+        status.soundcraft.connected = true;
+        status.soundcraft.channels = soundcraft.getChannelNames();
+        status.soundcraft.details = {
+          ip: config.get('soundcraftIp') || 'N/A',
+          channels: soundcraft.getChannelNames()
+        };
+      } else {
+        status.soundcraft.connected = false;
+      }
+    } catch (err) {
+      status.soundcraft.connected = false;
+      status.soundcraft.error = err.message;
+    }
+  }
+  
+  return status;
+}
+
+/**
+ * Get current playing track and volume
+ */
+async function getNowPlaying() {
+  try {
+    // Parallelize all Sonos API calls for better performance
+    const [state, volume, queue] = await Promise.all([
+      sonos.getCurrentState(),
+      sonos.getVolume(),
+      sonos.getQueue().catch(err => {
+        // Ignore queue errors for now-playing
+        return null;
+      })
+    ]);
+
+    // Fetch queue (next tracks)
+    let nextTracks = [];
+    if (queue && queue.items) {
+      nextTracks = queue.items.slice(0, 5).map(item => ({
+        title: item.title || 'Unknown',
+        artist: item.artist || item.creator || 'Unknown'
+      }));
+    }
+
+    // Fetch current track in parallel if playing
+    let track = null;
+    if (state === 'playing') {
+      track = await sonos.currentTrack().catch(err => {
+        // Return null if track fetch fails
+        return null;
+      });
+    }
+    
+    return {
+      state: state,
+      volume: volume,
+      maxVolume: config.get('maxVolume') || 75,
+      nextTracks,
+      track: track ? {
+        title: track.title || 'Unknown',
+        artist: track.artist || 'Unknown',
+        album: track.album || 'Unknown',
+        position: track.position || 0,
+        duration: track.duration || 0
+      } : null
+    };
+  } catch (err) {
+    return {
+      error: err.message,
+      state: 'unknown',
+      volume: null,
+      track: null
+    };
+  }
+}
+
+/**
+ * Get config values for admin (safe values only)
+ */
+function getConfigForAdmin() {
+  // Helper to mask sensitive values - return masked value if exists, empty string if not
+  const maskSensitive = (value) => {
+    if (!value) return '';
+    // Return masked value (first 3 chars + ... + last 3 chars) for display
+    if (typeof value === 'string' && value.length > 6) {
+      return value.slice(0, 3) + '…' + value.slice(-3);
+    }
+    return '••••••';
+  };
+  
+  const openaiApiKey = config.get('openaiApiKey');
+  const telemetryInstanceId = config.get('telemetryInstanceId');
+  const adminPasswordHash = config.get('adminPasswordHash');
+  
+  return {
+    adminChannel: config.get('adminChannel') || 'music-admin',
+    standardChannel: config.get('standardChannel') || 'music',
+    maxVolume: config.get('maxVolume') || 75,
+    market: config.get('market') || 'US',
+    gongLimit: config.get('gongLimit') || 3,
+    voteLimit: config.get('voteLimit') || 6,
+    voteImmuneLimit: config.get('voteImmuneLimit') || 6,
+    flushVoteLimit: config.get('flushVoteLimit') || 6,
+    voteTimeLimitMinutes: config.get('voteTimeLimitMinutes') || 2,
+    ttsEnabled: config.get('ttsEnabled') !== false,
+    logLevel: config.get('logLevel') || 'info',
+    ipAddress: config.get('ipAddress') || '',
+    webPort: config.get('webPort') || 8181,
+    httpsPort: config.get('httpsPort') || 8443,
+    sonos: config.get('sonos') || '',
+    defaultTheme: config.get('defaultTheme') || '',
+    themePercentage: config.get('themePercentage') || 0,
+    openaiApiKey: openaiApiKey ? maskSensitive(openaiApiKey) : '',
+    aiModel: config.get('aiModel') || 'gpt-4o',
+    soundcraftEnabled: config.get('soundcraftEnabled') || false,
+    soundcraftIp: config.get('soundcraftIp') || '',
+    soundcraftChannels: config.get('soundcraftChannels') || [],
+    webauthnRequireUserVerification: config.get('webauthnRequireUserVerification') === true, // Default: false for maximum compatibility
+    // Don't expose sensitive values
+    telemetryInstanceId: telemetryInstanceId ? maskSensitive(telemetryInstanceId) : '',
+    adminPasswordHash: adminPasswordHash ? '[REDACTED]' : ''
+  };
+}
+
+/**
+ * Broadcast new logs to all connected SSE clients
+ */
+function broadcastLog(logEntry) {
+  // Add to buffer
+  logBuffer.push(logEntry);
+  
+  // Keep buffer size limited
+  if (logBuffer.length > MAX_LOG_BUFFER_SIZE) {
+    logBuffer.shift(); // Remove oldest entry
+  }
+  
+  // Broadcast to all connected SSE clients
+  if (global.logStreamClients && global.logStreamClients.size > 0) {
+    const message = `data: ${JSON.stringify({ type: 'log', ...logEntry })}\n\n`;
+    global.logStreamClients.forEach(client => {
+      try {
+        client.write(message);
+      } catch (err) {
+        // Client disconnected, remove it
+        global.logStreamClients.delete(client);
+      }
+    });
+  }
+}
+
+/**
+ * Broadcast status/now playing updates to all connected SSE clients
+ */
+function broadcastStatusUpdate(type, data) {
+  if (global.statusStreamClients && global.statusStreamClients.size > 0) {
+    const message = `data: ${JSON.stringify({ type, ...data })}\n\n`;
+    global.statusStreamClients.forEach(client => {
+      try {
+        client.write(message);
+      } catch (err) {
+        // Client disconnected, remove it
+        global.statusStreamClients.delete(client);
+      }
+    });
+  }
+}
+
+/**
+ * Start polling for track changes and status updates
+ */
+function startStatusPolling() {
+  if (statusPollInterval) {
+    clearInterval(statusPollInterval);
+  }
+  
+  // Check if Sonos is configured before starting polling
+  const sonosIp = config.get('sonos');
+  if (!sonosIp || sonosIp === 'IP_TO_SONOS') {
+    logger.debug('Status polling not started - Sonos not configured');
+    return;
+  }
+  
+  // Poll every 2 seconds for track changes
+  statusPollInterval = setInterval(async () => {
+    try {
+      const nowPlaying = await getNowPlaying();
+      const currentTrackId = nowPlaying.track 
+        ? `${nowPlaying.track.title}|${nowPlaying.track.artist}|${nowPlaying.track.queuePosition || 0}`
+        : null;
+      
+      // Check if track changed
+      if (currentTrackId !== lastTrackInfo) {
+        lastTrackInfo = currentTrackId;
+        broadcastStatusUpdate('nowPlaying', { data: nowPlaying });
+      }
+      
+      // Also check for status changes (every 30 seconds)
+      if (!global.lastStatusCheck || Date.now() - global.lastStatusCheck > 30000) {
+        global.lastStatusCheck = Date.now();
+        const status = await getAdminStatus();
+        broadcastStatusUpdate('status', { data: status });
+      }
+    } catch (err) {
+      // Silently ignore polling errors (Sonos might be disconnected)
+      if (logger && logger.debug) {
+        logger.debug('Status polling error (non-critical):', err.message);
+      }
+    }
+  }, 2000); // Poll every 2 seconds
+  
+  // Don't prevent Node.js shutdown
+  if (statusPollInterval && statusPollInterval.unref) {
+    statusPollInterval.unref();
+  }
+}
+
+/**
+ * Handle Server-Sent Events stream for real-time status/now playing updates
+ */
+function handleStatusStream(req, res) {
+  // Set headers for SSE
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+  
+  // Send initial connection message
+  res.write('data: {"type":"connected"}\n\n');
+  
+  // Send initial status and now playing data
+  (async () => {
+    try {
+      const status = await getAdminStatus();
+      res.write(`data: ${JSON.stringify({ type: 'status', data: status })}\n\n`);
+      
+      const nowPlaying = await getNowPlaying();
+      res.write(`data: ${JSON.stringify({ type: 'nowPlaying', data: nowPlaying })}\n\n`);
+    } catch (err) {
+      logger.error('Error sending initial status data:', err);
+    }
+  })();
+  
+  // Store reference to this client
+  if (!global.statusStreamClients) {
+    global.statusStreamClients = new Set();
+  }
+  global.statusStreamClients.add(res);
+  
+  // Keep connection alive with heartbeat
+  const heartbeatInterval = setInterval(() => {
+    try {
+      res.write(': heartbeat\n\n');
+    } catch (err) {
+      // Client disconnected
+      clearInterval(heartbeatInterval);
+      if (global.statusStreamClients) global.statusStreamClients.delete(res);
+    }
+  }, 30000); // Every 30 seconds
+  
+  // Clean up on client disconnect
+  req.on('close', () => {
+    clearInterval(heartbeatInterval);
+    if (global.statusStreamClients) global.statusStreamClients.delete(res);
+  });
+}
+
+/**
+ * Handle Server-Sent Events stream for real-time logs
+ */
+function handleLogStream(req, res) {
+  // Set headers for SSE
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+  
+  // Send initial connection message
+  res.write('data: {"type":"connected"}\n\n');
+  
+  // Send existing logs from buffer
+  logBuffer.forEach(log => {
+    res.write(`data: ${JSON.stringify({ type: 'log', ...log })}\n\n`);
+  });
+  
+  // Store reference to this client
+  if (!global.logStreamClients) {
+    global.logStreamClients = new Set();
+  }
+  global.logStreamClients.add(res);
+  
+  // Keep connection alive with heartbeat
+  const heartbeatInterval = setInterval(() => {
+    try {
+      res.write(': heartbeat\n\n');
+    } catch (err) {
+      // Client disconnected
+      clearInterval(heartbeatInterval);
+      if (global.logStreamClients) global.logStreamClients.delete(res);
+    }
+  }, 30000); // Every 30 seconds
+  
+  // Clean up on client disconnect
+  req.on('close', () => {
+    clearInterval(heartbeatInterval);
+    if (global.logStreamClients) global.logStreamClients.delete(res);
+  });
+}
+
+/**
+ * Update a config value
+ */
+async function updateConfigValue(key, value) {
+  try {
+    // Validate key is allowed to be updated
+    const allowedKeys = [
+      'adminChannel', 'standardChannel', 'maxVolume', 'market',
+      'gongLimit', 'voteLimit', 'voteImmuneLimit', 'flushVoteLimit',
+      'voteTimeLimitMinutes', 'ttsEnabled', 'logLevel', 'ipAddress',
+      'webPort', 'httpsPort', 'sonos', 'defaultTheme', 'themePercentage',
+      'openaiApiKey', 'aiModel', 'soundcraftEnabled', 'soundcraftIp', 'soundcraftChannels',
+      'webauthnEnabled', 'webauthnRpName', 'webauthnRpId', 'webauthnOrigin', 'webauthnRequireUserVerification'
+    ];
+    
+    if (!allowedKeys.includes(key)) {
+      return { success: false, error: 'Key not allowed to be updated via admin' };
+    }
+    
+    // Update in memory
+    config.set(key, value);
+    
+    // Save to file
+    config.save((err) => {
+      if (err) {
+        logger.error('Failed to save config:', err);
+      } else {
+        logger.info(`Config updated via admin: ${key} = ${value}`);
+      }
+    });
+    
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+// Start HTTP server immediately (before platform initialization)
+// This ensures setup wizard is always accessible
 httpServer.listen(webPort, () => {
-  logger.info(`📻 HTTP server for TTS listening on port ${webPort}`);
+  if (useHttps) {
+    logger.info(`📻 HTTP server listening on port ${webPort} (redirecting to HTTPS)`);
+  } else {
+  logger.info(`📻 HTTP server listening on port ${webPort}`);
+  }
+  if (ttsEnabled) {
+    logger.info(`   TTS endpoint: http://${ipAddress}:${webPort}/tts.mp3`);
+  }
+  logger.info(`   Setup wizard: http://${ipAddress}:${webPort}/setup`);
+  
+  // Start platform initialization after server is ready
+  // This is done in the startup sequence below
 });
+
+// Start HTTPS server if SSL is configured
+if (useHttps && httpsServer) {
+  const httpsPort = config.get('httpsPort') || 8443;
+  httpsServer.listen(httpsPort, () => {
+    logger.info(`🔒 HTTPS server listening on port ${httpsPort}`);
+    if (ttsEnabled) {
+      logger.info(`   TTS endpoint: https://${ipAddress}:${httpsPort}/tts.mp3`);
+    }
+    logger.info(`   Setup wizard: https://${ipAddress}:${httpsPort}/setup`);
+  });
+}
 
 // ==========================================
 // COMMAND REGISTRY & PARSING
@@ -903,6 +2461,7 @@ const commandRegistry = new Map([
   ['searchalbum', { fn: (args, ch, u) => _searchalbum(args, ch), admin: false }],
   ['searchplaylist', { fn: _searchplaylist, admin: false }],
   ['current', { fn: (args, ch, u) => _currentTrack(ch), admin: false, aliases: ['wtf'] }],
+  ['source', { fn: (args, ch, u) => _showSource(ch), admin: false }],
   ['gong', { fn: (args, ch, u) => voting.gong(ch, u, () => _gongplay('play', ch)), admin: false, aliases: ['dong', ':gong:', ':gun:'] }],
   ['gongcheck', { fn: (args, ch, u) => voting.gongcheck(ch), admin: false }],
   ['voteimmune', { fn: (args, ch, u) => voting.voteImmune(args, ch, u), admin: false }],
@@ -953,10 +2512,10 @@ for (const [cmd, meta] of commandRegistry) {
   aliases.forEach(a => aliasMap.set(a.toLowerCase(), cmd));
 }
 
-function _appendAIUnparsed(entry) {
+async function _appendAIUnparsed(entry) {
   try {
     const line = JSON.stringify(entry) + "\n";
-    fs.appendFileSync(aiUnparsedFile, line, { encoding: 'utf8' });
+    await fs.promises.appendFile(aiUnparsedFile, line, { encoding: 'utf8' });
   } catch (e) {
     logger.warn('Failed to write ai-unparsed log: ' + e.message);
   }
@@ -1011,11 +2570,22 @@ async function _configdump(input, channel, userName) {
       _slackMessage('📄 Config file appears empty or not loaded.', channel);
       return;
     }
+    const sensitiveKeys = [
+      'token', 'slackAppToken', 'slackBotToken', 
+      'spotifyClientId', 'spotifyClientSecret',
+      'openaiApiKey', 'telemetryInstanceId', 'adminPasswordHash'
+    ];
+    
     const lines = entries.map(([k, v]) => {
       let val = typeof v === 'string' ? v : JSON.stringify(v);
-      if (k.toLowerCase().includes('token') || k.toLowerCase().includes('secret') || k.toLowerCase().includes('apikey') || k.toLowerCase().includes('clientid')) {
-        val = (val || '').toString();
-        if (val.length > 6) val = val.slice(0, 3) + '…' + val.slice(-3);
+      // Check if key is in sensitive list or contains sensitive keywords
+      if (sensitiveKeys.includes(k) || 
+          k.toLowerCase().includes('token') || 
+          k.toLowerCase().includes('secret') || 
+          k.toLowerCase().includes('apikey') || 
+          k.toLowerCase().includes('clientid') ||
+          k.toLowerCase().includes('password')) {
+        val = '[REDACTED]';
       }
       return `${k}: ${val}`;
     });
@@ -1078,48 +2648,78 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
   if (!AIHandler.isAIEnabled()) {
     logger.debug('AI disabled, falling back to standard processing');
     _slackMessage('🤔 I didn\'t understand that. Try: `add <song>`, `bestof <artist>`, `gong`, `current`, or `help`', channel);
-    _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, reason: 'ai_disabled' });
+    await _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, reason: 'ai_disabled' });
     return;
   }
 
   try {
-    const parsed = await AIHandler.parseNaturalLanguage(cleanText, userName);
-
-    if (!parsed) {
-      logger.warn(`AI parsing returned null for: "${cleanText}"`);
-      _slackMessage('🤖 Sorry, I couldn\'t understand that. Try `help` to see available commands!', channel);
-      _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, reasoning: 'none', reason: 'parse_null' });
-      return;
-    }
-
-    // Handle "chat" command FIRST - direct responses to simple questions/greetings
-    // This bypasses confidence check since chat responses are always valid
-    if (parsed.command === 'chat' && parsed.response) {
-      logger.info(`AI chat response: "${cleanText}" → "${parsed.response}"`);
-      _slackMessage(parsed.response, channel);
-
-      // If chat includes a music suggestion, save it for follow-up
-      if (parsed.suggestedAction && parsed.suggestedAction.command) {
-        const suggestion = `${parsed.suggestedAction.command} ${parsed.suggestedAction.args.join(' ')}`;
-        const description = parsed.suggestedAction.description || suggestion;
-        AIHandler.setUserContext(userName, suggestion, `offered to play ${description}`);
-        logger.info(`Chat suggestion saved for ${userName}: "${suggestion}" (${description})`);
+    let parsed = null;
+    
+    // Check if user is confirming a previous suggestion BEFORE parsing
+    const ctx = AIHandler.getUserContext(userName);
+    if (ctx && ctx.suggestedAction) {
+      // Check if this looks like a confirmation
+      const confirmationPattern = /\b(ok|yes|do it|sure|yeah|yep|please|go ahead|play it|gör det|ja|kör|varsågod|snälla|spela)\b/i;
+      if (confirmationPattern.test(cleanText)) {
+        logger.info(`User "${userName}" confirmed suggested action: ${ctx.suggestedAction.command} ${ctx.suggestedAction.args.join(' ')}`);
+        
+        // Use the stored suggestedAction directly to preserve args structure
+        parsed = {
+          command: ctx.suggestedAction.command,
+          args: ctx.suggestedAction.args,
+          confidence: 0.95,
+          reasoning: 'User confirmed previous suggestion',
+          summary: 'You got it! Playing those tunes now! 🎵'
+        };
+        
+        // Clear context since we're executing it
+        AIHandler.clearUserContext(userName);
       }
-      return;
     }
+    
+    // If not a confirmation, proceed with normal AI parsing
+    if (!parsed) {
+      parsed = await AIHandler.parseNaturalLanguage(cleanText, userName);
 
-    // Check confidence threshold (only for non-chat commands)
-    if (parsed.confidence < 0.5) {
-      logger.info(`Low confidence (${parsed.confidence}) for: "${cleanText}" → ${parsed.command}`);
-      _slackMessage(`🤔 Not sure I understood. Did you mean: \`${parsed.command} ${parsed.args.join(' ')}\`?\nTry \`help\` for available commands.`, channel);
-      _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, parsed, reasoning: parsed.reasoning, reason: 'low_confidence' });
-      return;
-    }
+      if (!parsed) {
+        logger.warn(`AI parsing returned null for: "${cleanText}"`);
+        _slackMessage('🤖 Sorry, I couldn\'t understand that. Try `help` to see available commands!', channel);
+        await _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, reasoning: 'none', reason: 'parse_null' });
+        return;
+      }
 
-    // Log successful AI parse
-    logger.info(`✨ AI parsed: "${cleanText}" → ${parsed.command} [${parsed.args.join(', ')}] (${(parsed.confidence * 100).toFixed(0)}%)`);
-    // Send short DJ-style summary before executing
-    if (parsed.summary) {
+      // Handle "chat" command FIRST - direct responses to simple questions/greetings
+      // This bypasses confidence check since chat responses are always valid
+      if (parsed.command === 'chat' && parsed.response) {
+        logger.info(`AI chat response: "${cleanText}" → "${parsed.response}"`);
+        _slackMessage(parsed.response, channel);
+
+        // If chat includes a music suggestion, save it for follow-up
+        if (parsed.suggestedAction && parsed.suggestedAction.command) {
+          const suggestion = `${parsed.suggestedAction.command} ${parsed.suggestedAction.args.join(' ')}`;
+          const description = parsed.suggestedAction.description || suggestion;
+          AIHandler.setUserContext(userName, suggestion, `offered to play ${description}`, parsed.suggestedAction);
+          logger.info(`Chat suggestion saved for ${userName}: "${suggestion}" (${description})`);
+        }
+        return;
+      }
+
+      // Check confidence threshold (only for non-chat commands)
+      if (parsed.confidence < 0.5) {
+        logger.info(`Low confidence (${parsed.confidence}) for: "${cleanText}" → ${parsed.command}`);
+        _slackMessage(`🤔 Not sure I understood. Did you mean: \`${parsed.command} ${parsed.args.join(' ')}\`?\nTry \`help\` for available commands.`, channel);
+        await _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, parsed, reasoning: parsed.reasoning, reason: 'low_confidence' });
+        return;
+      }
+
+      // Log successful AI parse
+      logger.info(`✨ AI parsed: "${cleanText}" → ${parsed.command} [${parsed.args.join(', ')}] (${(parsed.confidence * 100).toFixed(0)}%)`);
+      // Send short DJ-style summary before executing
+      if (parsed.summary) {
+        _slackMessage(parsed.summary, channel);
+      }
+    } else {
+      // Confirmed action - send summary and continue
       _slackMessage(parsed.summary, channel);
     }
 
@@ -1305,7 +2905,7 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
   } catch (err) {
     logger.error(`Error in AI natural language handler: ${err.message}`);
     _slackMessage('❌ Oops, something went wrong processing your request. Try using a command directly!', channel);
-    _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, error: err.message, reason: 'handler_error' });
+    await _appendAIUnparsed({ ts: new Date().toISOString(), user: userName, platform, channel, text: cleanText, error: err.message, reason: 'handler_error' });
   }
 }
 
@@ -1472,7 +3072,20 @@ async function processInput(text, channel, userName, platform = 'slack', isAdmin
 
 // Removed duplicate _slackMessage definition (platform-aware version earlier in file is authoritative)
 
-const userCache = {};
+// Simple LRU cache implementation for user data to prevent memory leak
+const USER_CACHE_MAX_SIZE = 500; // Max users to cache
+const userCache = new Map();
+
+function addToUserCache(userId, userName) {
+  // If cache is at max size, remove oldest entry (first in Map)
+  if (userCache.size >= USER_CACHE_MAX_SIZE) {
+    const firstKey = userCache.keys().next().value;
+    userCache.delete(firstKey);
+  }
+  // Delete and re-add to move to end (most recent)
+  userCache.delete(userId);
+  userCache.set(userId, userName);
+}
 
 async function _checkUser(userId) {
   try {
@@ -1486,14 +3099,17 @@ async function _checkUser(userId) {
     userId = userId.replace(/[<@>]/g, '');
 
     // Check if user info is already in cache
-    if (userCache[userId]) {
-      return userCache[userId];
+    if (userCache.has(userId)) {
+      const userName = userCache.get(userId);
+      // Move to end (mark as recently used)
+      addToUserCache(userId, userName);
+      return userName;
     }
 
     // Fetch user info from Slack API
     const result = await web.users.info({ user: userId });
     if (result.ok && result.user) {
-      userCache[userId] = result.user.name; // Cache the user info
+      addToUserCache(userId, result.user.name);
       return result.user.name;
     } else {
       logger.error('User not found: ' + userId);
@@ -1641,60 +3257,155 @@ function _countQueue(channel, cb) {
 
 async function _showQueue(channel) {
   try {
-    const result = await sonos.getQueue();
-    // logger.info('Current queue: ' + JSON.stringify(result, null, 2))
-    _status(channel, function (state) {
-      logger.info('_showQueue, got state = ' + state);
+    // Parallelize all Sonos API calls for better performance
+    const [result, state] = await Promise.all([
+      sonos.getQueue(),
+      sonos.getCurrentState()
+    ]);
+
+    // Get source information and current track directly (don't use _currentTrack callback)
+    let sourceInfo = null;
+    let track = null;
+
+    if (state === 'playing') {
+      // Parallelize source and track fetching
+      [sourceInfo, track] = await Promise.all([
+        _getCurrentSource(),
+        sonos.currentTrack().catch(trackErr => {
+          logger.warn('Could not get current track: ' + trackErr.message);
+          return null;
+        })
+      ]);
+    }
+    
+    if (!result || !result.items || result.items.length === 0) {
+      logger.debug('Queue is empty');
+      let emptyMsg = '🦗 *Crickets...* The queue is empty! Try `add <song>` to get started! 🎵';
+      if (state === 'playing' && sourceInfo && sourceInfo.type === 'external') {
+        emptyMsg += '\n⚠️ Note: Currently playing from external source (not queue). Run `stop` to switch to queue.';
+      }
+      _slackMessage(emptyMsg, channel);
+      return;
+    }
+    
+    // Build single compact message
+    let message = '';
+    
+    if (state === 'playing' && track) {
+      message += `Currently playing: *${track.title}* by _${track.artist}_\n`;
+      if (track.duration && track.position) {
+        const remaining = track.duration - track.position;
+        const remainingMin = Math.floor(remaining / 60);
+        const remainingSec = Math.floor(remaining % 60);
+        const durationMin = Math.floor(track.duration / 60);
+        const durationSec = Math.floor(track.duration % 60);
+        message += `:stopwatch: ${remainingMin}:${remainingSec.toString().padStart(2, '0')} remaining (${durationMin}:${durationSec.toString().padStart(2, '0')} total)\n`;
+      }
+      
+      if (sourceInfo && sourceInfo.type === 'external') {
+        message += `⚠️ Source: *External* (not from queue)\n`;
+      }
+    } else {
+      message += `Playback state: *${state}*\n`;
+    }
+    
+    message += `\nTotal tracks in queue: ${result.total}\n====================\n`;
+    
+    logger.info(`Total tracks in queue: ${result.total}, items returned: ${result.items.length}`);
+    logger.debug(`Queue items: ${JSON.stringify(result.items.map((item, i) => ({ pos: i, title: item.title, artist: item.artist })))}`);
+    if (track) {
+      logger.debug(`Current track: queuePosition=${track.queuePosition}, title="${track.title}", artist="${track.artist}"`);
+    }
+    
+    const tracks = [];
+
+    result.items.map(function (item, i) {
+      let trackTitle = item.title;
+      let prefix = '';
+
+      // Check if this is the currently playing track
+      // Match by position OR by title/artist if position matches
+      const positionMatch = track && (i + 1) === track.queuePosition;
+      const nameMatch = track && item.title === track.title && item.artist === track.artist;
+      const isCurrentTrack = positionMatch || (nameMatch && sourceInfo && sourceInfo.type === 'queue');
+
+      // Check if track is gong banned (immune)
+      if (voting.isTrackGongBanned(item.title)) {
+        prefix = ':lock: ';
+        trackTitle = item.title;
+      } else if (isCurrentTrack && sourceInfo && sourceInfo.type === 'queue') {
+        trackTitle = '*' + trackTitle + '*';
+      } else {
+        trackTitle = '_' + trackTitle + '_';
+      }
+
+      if (isCurrentTrack && sourceInfo && sourceInfo.type === 'queue') {
+        tracks.push(':notes: ' + '_#' + i + '_ ' + trackTitle + ' by ' + item.artist);
+      } else {
+        tracks.push(prefix + '>_#' + i + '_ ' + trackTitle + ' by ' + item.artist);
+      }
     });
-    _currentTrack(channel, function (err, track) {
-      if (!result || !result.items || result.items.length === 0) {
-        logger.debug('Queue is empty');
-        _slackMessage('🦗 *Crickets...* The queue is empty! Try `add <song>` to get started! 🎵', channel);
-        return;
-      }
-      if (err) {
-        logger.error(err);
-      }
-      var message = 'Total tracks in queue: ' + result.total + '\n====================\n';
-      logger.info('Total tracks in queue: ' + result.total);
-      const tracks = [];
-
-      result.items.map(function (item, i) {
-        let trackTitle = item.title;
-        let prefix = '';
-
-        // Check if this is the currently playing track
-        const isCurrentTrack = track && (i + 1) === track.queuePosition;
-
-        // Check if track is gong banned (immune)
-        if (voting.isTrackGongBanned(item.title)) {
-          prefix = ':lock: ';
-          trackTitle = item.title;
-        } else if (track && item.title === track.title) {
-          trackTitle = '*' + trackTitle + '*';
-        } else {
-          trackTitle = '_' + trackTitle + '_';
-        }
-
-        if (isCurrentTrack) {
-          tracks.push(':notes: ' + '_#' + i + '_ ' + trackTitle + ' by ' + item.artist);
-        } else {
-          tracks.push(prefix + '>_#' + i + '_ ' + trackTitle + ' by ' + item.artist);
-        }
-      });
-      for (var i in tracks) {
-        message += tracks[i] + '\n';
-        if (i > 0 && Math.floor(i % 100) === 0) {
-          _slackMessage(message, channel);
-          message = '';
-        }
-      }
-      if (message) {
+    
+    for (var i in tracks) {
+      message += tracks[i] + '\n';
+      if (i > 0 && Math.floor(i % 100) === 0) {
         _slackMessage(message, channel);
+        message = '';
       }
-    });
+    }
+    
+    if (message) {
+      _slackMessage(message, channel);
+    }
   } catch (err) {
     logger.error('Error fetching queue: ' + err);
+    _slackMessage('🚨 Error fetching queue. Try again! 🔄', channel);
+  }
+}
+
+async function _showSource(channel) {
+  try {
+    const state = await sonos.getCurrentState();
+    
+    if (state !== 'playing') {
+      _slackMessage(`⏸️ Playback is *${state}*. No source active.`, channel);
+      return;
+    }
+    
+    const sourceInfo = await _getCurrentSource();
+    const track = await sonos.currentTrack();
+    
+    if (!track) {
+      _slackMessage('🔇 No track information available.', channel);
+      return;
+    }
+    
+    let message = `🎵 Currently playing: *${track.title}* by _${track.artist}_\n\n`;
+    
+    if (sourceInfo) {
+      if (sourceInfo.type === 'queue') {
+        message += `📋 **Source: Queue** (position #${sourceInfo.queuePosition})\n`;
+        message += `✅ Sonos is playing from the queue managed by SlackONOS.`;
+      } else {
+        message += `⚠️ **Source: External** (not from queue)\n`;
+        message += `🔍 Sonos is playing from an external source, likely:\n`;
+        message += `   • Spotify Connect (from Spotify app)\n`;
+        message += `   • AirPlay (from iPhone/iPad/Mac)\n`;
+        message += `   • Line-in (physical connection)\n`;
+        message += `   • Another music service app\n\n`;
+        message += `💡 **To switch to queue:**\n`;
+        message += `   1. Run \`stop\` to stop current playback\n`;
+        message += `   2. Run \`add <song>\` to add to queue\n`;
+        message += `   3. Playback will start from queue automatically`;
+      }
+    } else {
+      message += `❓ Could not determine source. Track may be from external source.`;
+    }
+    
+    _slackMessage(message, channel);
+  } catch (err) {
+    logger.error('Error getting source info: ' + err);
+    _slackMessage('🚨 Error getting source information. Try again! 🔄', channel);
   }
 }
 
@@ -1802,48 +3513,23 @@ async function _bestof(input, channel, userName) {
       return;
     }
 
-    // If player is stopped, flush the queue to start fresh before adding
-    try {
-      const stateBefore = await sonos.getCurrentState();
-      logger.info('Current state before bestof queueing: ' + stateBefore);
-      if (stateBefore === 'stopped') {
-        logger.info('Player stopped - flushing queue before BESTOF');
-        try {
-          await sonos.flush();
-          logger.info('Queue flushed (BESTOF)');
-        } catch (flushErr) {
-          logger.warn('Could not flush queue (BESTOF): ' + flushErr.message);
-        }
-      }
-    } catch (stateErr) {
-      logger.warn('Could not determine player state before BESTOF: ' + stateErr.message);
+    // Check state and flush if stopped (don't wait for this to complete before responding)
+    const stateBefore = await sonos.getCurrentState().catch(err => {
+      logger.warn('Could not determine player state before BESTOF: ' + err.message);
+      return 'unknown';
+    });
+
+    logger.info('Current state before bestof queueing: ' + stateBefore);
+
+    if (stateBefore === 'stopped') {
+      logger.info('Player stopped - flushing queue before BESTOF');
+      await sonos.flush().catch(flushErr => {
+        logger.warn('Could not flush queue (BESTOF): ' + flushErr.message);
+      });
     }
 
-    let addedCount = 0;
-    for (const track of tracksByArtist) {
-      try {
-        await sonos.queue(track.uri);
-        logger.info(`Queued BESTOF track: ${track.name}`);
-        addedCount++;
-      } catch (err) {
-        logger.warn(`Could not queue track ${track.name}: ${err.message}`);
-      }
-    }
-
-    try {
-      const state = await sonos.getCurrentState();
-      logger.info('Current state after bestof: ' + state);
-
-      if (state !== 'playing' && state !== 'transitioning') {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        await sonos.play();
-        logger.info('Started playback after bestof.');
-      }
-    } catch (stateErr) {
-      logger.warn('Could not check/start playback: ' + stateErr.message);
-    }
-
-    let msg = `🎼 *Best of ${bestArtist}*\nAdded ${addedCount} tracks:\n`;
+    // Respond to user immediately with what we're about to queue
+    let msg = `🎼 *Best of ${bestArtist}*\nQueueing ${tracksByArtist.length} tracks:\n`;
     tracksByArtist.forEach((t, i) => {
       msg += `> ${i + 1}. *${t.name}*\n`;
     });
@@ -1852,6 +3538,40 @@ async function _bestof(input, channel, userName) {
       trackName: tracksByArtist[0]?.name || bestArtist,
       addReactions: currentPlatform === 'discord'
     });
+
+    // Queue tracks in parallel (much faster!) - don't block user response
+    (async () => {
+      try {
+        // Queue all tracks in parallel using Promise.allSettled (continues even if some fail)
+        const queuePromises = tracksByArtist.map(track =>
+          sonos.queue(track.uri)
+            .then(() => {
+              logger.info(`Queued BESTOF track: ${track.name}`);
+              return { success: true, track: track.name };
+            })
+            .catch(err => {
+              logger.warn(`Could not queue track ${track.name}: ${err.message}`);
+              return { success: false, track: track.name, error: err.message };
+            })
+        );
+
+        const results = await Promise.allSettled(queuePromises);
+        const addedCount = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+
+        logger.info(`BESTOF: Queued ${addedCount}/${tracksByArtist.length} tracks for ${bestArtist}`);
+
+        // Auto-start playback if not playing
+        if (stateBefore === 'stopped' || stateBefore === 'paused') {
+          await new Promise(resolve => setTimeout(resolve, 300)); // Brief delay for queue
+          await sonos.play().catch(err => {
+            logger.warn('Could not start playback after BESTOF: ' + err.message);
+          });
+          logger.info('Started playback after bestof');
+        }
+      } catch (err) {
+        logger.error(`Error in BESTOF background queueing: ${err.message}`);
+      }
+    })();
 
   } catch (err) {
     logger.error(`BESTOF error: ${err.stack || err}`);
@@ -2018,7 +3738,11 @@ async function _debug(channel, userName) {
     }).join('\n');
 
     // Build Config Section
-    const sensitiveKeys = ['token', 'slackAppToken', 'slackBotToken', 'spotifyClientId', 'spotifyClientSecret'];
+    const sensitiveKeys = [
+      'token', 'slackAppToken', 'slackBotToken', 
+      'spotifyClientId', 'spotifyClientSecret',
+      'openaiApiKey', 'telemetryInstanceId', 'adminPasswordHash'
+    ];
     const configKeys = Object.keys(config.stores.file.store);
     const configValues = configKeys
       .map(key => {
@@ -2075,7 +3799,14 @@ async function _debug(channel, userName) {
           `> Connected: \`${connected ? 'Yes' : 'No'}\`\n` +
           `> Configured Channels: ${channels}\n`
         );
-      })();
+      })() +
+      `\n` +
+      `*📻 TTS HTTP Server:*\n` +
+      `> Enabled: \`${ttsEnabled ? 'true' : 'false'}\`\n` +
+      (ttsEnabled ?
+        `> Port: \`${webPort}\`\n` +
+        `> Endpoint: \`http://${ipAddress}:${webPort}/tts.mp3\`\n`
+        : '');
 
     _slackMessage(message, channel);
   } catch (err) {
@@ -2144,99 +3875,126 @@ async function _add(input, channel, userName) {
   logger.info('Track to add: ' + track);
 
   try {
-    const tracks = await spotify.searchTrackList(track, 7);
+    const tracks = await spotify.searchTrackList(track, 3); // Reduced from 7 to 3 for faster validation
     if (!tracks || tracks.length === 0) {
       _slackMessage("🤷 Couldn't find anything matching that. Try different keywords or check the spelling! 🎵", channel);
       return;
     }
-    const result = {
-      name: tracks[0].name,
-      artist: tracks[0].artist,
-      uri: tracks[0].uri
-    };
-    
-    // Check if track is blacklisted
-    if (isTrackBlacklisted(result.name, result.artist)) {
-      logger.info(`Track blocked by blacklist: ${result.name} by ${result.artist}`);
-      _slackMessage(`🚫 Sorry, *${result.name}* by ${result.artist} is on the blacklist and cannot be added.`, channel);
+
+    // Pre-validate all candidates in parallel before attempting to queue
+    const candidates = tracks
+      .filter(t => musicHelper.isValidSpotifyUri(t.uri))
+      .map(t => ({
+        name: t.name,
+        artist: t.artist,
+        uri: t.uri
+      }));
+
+    if (candidates.length === 0) {
+      _slackMessage("🤷 Found tracks but they have invalid format. Try a different search! 🎵", channel);
       return;
     }
 
-    // Get current player state
-    const state = await sonos.getCurrentState();
+    // Check if first result is blacklisted (most common case)
+    const firstCandidate = candidates[0];
+    if (isTrackBlacklisted(firstCandidate.name, firstCandidate.artist)) {
+      logger.info(`Track blocked by blacklist: ${firstCandidate.name} by ${firstCandidate.artist}`);
+      _slackMessage(`🚫 Sorry, *${firstCandidate.name}* by ${firstCandidate.artist} is on the blacklist and cannot be added.`, channel);
+      return;
+    }
+
+    // Parallelize getting state and queue to save time
+    const [state, queue] = await Promise.all([
+      sonos.getCurrentState(),
+      sonos.getQueue().catch(err => {
+        logger.warn('Could not get queue: ' + err.message);
+        return null;
+      })
+    ]);
     logger.info('Current state for add: ' + state);
 
-    // If stopped, flush the queue to start fresh
+    // Handle stopped state - flush queue
     if (state === 'stopped') {
-      logger.info('Player stopped - flushing queue and starting fresh');
+      logger.info('Player stopped - ensuring queue is active source and flushing');
       try {
+        // Parallel stop and flush (flush is safe even if not stopped)
         await sonos.flush();
-        logger.info('Queue flushed');
+        await new Promise(resolve => setTimeout(resolve, 200)); // Reduced from 300ms
+        logger.info('Queue flushed and ready');
       } catch (flushErr) {
         logger.warn('Could not flush queue: ' + flushErr.message);
       }
+    } else if (queue && queue.items) {
+      // Check for duplicates if playing (using pre-fetched queue)
+      const isDuplicate = queue.items.some((item) => {
+        return item.uri === firstCandidate.uri ||
+               (item.title === firstCandidate.name && item.artist === firstCandidate.artist);
+      });
 
-      await sonos.queue(result.uri);
-      logger.info('Added track: ' + result.name);
+      if (isDuplicate) {
+        const duplicatePosition = queue.items.findIndex(item =>
+          item.uri === firstCandidate.uri ||
+          (item.title === firstCandidate.name && item.artist === firstCandidate.artist)
+        );
+        _slackMessage(
+          `*${firstCandidate.name}* by _${firstCandidate.artist}_ is already in the queue at position #${duplicatePosition}! :musical_note:\nWant it to play sooner? Use \`vote ${duplicatePosition}\` to move it up! :arrow_up:`,
+          channel
+        );
+        return;
+      }
+    }
 
-      // Wait a moment before starting playback
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      await sonos.play();
+    // Try to queue the first valid candidate (most relevant result)
+    let result = null;
+    try {
+      await sonos.queue(firstCandidate.uri);
+      logger.info('Added track: ' + firstCandidate.name);
+      result = firstCandidate;
+    } catch (e) {
+      const errorDetails = e.message || String(e);
+      const upnpErrorMatch = errorDetails.match(/errorCode[>](\d+)[<]/);
+      const errorCode = upnpErrorMatch ? upnpErrorMatch[1] : null;
 
-      _slackMessage(
-        'Started fresh! Added ' + '*' + result.name + '*' + ' by ' + result.artist + ' and began playback. :notes:',
-        channel,
-        { trackName: result.name, addReactions: currentPlatform === 'discord' }
-      );
+      logger.warn(`Queue failed for "${firstCandidate.name}" by ${firstCandidate.artist}: ${errorDetails}${errorCode ? ` (error code: ${errorCode})` : ''}`);
+
+      if (errorCode === '800') {
+        _slackMessage('🤷 Track not available in your region. Try searching for different songs! 🎵', channel);
+      } else {
+        _slackMessage('🤷 Couldn\'t add the track. It may not be available or there was an error. Try a different search! 🎵', channel);
+      }
       return;
     }
+    
+    // Respond immediately to user (don't wait for playback to start)
+    _slackMessage(
+      'Added ' + '*' + result.name + '*' + ' by ' + result.artist + ' to the queue! :notes:',
+      channel,
+      { trackName: result.name, addReactions: currentPlatform === 'discord' }
+    );
 
-    // For playing/paused/transitioning states, check for duplicates
-    try {
-      const queue = await sonos.getQueue();
-      if (queue && queue.items) {
-        let duplicatePosition = -1;
-        const isDuplicate = queue.items.some((item, index) => {
-          if (item.uri === result.uri || (item.title === result.name && item.artist === result.artist)) {
-            duplicatePosition = index;
-            return true;
-          }
-          return false;
-        });
-
-        if (isDuplicate) {
-          _slackMessage(
-            `*${result.name}* by _${result.artist}_ is already in the queue at position #${duplicatePosition}! :musical_note:\nWant it to play sooner? Use \`vote ${duplicatePosition}\` to move it up! :arrow_up:`,
-            channel
-          );
-          return;
+    // Handle playback state asynchronously (don't block user response)
+    if (state === 'stopped') {
+      // Start playback in background (don't await)
+      (async () => {
+        try {
+          await new Promise(resolve => setTimeout(resolve, 300)); // Brief delay for queue to settle
+          await sonos.play();
+          logger.info('Started playback from queue');
+        } catch (playErr) {
+          logger.warn('Failed to start playback: ' + playErr.message);
         }
-      }
-    } catch (queueErr) {
-      // If we can't get the queue, just log and continue with adding
-      logger.warn('Could not check queue for duplicates: ' + queueErr.message);
+      })();
+    } else if (state === 'paused') {
+      // Resume playback if paused
+      (async () => {
+        try {
+          await sonos.play();
+          logger.info('Resumed playback');
+        } catch (playErr) {
+          logger.warn('Failed to resume playback: ' + playErr.message);
+        }
+      })();
     }
-
-    await sonos.queue(result.uri);
-    logger.info('Added track: ' + result.name);
-
-    let msg = 'Added ' + '*' + result.name + '*' + ' by ' + result.artist + ' to the queue.';
-
-    // Auto-play if player was paused or in another non-playing state
-    if (state !== 'playing' && state !== 'transitioning') {
-      try {
-        await sonos.play();
-        logger.info('Player was not playing, started playback.');
-        msg += ' Playback started! :notes:';
-      } catch (playErr) {
-        logger.warn('Failed to auto-play: ' + playErr.message);
-      }
-    }
-
-    _slackMessage(msg, channel, {
-      trackName: result.name,
-      addReactions: currentPlatform === 'discord'
-    });
   } catch (err) {
     logger.error('Error adding track: ' + err.message);
     _slackMessage('🤷 Couldn\'t find that track or hit an error adding it. Try being more specific with the song name! 🎵', channel);
@@ -2284,54 +4042,33 @@ async function _addalbum(input, channel, userName) {
     
     const isStopped = state === 'stopped';
 
-    // If stopped, flush the queue to start fresh
+    // If stopped, ensure queue is active source and flush
     if (isStopped) {
-      logger.info('Player stopped - flushing queue and starting fresh');
+      logger.info('Player stopped - ensuring queue is active and flushing');
       try {
+        // Stop any active playback to force Sonos to use queue
+        try {
+          await sonos.stop();
+          await new Promise(resolve => setTimeout(resolve, 300));
+        } catch (stopErr) {
+          // Ignore stop errors (might already be stopped)
+          logger.debug('Stop command result (may already be stopped): ' + stopErr.message);
+        }
+        
+        // Flush queue to start fresh
         await sonos.flush();
-        logger.info('Queue flushed');
+        await new Promise(resolve => setTimeout(resolve, 300));
+        logger.info('Queue flushed and ready');
       } catch (flushErr) {
         logger.warn('Could not flush queue: ' + flushErr.message);
       }
     }
 
-    // If we have blacklisted tracks, add individually; otherwise use album URI
-    if (blacklistedTracks.length > 0) {
-      const allowedTracks = albumTracks.filter(track => 
-        !isTrackBlacklisted(track.name, track.artist)
-      );
-      
-      // Add allowed tracks individually
-      for (const track of allowedTracks) {
-        await sonos.queue(track.uri);
-      }
-      logger.info(`Added ${allowedTracks.length} tracks from album (filtered ${blacklistedTracks.length})`);
-    } else {
-      // No blacklisted tracks, add entire album via URI (more efficient)
-      await sonos.queue(result.uri);
-      logger.info('Added album: ' + result.name);
-    }
-
-    // Start playback if needed
-    if (isStopped) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      await sonos.play();
-    } else if (state !== 'playing' && state !== 'transitioning') {
-      try {
-        await sonos.play();
-        logger.info('Player was not playing, started playback.');
-      } catch (playErr) {
-        logger.warn('Failed to auto-play: ' + playErr.message);
-      }
-    }
-
-    const trackCountText = blacklistedTracks.length > 0 
-      ? `${albumTracks.length - blacklistedTracks.length} tracks from album` 
+    // Respond to user immediately
+    const trackCountText = blacklistedTracks.length > 0
+      ? `${albumTracks.length - blacklistedTracks.length} tracks from album`
       : 'album';
-    let text = isStopped 
-      ? `Started fresh! Added ${trackCountText} *${result.name}* by ${result.artist} and began playback. :notes:`
-      : `Added ${trackCountText} *${result.name}* by ${result.artist} to the queue.`;
-    
+    let text = `Added ${trackCountText} *${result.name}* by ${result.artist} to the queue! :notes:`;
     text += warningMessage;
 
     if (result.coverUrl) {
@@ -2354,6 +4091,45 @@ async function _addalbum(input, channel, userName) {
     } else {
       _slackMessage(text, channel);
     }
+
+    // Queue tracks in background (don't block user response)
+    (async () => {
+      try {
+        // If we have blacklisted tracks, add individually in parallel; otherwise use album URI
+        if (blacklistedTracks.length > 0) {
+          const allowedTracks = albumTracks.filter(track =>
+            !isTrackBlacklisted(track.name, track.artist)
+          );
+
+          // Queue all tracks in parallel (much faster!)
+          const queuePromises = allowedTracks.map(track =>
+            sonos.queue(track.uri).catch(err => {
+              logger.warn(`Could not queue track ${track.name}: ${err.message}`);
+              return null;
+            })
+          );
+
+          await Promise.allSettled(queuePromises);
+          logger.info(`Added ${allowedTracks.length} tracks from album (filtered ${blacklistedTracks.length})`);
+        } else {
+          // No blacklisted tracks, add entire album via URI (more efficient)
+          await sonos.queue(result.uri);
+          logger.info('Added album: ' + result.name);
+        }
+
+        // Start playback if needed
+        if (isStopped) {
+          await new Promise(resolve => setTimeout(resolve, 300)); // Reduced from 1000ms
+          await sonos.play();
+          logger.info('Started playback after album add');
+        } else if (state !== 'playing' && state !== 'transitioning') {
+          await sonos.play();
+          logger.info('Player was not playing, started playback.');
+        }
+      } catch (err) {
+        logger.error('Error in background album queueing: ' + err.message);
+      }
+    })();
   } catch (err) {
     logger.error('Error adding album: ' + err.message);
     _slackMessage('🔎 Couldn\'t find that album. Double-check the spelling or try including the artist name! 🎶', channel);
@@ -2448,12 +4224,23 @@ async function _addplaylist(input, channel, userName) {
     
     const isStopped = state === 'stopped';
 
-    // If stopped, flush the queue to start fresh
+    // If stopped, ensure queue is active source and flush
     if (isStopped) {
-      logger.info('Player stopped - flushing queue and starting fresh');
+      logger.info('Player stopped - ensuring queue is active and flushing');
       try {
+        // Stop any active playback to force Sonos to use queue
+        try {
+          await sonos.stop();
+          await new Promise(resolve => setTimeout(resolve, 300));
+        } catch (stopErr) {
+          // Ignore stop errors (might already be stopped)
+          logger.debug('Stop command result (may already be stopped): ' + stopErr.message);
+        }
+        
+        // Flush queue to start fresh
         await sonos.flush();
-        logger.info('Queue flushed');
+        await new Promise(resolve => setTimeout(resolve, 300));
+        logger.info('Queue flushed and ready');
       } catch (flushErr) {
         logger.warn('Could not flush queue: ' + flushErr.message);
       }
@@ -2478,8 +4265,26 @@ async function _addplaylist(input, channel, userName) {
 
     // Start playback if needed
     if (isStopped) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      await sonos.play();
+      // Ensure queue is the active source before starting playback
+      try {
+        // Stop any active playback to force Sonos to use queue
+        try {
+          await sonos.stop();
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (stopErr) {
+          // Ignore stop errors (might already be stopped)
+          logger.debug('Stop before play (may already be stopped): ' + stopErr.message);
+        }
+        
+        // Wait a moment to ensure queue is ready
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Start playback from queue
+        await sonos.play();
+        logger.info('Started playback from queue');
+      } catch (playErr) {
+        logger.warn('Failed to start playback: ' + playErr.message);
+      }
     } else if (state !== 'playing' && state !== 'transitioning') {
       try {
         await sonos.play();
@@ -2489,16 +4294,54 @@ async function _addplaylist(input, channel, userName) {
       }
     }
 
-    const trackCountText = blacklistedTracks.length > 0 
-      ? `${playlistTracks.length - blacklistedTracks.length} tracks from playlist` 
+    // Respond to user immediately
+    const trackCountText = blacklistedTracks.length > 0
+      ? `${playlistTracks.length - blacklistedTracks.length} tracks from playlist`
       : 'playlist';
-    let text = isStopped 
-      ? `Started fresh! Added ${trackCountText} *${result.name}* by ${result.owner} and began playback. :notes:`
-      : `Added ${trackCountText} *${result.name}* by ${result.owner} to the queue.`;
-    
+    let text = `Added ${trackCountText} *${result.name}* by ${result.owner} to the queue! :notes:`;
     text += warningMessage;
+
     logger.info(`Sending playlist confirmation message: ${text}`);
     _slackMessage(text, channel);
+
+    // Queue tracks in background (don't block user response)
+    (async () => {
+      try {
+        // If we have blacklisted tracks, add individually in parallel; otherwise use playlist URI
+        if (blacklistedTracks.length > 0) {
+          const allowedTracks = playlistTracks.filter(track =>
+            !isTrackBlacklisted(track.name, track.artist)
+          );
+
+          // Queue all tracks in parallel (much faster for large playlists!)
+          const queuePromises = allowedTracks.map(track =>
+            sonos.queue(track.uri).catch(err => {
+              logger.warn(`Could not queue track ${track.name}: ${err.message}`);
+              return null;
+            })
+          );
+
+          await Promise.allSettled(queuePromises);
+          logger.info(`Added ${allowedTracks.length} tracks from playlist (filtered ${blacklistedTracks.length})`);
+        } else {
+          // No blacklisted tracks, add entire playlist via URI (more efficient)
+          await sonos.queue(result.uri);
+          logger.info('Added playlist: ' + result.name);
+        }
+
+        // Start playback if needed
+        if (isStopped) {
+          await new Promise(resolve => setTimeout(resolve, 300)); // Reduced from 1500ms total
+          await sonos.play();
+          logger.info('Started playback after playlist add');
+        } else if (state !== 'playing' && state !== 'transitioning') {
+          await sonos.play();
+          logger.info('Player was not playing, started playback.');
+        }
+      } catch (err) {
+        logger.error('Error in background playlist queueing: ' + err.message);
+      }
+    })();
   } catch (err) {
     logger.error('Error adding playlist: ' + err.message);
     _slackMessage('🔎 Couldn\'t find that playlist. Try a Spotify link, or use `searchplaylist <name>` to pick one. 🎵', channel);
@@ -2578,32 +4421,136 @@ function _currentTrackTitle(channel, cb) {
     });
 }
 
+async function _getCurrentSource() {
+  try {
+    // Try to get transport URI to determine source
+    // node-sonos might have getPositionInfo or similar
+    const track = await sonos.currentTrack();
+    if (!track) return null;
+    
+    // Log track info for debugging
+    logger.debug(`Source check: currentTrack queuePosition=${track.queuePosition}, title="${track.title}", artist="${track.artist}"`);
+    
+    // Check if track has queuePosition - if yes, it's from queue
+    // If no queuePosition, it might be from external source
+    if (track.queuePosition !== undefined && track.queuePosition !== null && track.queuePosition > 0) {
+      // Verify the track actually exists at that position
+      try {
+        const queue = await sonos.getQueue();
+        if (queue && queue.items) {
+          logger.debug(`Source check: queue has ${queue.items.length} items, total=${queue.total}`);
+          
+          // Check if queuePosition matches an item in the queue
+          const queueIndex = track.queuePosition - 1; // Convert to 0-based index
+          if (queueIndex >= 0 && queueIndex < queue.items.length) {
+            const queueItem = queue.items[queueIndex];
+            // Verify it's the same track
+            if (queueItem.title === track.title && queueItem.artist === track.artist) {
+              logger.debug(`Source check: confirmed queue match at position ${track.queuePosition}`);
+              return { type: 'queue', queuePosition: track.queuePosition };
+            } else {
+              logger.warn(`Source check: queuePosition ${track.queuePosition} exists but track doesn't match. Queue has "${queueItem.title}" by "${queueItem.artist}", but playing "${track.title}" by "${track.artist}"`);
+            }
+          } else {
+            logger.warn(`Source check: queuePosition ${track.queuePosition} is out of bounds (queue has ${queue.items.length} items)`);
+          }
+          
+          // Try to find track by name/artist match
+          const queueTrack = queue.items.find((item, index) => 
+            item.title === track.title && item.artist === track.artist
+          );
+          if (queueTrack) {
+            const foundPosition = queue.items.indexOf(queueTrack) + 1;
+            logger.debug(`Source check: found track in queue at position ${foundPosition} (but queuePosition was ${track.queuePosition})`);
+            return { type: 'queue', queuePosition: foundPosition, note: 'position_mismatch' };
+          }
+        }
+      } catch (queueErr) {
+        logger.debug('Could not check queue for source: ' + queueErr.message);
+      }
+      
+      // If queuePosition exists but doesn't match, might be stale or external
+      logger.warn(`Source check: queuePosition ${track.queuePosition} exists but track not found in queue - might be external source`);
+    }
+    
+    // Try to get queue and check if current track matches
+    try {
+      const queue = await sonos.getQueue();
+      if (queue && queue.items) {
+        const queueTrack = queue.items.find((item, index) => 
+          item.title === track.title && item.artist === track.artist
+        );
+        if (queueTrack) {
+          const position = queue.items.indexOf(queueTrack) + 1;
+          logger.debug(`Source check: found track in queue at position ${position} (no queuePosition in track)`);
+          return { type: 'queue', queuePosition: position };
+        }
+      }
+    } catch (queueErr) {
+      logger.debug('Could not check queue for source: ' + queueErr.message);
+    }
+    
+    // If track doesn't match queue, it's likely from external source
+    logger.warn(`Source check: track "${track.title}" by "${track.artist}" not found in queue - likely external source`);
+    return { type: 'external', track: { title: track.title, artist: track.artist } };
+  } catch (err) {
+    logger.warn('Error getting source info: ' + err.message);
+    return null;
+  }
+}
+
 function _currentTrack(channel, cb) {
+  // First check the playback state
   sonos
-    .currentTrack()
-    .then((track) => {
-      if (track) {
-        let message = `Currently playing: *${track.title}* by _${track.artist}_`;
-
-        // Add time information if available
-        if (track.duration && track.position) {
-          const remaining = track.duration - track.position;
-          const remainingMin = Math.floor(remaining / 60);
-          const remainingSec = Math.floor(remaining % 60);
-          const durationMin = Math.floor(track.duration / 60);
-          const durationSec = Math.floor(track.duration % 60);
-
-          message += `\n⏱️ ${remainingMin}:${remainingSec.toString().padStart(2, '0')} remaining (${durationMin}:${durationSec.toString().padStart(2, '0')} total)`;
-        }
-
-        if (voting.isTrackGongBanned(track.title)) {
-          message += ' :lock: (Immune to GONG)';
-        }
-        _slackMessage(message, channel);
-        if (cb) cb(null, track);
-      } else {
-        _slackMessage('🔇 *Silence...* Nothing is currently playing. Use `add` to get started! 🎵', channel);
+    .getCurrentState()
+    .then(async (state) => {
+      if (state !== 'playing') {
+        // Not playing - just show the state
+        const stateEmoji = state === 'paused' ? '⏸️' : '⏹️';
+        _slackMessage(`${stateEmoji} Playback is *${state}*`, channel);
         if (cb) cb(null, null);
+        return;
+      }
+      
+      // Playing - get track info and source
+      try {
+        const track = await sonos.currentTrack();
+        if (track) {
+          let message = `Currently playing: *${track.title}* by _${track.artist}_`;
+
+          // Add time information if available
+          if (track.duration && track.position) {
+            const remaining = track.duration - track.position;
+            const remainingMin = Math.floor(remaining / 60);
+            const remainingSec = Math.floor(remaining % 60);
+            const durationMin = Math.floor(track.duration / 60);
+            const durationSec = Math.floor(track.duration % 60);
+
+            message += `\n⏱️ ${remainingMin}:${remainingSec.toString().padStart(2, '0')} remaining (${durationMin}:${durationSec.toString().padStart(2, '0')} total)`;
+          }
+
+          // Check source
+          const sourceInfo = await _getCurrentSource();
+          if (sourceInfo) {
+            if (sourceInfo.type === 'queue') {
+              message += `\n📋 Source: *Queue* (position #${sourceInfo.queuePosition})`;
+            } else {
+              message += `\n⚠️ Source: *External* (not from queue - Spotify Connect/AirPlay/Line-in?)`;
+              message += `\n💡 Tip: Run \`flush\` and \`stop\`, then \`add <song>\` to use queue`;
+            }
+          }
+
+          if (voting.isTrackGongBanned(track.title)) {
+            message += '\n🔒 (Immune to GONG)';
+          }
+          _slackMessage(message, channel);
+          if (cb) cb(null, track);
+        } else {
+          _slackMessage('🔇 *Silence...* Nothing is currently playing. Use `add` to get started! 🎵', channel);
+          if (cb) cb(null, null);
+        }
+      } catch (trackErr) {
+        throw trackErr;
       }
     })
     .catch((err) => {
@@ -2927,7 +4874,7 @@ function _help(input, channel) {
   }
 }
 
-function _blacklist(input, channel, userName) {
+async function _blacklist(input, channel, userName) {
   _logUserAction(userName, 'blacklist');
   // Admin check now handled in processInput (platform-aware)
   if (!input || input.length < 2) {
@@ -2960,15 +4907,15 @@ function _blacklist(input, channel, userName) {
     _slackMessage(`User <@${targetUser}> has been added to the blacklist. They are now banned from using the bot. 🚫`, channel);
   }
 
-  saveBlacklist(blacklist);
+  await saveBlacklist(blacklist);
 }
 
-function _trackblacklist(input, channel, userName) {
+async function _trackblacklist(input, channel, userName) {
   _logUserAction(userName, 'trackblacklist');
   // Admin check now handled in processInput (platform-aware)
-  
+
   const trackBlacklist = loadTrackBlacklist();
-  
+
   if (!input || input.length < 2) {
     if (trackBlacklist.length === 0) {
       _slackMessage('The track blacklist is currently empty. All songs are allowed! 🎵', channel);
@@ -2978,22 +4925,22 @@ function _trackblacklist(input, channel, userName) {
     }
     return;
   }
-  
+
   const action = input[1].toLowerCase();
   const trackName = input.slice(2).join(' ').trim();
-  
+
   if (!trackName && (action === 'add' || action === 'remove')) {
     _slackMessage('🤔 Please specify a track or artist name! Example: `trackblacklist add Last Christmas`', channel);
     return;
   }
-  
+
   if (action === 'add') {
     if (trackBlacklist.some(t => t.toLowerCase() === trackName.toLowerCase())) {
       _slackMessage(`"${trackName}" is already on the blacklist! 🚫`, channel);
       return;
     }
     trackBlacklist.push(trackName);
-    saveTrackBlacklist(trackBlacklist);
+    await saveTrackBlacklist(trackBlacklist);
     _slackMessage(`✅ "${trackName}" has been added to the track blacklist! This track/artist can no longer be added. 🚫🎵`, channel);
   } else if (action === 'remove') {
     const index = trackBlacklist.findIndex(t => t.toLowerCase() === trackName.toLowerCase());
@@ -3002,7 +4949,7 @@ function _trackblacklist(input, channel, userName) {
       return;
     }
     trackBlacklist.splice(index, 1);
-    saveTrackBlacklist(trackBlacklist);
+    await saveTrackBlacklist(trackBlacklist);
     _slackMessage(`✅ "${trackName}" has been removed from the track blacklist! This track/artist can now be added again. 🎉`, channel);
   } else {
     _slackMessage('Invalid action! Use `trackblacklist add <name>` or `trackblacklist remove <name>` 📝', channel);
@@ -3321,8 +5268,8 @@ async function _tts(input, channel) {
     const audioBuffers = audioResults.map(result => Buffer.from(result.base64, 'base64'));
     const combinedBuffer = Buffer.concat(audioBuffers);
 
-    // Write the combined audio to file
-    fs.writeFileSync(ttsFilePath, combinedBuffer);
+    // Write the combined audio to file (async)
+    await fs.promises.writeFile(ttsFilePath, combinedBuffer);
     logger.info('TTS audio saved to: ' + ttsFilePath);
 
     // Get TTS file duration
@@ -3336,13 +5283,22 @@ async function _tts(input, channel) {
     const waitTime = Math.ceil(fileDuration * 1000) + 2000;
     logger.info('TTS duration: ' + fileDuration.toFixed(2) + 's, will wait ' + waitTime + 'ms before cleanup');
 
+    // Validate IP address for TTS (must be accessible from Sonos)
+    if (!ipAddress || ipAddress === '' || ipAddress === 'IP_HOST' || ipAddress === '127.0.0.1' || ipAddress === 'localhost') {
+      logger.error('❌ TTS failed: ipAddress is not configured or set to localhost/127.0.0.1. Sonos cannot access this address. Please set ipAddress in config.json to your server\'s network IP address (e.g., 192.168.1.100) or set HOST_IP environment variable.');
+      _slackMessage('🚨 TTS failed: Server IP address not configured. Sonos cannot access localhost. Please configure ipAddress in config.json with your server\'s network IP address. 🔧', channel);
+      return;
+    }
+
     // Get current track position
     const currentTrack = await sonos.currentTrack();
     const currentPosition = currentTrack ? currentTrack.queuePosition : 1;
     const ttsPosition = currentPosition + 1;
 
-    // Use HTTP server to serve the TTS file (with cache-busting timestamp)
-    const uri = `http://${ipAddress}:${webPort}/tts.mp3?t=${Date.now()}`;
+    // Use HTTPS if available, otherwise fall back to HTTP (with cache-busting timestamp)
+    const protocol = useHttps ? 'https' : 'http';
+    const port = useHttps ? (config.get('httpsPort') || 8443) : webPort;
+    const uri = `${protocol}://${ipAddress}:${port}/tts.mp3?t=${Date.now()}`;
     logger.info('Queuing TTS file from: ' + uri + ' at position ' + ttsPosition);
 
     // Queue TTS right after current track
@@ -3390,7 +5346,7 @@ function _moveTrackAdmin(input, channel, userName) {
   }
 
   sonos
-    .reorderTracksInQueue(from, 1, to, 0)
+    .reorderTracksInQueue(from + 1, 1, to + 1, 0)
     .then(() => {
       _slackMessage(`📍 Successfully moved track from position *${from}* to *${to}*! Queue reshuffled! 🔀`, channel);
     })

@@ -6,3 +6,16 @@ config/config.json
 config/userActions.json
 docker-compose.yml
 test/config/test-config.json
+
+# Test artifacts
+test/timing-log.json
+
+# Editor files
+*.swp
+*.swo
+*.swn
+.cursorrules
+
+# OS files
+.DS_Store
+Thumbs.db
