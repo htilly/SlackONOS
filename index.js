@@ -1768,7 +1768,13 @@ async function handleHttpRequest(req, res) {
 
 // Create HTTP server (always created, redirects to HTTPS if HTTPS is enabled)
 httpServer = http.createServer(async (req, res) => {
-  // If HTTPS is enabled, redirect all HTTP requests to HTTPS
+  // Always serve TTS over HTTP (Sonos doesn't trust self-signed certificates)
+  if (req.url && req.url.startsWith('/tts.mp3')) {
+    await handleHttpRequest(req, res);
+    return;
+  }
+
+  // If HTTPS is enabled, redirect all other HTTP requests to HTTPS
   if (useHttps && httpsServer) {
     const host = req.headers.host || `${ipAddress}:${webPort}`;
     const httpsPort = config.get('httpsPort') || 8443;
@@ -1779,7 +1785,7 @@ httpServer = http.createServer(async (req, res) => {
     res.end();
     return;
   }
-  
+
   // If HTTPS is not enabled, handle request normally
   await handleHttpRequest(req, res);
 });
