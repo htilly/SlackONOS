@@ -33,7 +33,6 @@ If telemetry is enabled, SlackONOS may send anonymous usage data:
 - ❌ User data, usernames, or chat messages
 - ❌ Slack/Discord server information
 - ❌ Song titles, playlists, or listening history
-- ❌ IP addresses or location data
 - ❌ Command usage or voting patterns
 
 **Telemetry Control:** You can disable telemetry at any time by setting `telemetryEnabled: false` in your configuration.
@@ -127,4 +126,7 @@ This Privacy Policy is designed to comply with:
 ---
 
 **Note:** Since SlackONOS is self-hosted, you are the data controller. This policy describes how the software handles data, but you are responsible for compliance with applicable laws in your jurisdiction.
+
+
+
 

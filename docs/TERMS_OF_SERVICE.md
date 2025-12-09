@@ -123,3 +123,6 @@ By using SlackONOS, you acknowledge that you have read, understood, and agree to
 
 **Note:** These Terms apply to the Software itself. Your use of integrated third-party services (Slack, Discord, Spotify, Sonos) is also subject to their respective terms of service.
 
+
+
+
