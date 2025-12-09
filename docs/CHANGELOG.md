@@ -6,6 +6,147 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [2.0.0] - 2024-12-09
+
+### 🚀 Performance (Major)
+- **75-90% faster command execution** - Parallelized all Sonos/Spotify API calls across commands
+  - `add` command: 75-90% faster (removed 1.5s delays, parallel API calls, non-blocking playback)
+  - `list` command: 50% faster (parallel state/queue/track fetching)
+  - `bestof` command: 90% faster (parallel track queueing)
+  - `addalbum`/`addplaylist`: 85% faster (parallel queueing with immediate user feedback)
+  - `getNowPlaying`: 40-50% faster (parallel API calls)
+- **Async file I/O** - Converted all synchronous file operations to async for better event loop utilization
+- **Non-blocking operations** - Users get immediate feedback while background operations complete
+
+### 🎨 Web Interface (Major)
+- **Complete Setup Wizard** - Zero-config onboarding at `/setup`
+  - Automatic Sonos device discovery with 15s timeout
+  - Slack/Discord bot validation
+  - Spotify credential verification
+  - Admin password setup
+  - Live configuration preview
+- **Admin Panel** - Full-featured management interface at `/admin`
+  - Real-time now-playing display with SSE updates
+  - Playback controls (play, pause, next, volume)
+  - Configuration management with live validation
+  - WebAuthn/FIDO2 security key management
+  - Credential caching to eliminate redundant API calls
+  - SSE reconnection with exponential backoff (max 10 attempts)
+
+### 🔐 Authentication (Major)
+- **WebAuthn/FIDO2 Passwordless Login** - Modern authentication with security keys
+  - Support for Touch ID, Face ID, Windows Hello
+  - Yubikey and hardware security key support
+  - User verification toggle for PIN vs touch-only modes
+  - Multi-credential support per user
+- **Password Authentication** - Traditional bcrypt-based login option
+- **Session Management** - Secure cookie-based sessions with configurable expiry
+
+### 🤖 AI Enhancements
+- **Multi-turn Conversation Support** - Context-aware conversations with the bot
+  - Remembers conversation history (configurable context limit)
+  - Follow-up questions and clarifications
+  - Seasonal awareness and personalized suggestions
+- **Improved AI Handler** - Better natural language understanding
+  - Enhanced reasoning and confidence scoring
+  - Better error handling and user feedback
+  - AI unparsed request logging for debugging
+- **Memory Management** - Automatic cleanup of old conversation contexts
+
+### 📊 Monitoring & Logging
+- **Enhanced Telemetry** - Improved PostHog integration
+  - Persistent instance ID for cross-restart tracking
+  - Heartbeat events every 24h
+  - Graceful shutdown tracking
+  - Platform and version metadata
+- **Better Logging** - Comprehensive Winston-based logging
+  - Structured log levels (debug, info, warn, error)
+  - Sensitive data redaction in all outputs
+  - AI handler logging and debugging tools
+
+### 📁 Project Organization (Major)
+- **Reorganized Repository** - Cleaner, more maintainable structure
+  - Moved 15 documentation files to `/docs` directory
+  - Moved 3 Docker files to `/docker` directory
+  - Merged old `/doc` folder into `/docs`
+  - Updated README.md with new documentation links
+  - Enhanced `.gitignore` (test artifacts, editor files, OS files)
+- **Updated GitHub Actions** - Docker build workflow uses new paths
+- **Modular Architecture** - Better separation of concerns
+  - `lib/auth-handler.js` - Authentication logic
+  - `lib/webauthn-handler.js` - WebAuthn implementation
+  - `lib/setup-handler.js` - Setup wizard backend
+  - `lib/sonos-discovery.js` - Device discovery utilities
+  - Validator modules for Slack, Discord, Spotify
+
+### 🧪 Testing Improvements
+- **Expanded Test Coverage** - 622+ tests across multiple suites
+  - Error handling tests (622 tests)
+  - Memory management tests (330 tests)
+  - Setup wizard tests (163 tests)
+  - Integration test suite enhancements
+- **Better Test Infrastructure** - Improved mocking and fixtures
+  - Spotify response recording for consistent tests
+  - Enhanced integration test validators
+  - Test configuration management
+
+### 🔧 Configuration
+- **Config Validation** - Comprehensive validation for all settings
+- **Safe Config Dumps** - All sensitive values properly redacted
+  - API keys, tokens, secrets masked in debug output
+  - Consistent redaction across all commands
+- **Config Merging** - New settings merge with existing config (preserves user data)
+
+### 🎵 Music Features
+- **Source Detection** - New `source` command shows playback source
+  - Identifies queue vs external source (Spotify Connect, AirPlay, etc.)
+  - Helps debug playback issues
+  - Smart suggestions for switching sources
+- **Improved Queue Display** - Better formatting and track information
+  - Shows currently playing track with metadata
+  - Time remaining and total duration
+  - Lock icons for immune tracks
+  - Source warnings when playing external content
+
+### 🐛 Bug Fixes
+- Fixed WebAuthn user verification issues with Yubikey
+- Fixed credential validation race conditions
+- Fixed SSE connection handling and reconnection
+- Fixed config value masking for sensitive data
+- Fixed file I/O blocking event loop
+- Fixed queue display position matching
+- Fixed admin panel real-time update bugs
+
+### 🔒 Security Enhancements
+- **Never expose sensitive values** - Comprehensive redaction
+  - API keys, tokens, secrets, passwords
+  - Hashes and instance IDs
+  - All debug/configdump commands sanitized
+- **Secure session management** - HttpOnly cookies with expiry
+- **Password hashing** - Bcrypt with proper salt rounds
+- **WebAuthn challenge verification** - Proper attestation and assertion validation
+
+### 📖 Documentation
+- **Slack Setup Guide** - Comprehensive Socket Mode configuration
+- **Discord Setup Guide** - Complete bot setup instructions
+- **Testing Guide** - How to run and write tests
+- **Telemetry Documentation** - Privacy and opt-out information
+- **Troubleshooting Guide** - Common issues and solutions
+- **App Directory Manifest** - Slack App Directory listing preparation
+- **Privacy Policy & Terms of Service** - Legal documentation
+
+### ⚠️ Breaking Changes
+- **Repository structure changed** - Documentation moved to `/docs`, Docker files to `/docker`
+- **Config format extended** - New optional fields for WebAuthn, setup wizard, AI context
+- **Node.js >= 18** recommended for optimal performance (native fetch support)
+
+### 🎯 Migration Guide
+1. Update documentation links if hardcoded (use `/docs/` prefix)
+2. Update Docker build paths if using custom workflows
+3. Optional: Configure WebAuthn for passwordless admin access
+4. Optional: Set `aiContextLimit` for conversation memory management
+5. Review new config options in `config/config.json.example`
+
 ## [1.7.1] - 2025-12-02
 
 ### Fixed
