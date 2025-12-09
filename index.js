@@ -296,8 +296,19 @@ const sonosIp = config.get('sonos');
 const webPort = config.get('webPort');
 let ipAddress = config.get('ipAddress');
 
+// Ensure ipAddress exists in config (set to empty string if missing)
+if (ipAddress === undefined || ipAddress === null) {
+  ipAddress = '';
+  config.set('ipAddress', '');
+  config.save((err) => {
+    if (err) {
+      logger.warn(`Failed to save ipAddress to config: ${err.message}`);
+    }
+  });
+}
+
 // Auto-detect IP address if not configured or set to placeholder
-if (!ipAddress || ipAddress === 'IP_HOST') {
+if (!ipAddress || ipAddress === 'IP_HOST' || ipAddress === '') {
   // First, check for HOST_IP environment variable (Docker best practice)
   if (process.env.HOST_IP) {
     ipAddress = process.env.HOST_IP;
@@ -316,13 +327,14 @@ if (!ipAddress || ipAddress === 'IP_HOST') {
           break;
         }
       }
-      if (ipAddress && ipAddress !== 'IP_HOST') break;
+      if (ipAddress && ipAddress !== 'IP_HOST' && ipAddress !== '') break;
     }
 
-    // Fallback if no suitable address found
+    // Don't set fallback to 127.0.0.1 - leave empty if not found
+    // This will cause TTS validation to fail with proper error message
     if (!ipAddress || ipAddress === 'IP_HOST') {
-      ipAddress = '127.0.0.1';
-      logger.warn('Could not auto-detect IP address. Set HOST_IP environment variable or configure ipAddress in config.json');
+      ipAddress = '';
+      logger.warn('⚠️  Could not auto-detect IP address. Configure ipAddress in config.json or set HOST_IP environment variable for TTS to work.');
     }
   }
 }
@@ -2076,7 +2088,8 @@ function getConfigForAdmin() {
     logLevel: config.get('logLevel') || 'info',
     soundcraftEnabled: config.get('soundcraftEnabled') || false,
     soundcraftIp: config.get('soundcraftIp') || '',
-    soundcraftChannels: config.get('soundcraftChannels') || []
+    soundcraftChannels: config.get('soundcraftChannels') || [],
+    webauthnRequireUserVerification: config.get('webauthnRequireUserVerification') === true
   };
 }
 
@@ -4736,13 +4749,22 @@ async function _tts(input, channel) {
     const waitTime = Math.ceil(fileDuration * 1000) + 2000;
     logger.info('TTS duration: ' + fileDuration.toFixed(2) + 's, will wait ' + waitTime + 'ms before cleanup');
 
+    // Validate IP address for TTS (must be accessible from Sonos)
+    if (!ipAddress || ipAddress === '' || ipAddress === 'IP_HOST' || ipAddress === '127.0.0.1' || ipAddress === 'localhost') {
+      logger.error('❌ TTS failed: ipAddress is not configured or set to localhost/127.0.0.1. Sonos cannot access this address. Please set ipAddress in config.json to your server\'s network IP address (e.g., 192.168.1.100) or set HOST_IP environment variable.');
+      _slackMessage('🚨 TTS failed: Server IP address not configured. Sonos cannot access localhost. Please configure ipAddress in config.json with your server\'s network IP address. 🔧', channel);
+      return;
+    }
+
     // Get current track position
     const currentTrack = await sonos.currentTrack();
     const currentPosition = currentTrack ? currentTrack.queuePosition : 1;
     const ttsPosition = currentPosition + 1;
 
-    // Use HTTP server to serve the TTS file (with cache-busting timestamp)
-    const uri = `http://${ipAddress}:${webPort}/tts.mp3?t=${Date.now()}`;
+    // Use HTTPS if available, otherwise fall back to HTTP (with cache-busting timestamp)
+    const protocol = useHttps ? 'https' : 'http';
+    const port = useHttps ? (config.get('httpsPort') || 8443) : webPort;
+    const uri = `${protocol}://${ipAddress}:${port}/tts.mp3?t=${Date.now()}`;
     logger.info('Queuing TTS file from: ' + uri + ' at position ' + ttsPosition);
 
     // Queue TTS right after current track

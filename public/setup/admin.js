@@ -812,11 +812,22 @@ async function setupWebAuthn() {
           statusDiv.style.color = '#4ade80';
           if (enableBtn) enableBtn.style.display = 'none';
           if (registerBtn) registerBtn.style.display = 'block';
+          
+          // Show settings section when enabled
+          const settingsDiv = document.getElementById('webauthn-settings');
+          if (settingsDiv) settingsDiv.style.display = 'block';
+          
+          // Load user verification setting
+          await loadWebAuthnUserVerificationSetting();
         } else {
           statusDiv.textContent = 'Disabled';
           statusDiv.style.color = '#f87171';
           if (enableBtn) enableBtn.style.display = 'block';
           if (registerBtn) registerBtn.style.display = 'none';
+          
+          // Hide settings section when disabled
+          const settingsDiv = document.getElementById('webauthn-settings');
+          if (settingsDiv) settingsDiv.style.display = 'none';
         }
       }
 
@@ -834,6 +845,62 @@ async function setupWebAuthn() {
       }
     }
   }
+
+  // Load WebAuthn user verification setting
+  async function loadWebAuthnUserVerificationSetting() {
+    try {
+      const response = await fetch(`${API_BASE}/config`);
+      if (response.status === 401) {
+        window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
+        return;
+      }
+      const config = await response.json();
+      const checkbox = document.getElementById('webauthn-require-user-verification');
+      if (checkbox && config.webauthnRequireUserVerification !== undefined) {
+        checkbox.checked = config.webauthnRequireUserVerification === true;
+      }
+    } catch (err) {
+      console.error('Error loading WebAuthn user verification setting:', err);
+    }
+  }
+
+  // Handle user verification setting change
+  const userVerificationCheckbox = document.getElementById('webauthn-require-user-verification');
+  userVerificationCheckbox?.addEventListener('change', async (e) => {
+    try {
+      const response = await fetch(`${API_BASE}/config/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          key: 'webauthnRequireUserVerification', 
+          value: e.target.checked 
+        })
+      });
+      
+      if (response.status === 401) {
+        window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
+        return;
+      }
+      
+      const data = await response.json();
+      if (data.success) {
+        showWebAuthnMessage(messageDiv, 
+          e.target.checked 
+            ? '✓ PIN requirement enabled. New security keys will require PIN entry.' 
+            : '✓ PIN requirement disabled. Security keys can authenticate without PIN.',
+          'success'
+        );
+      } else {
+        showWebAuthnMessage(messageDiv, data.error || 'Failed to update setting', 'error');
+        // Revert checkbox on error
+        e.target.checked = !e.target.checked;
+      }
+    } catch (err) {
+      showWebAuthnMessage(messageDiv, 'Error updating setting: ' + err.message, 'error');
+      // Revert checkbox on error
+      e.target.checked = !e.target.checked;
+    }
+  });
 
   // Load WebAuthn credentials
   async function loadWebAuthnCredentials() {

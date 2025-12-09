@@ -381,6 +381,33 @@
           <button class="btn btn-secondary" id="btn-enable-webauthn" style="display: none;">Enable WebAuthn</button>
         </div>
       </div>
+      
+      <!-- User Verification Setting -->
+      <div id="webauthn-settings" style="margin-bottom: 1rem; padding: 1rem; background: rgba(255, 255, 255, 0.03); border-radius: 8px; display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;">
+          <div style="flex: 1;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+              <input type="checkbox" id="webauthn-require-user-verification" style="width: 18px; height: 18px; cursor: pointer;">
+              <div>
+                <strong style="display: block; margin-bottom: 0.25rem;">Require PIN for Security Keys</strong>
+                <div style="font-size: 0.85rem; color: rgba(255,255,255,0.7); line-height: 1.4;">
+                  <strong>Default: Disabled</strong> (most compatible - works with Touch ID/Face ID, Yubikey, and other authenticators)
+                  <br><br>
+                  When enabled, user verification is required during registration and authentication:
+                  <ul style="margin: 0.5rem 0; padding-left: 1.5rem;">
+                    <li><strong>Hardware keys (Yubikey, etc.):</strong> Will require PIN entry</li>
+                    <li><strong>Platform authenticators (Touch ID/Face ID):</strong> Will require biometric verification (fingerprint/face scan)</li>
+                  </ul>
+                  Both PIN and biometrics count as user verification. This provides stronger security by ensuring the user is present and verified.
+                  <br><br>
+                  <strong>When to enable:</strong> If you want to enforce user verification for all authentication attempts, regardless of authenticator type.
+                </div>
+              </div>
+            </label>
+          </div>
+        </div>
+      </div>
+
       <div id="webauthn-credentials-list" style="margin-bottom: 1rem;">
         <!-- Credentials will be loaded here -->
       </div>
