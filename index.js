@@ -239,7 +239,16 @@ const logger = new WinstonWrapper({
   ],
 });
 
-// Override logger methods to broadcast to SSE clients
+// Helper function to check if a log level should be broadcast based on current logger level
+function shouldBroadcastLog(level) {
+  const currentLevel = logger.getLevel ? logger.getLevel() : 'info';
+  const levelPriority = { error: 0, warn: 1, info: 2, debug: 3 };
+  const currentPriority = levelPriority[currentLevel] !== undefined ? levelPriority[currentLevel] : 2; // Default to 'info'
+  const logPriority = levelPriority[level] !== undefined ? levelPriority[level] : 2;
+  return logPriority <= currentPriority;
+}
+
+// Override logger methods to broadcast to SSE clients (respecting log level)
 const originalDebug = logger.debug.bind(logger);
 const originalInfo = logger.info.bind(logger);
 const originalWarn = logger.warn.bind(logger);
@@ -247,42 +256,50 @@ const originalError = logger.error.bind(logger);
 
 logger.debug = function(msg) {
   originalDebug(msg);
-  const logEntry = {
-    timestamp: new Date().toISOString(),
-    level: 'debug',
-    message: msg
-  };
-  broadcastLog(logEntry);
+  if (shouldBroadcastLog('debug')) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'debug',
+      message: msg
+    };
+    broadcastLog(logEntry);
+  }
 };
 
 logger.info = function(msg) {
   originalInfo(msg);
-  const logEntry = {
-    timestamp: new Date().toISOString(),
-    level: 'info',
-    message: msg
-  };
-  broadcastLog(logEntry);
+  if (shouldBroadcastLog('info')) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'info',
+      message: msg
+    };
+    broadcastLog(logEntry);
+  }
 };
 
 logger.warn = function(msg) {
   originalWarn(msg);
-  const logEntry = {
-    timestamp: new Date().toISOString(),
-    level: 'warn',
-    message: msg
-  };
-  broadcastLog(logEntry);
+  if (shouldBroadcastLog('warn')) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'warn',
+      message: msg
+    };
+    broadcastLog(logEntry);
+  }
 };
 
 logger.error = function(msg) {
   originalError(msg);
-  const logEntry = {
-    timestamp: new Date().toISOString(),
-    level: 'error',
-    message: msg
-  };
-  broadcastLog(logEntry);
+  if (shouldBroadcastLog('error')) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'error',
+      message: msg
+    };
+    broadcastLog(logEntry);
+  }
 };
 
 // Log any file migrations that occurred during startup
@@ -441,7 +458,7 @@ const DiscordSystem = require('./discord');
 
 // Command router stub - will be properly defined after commandRegistry
 // This allows us to pass it to Slack/Discord initialization
-let routeCommand = async (text, channel, userName, platform = 'slack', isAdmin = false, isMention = false) => {
+let routeCommand = async (text, channel, userName, platform = 'slack', isAdmin = false, isMention = false, messageTs = null) => {
   // Temporary stub - will be replaced after commandRegistry is defined
   logger.warn('routeCommand called before initialization');
 };
@@ -464,6 +481,8 @@ let discord = null;
 let currentPlatform = 'slack';
 let currentChannel = null;
 let currentIsAdmin = false;
+// Map to store message timestamps for thread replies: channel -> ts
+const messageTimestamps = new Map();
 
 // Helper function wrapper for backward compatibility (Slack)
 async function _slackMessage(message, channel_id, options = {}) {
@@ -484,6 +503,18 @@ async function _slackMessage(message, channel_id, options = {}) {
   // Slack context normal path
   try {
     if (slack) {
+      // Check if we should use threads
+      const slackAlwaysThread = config.get('slackAlwaysThread') === true;
+      const shouldUseThread = options.forceThread || (slackAlwaysThread && messageTimestamps.has(targetChannel));
+      
+      if (shouldUseThread) {
+        const threadTs = options.thread_ts || messageTimestamps.get(targetChannel);
+        if (threadTs) {
+          options.thread_ts = threadTs;
+          logger.debug(`Using thread_ts ${threadTs} for channel ${targetChannel}`);
+        }
+      }
+      
       await slack.sendMessage(message, targetChannel, options);
     } else {
       logger.warn('Slack not initialized - cannot send message');
@@ -672,7 +703,9 @@ function ensureConfigDefaults() {
     // Soundcraft mixer integration
     soundcraftEnabled: false,
     soundcraftIp: '',
-    soundcraftChannels: []
+    soundcraftChannels: [],
+    // Slack settings
+    slackAlwaysThread: false
   };
   const applied = [];
   for (const [key, val] of Object.entries(defaults)) {
@@ -859,6 +892,45 @@ try {
       try {
         await slack.init();
         logger.info('✅ Slack connection established.');
+
+        // Set up reaction handler for Slack
+        slack.setReactionHandler(async (action, trackName, channelId, userName, platform) => {
+          logger.info(`[SLACK] Reaction ${action} from ${userName} for track: ${trackName}`);
+
+          // Set platform context
+          currentPlatform = platform;
+          currentChannel = channelId;
+
+          // For reactions, we vote/gong the track that was just added (most recent in queue)
+          // This is more intuitive than requiring a queue position number
+
+          if (action === 'vote') {
+            // Reaction vote is for making the track play sooner
+            // We'll get the queue and find the track by name, then call voting.vote with its position
+            try {
+              const queue = await sonos.getQueue();
+              if (queue && queue.items) {
+                // Find the track by name (case-insensitive, partial match)
+                const trackIndex = queue.items.findIndex(item =>
+                  item.title.toLowerCase().includes(trackName.toLowerCase())
+                );
+
+                if (trackIndex >= 0) {
+                  // voting.vote expects track number from item.id (e.g., "Q:0/123" -> 123)
+                  // But we need to convert from array index to Sonos queue position
+                  const item = queue.items[trackIndex];
+                  const queueTrack = parseInt(item.id.split('/')[1]) - 1; // Convert to 0-based
+                  await voting.vote(['vote', queueTrack.toString()], channelId, userName);
+                } else {
+                  logger.warn(`Track "${trackName}" not found in queue for reaction vote`);
+                }
+              }
+            } catch (err) {
+              logger.error(`Error processing vote reaction: ${err.message}`);
+            }
+          }
+          // Note: Gong reactions removed - gong only works via command on currently playing track
+        });
       } catch (slackErr) {
         logger.error(`Failed to connect to Slack API: ${slackErr.message}`);
         if (!hasDiscord) {
@@ -895,7 +967,7 @@ try {
 
             if (action === 'vote') {
               // Reaction vote is for making the track play sooner
-              // We'll get the queue and find the track by name, then call _vote with its position
+              // We'll get the queue and find the track by name, then call voting.vote with its position
               try {
                 const queue = await sonos.getQueue();
                 if (queue && queue.items) {
@@ -905,8 +977,11 @@ try {
                   );
 
                   if (trackIndex >= 0) {
-                    // Convert to queue position (0-based index matches Sonos internal)
-                    await _vote(['vote', trackIndex.toString()], channelId, userName);
+                    // voting.vote expects track number from item.id (e.g., "Q:0/123" -> 123)
+                    // But we need to convert from array index to Sonos queue position
+                    const item = queue.items[trackIndex];
+                    const queueTrack = parseInt(item.id.split('/')[1]) - 1; // Convert to 0-based
+                    await voting.vote(['vote', queueTrack.toString()], channelId, userName);
                   } else {
                     logger.warn(`Track "${trackName}" not found in queue for reaction vote`);
                   }
@@ -914,10 +989,8 @@ try {
               } catch (err) {
                 logger.error(`Error processing vote reaction: ${err.message}`);
               }
-            } else if (action === 'gong') {
-              // Gong always targets the currently playing track
-              await _gong(channelId, userName);
             }
+            // Note: Gong reactions removed - gong only works via command on currently playing track
           });
         } else {
           logger.warn('Discord returned null (token maybe invalid). Running Slack-only.');
@@ -1064,11 +1137,24 @@ async function generateSelfSignedCert(certPath, keyPath) {
     }
 
     // Get hostname/IP for certificate
-    const hostname = ipAddress || 'localhost';
+    // Ensure hostname is always a valid string (not empty or undefined)
+    // Defensive check: handle undefined, null, empty string, or invalid values
+    let hostname = 'localhost'; // Default fallback
+    if (ipAddress && typeof ipAddress === 'string') {
+      const trimmed = ipAddress.trim();
+      if (trimmed !== '' && trimmed !== 'IP_HOST') {
+        hostname = trimmed;
+      }
+    }
+    
+    // Final safety check - ensure hostname is never undefined or empty
+    if (!hostname || typeof hostname !== 'string' || hostname.trim() === '') {
+      hostname = 'localhost';
+    }
 
     // Generate certificate valid for 1 year
     const attrs = [{ name: 'commonName', value: hostname }];
-    const pems = selfsigned.generate(attrs, {
+    const pems = await selfsigned.generate(attrs, {
       days: 365,
       keySize: 2048,
       algorithm: 'sha256',
@@ -1092,10 +1178,11 @@ async function generateSelfSignedCert(certPath, keyPath) {
               type: 2, // DNS
               value: hostname,
             },
-            {
+            // Only add IP altName if hostname is a valid IP address
+            ...(hostname !== 'localhost' && /^\d+\.\d+\.\d+\.\d+$/.test(hostname) ? [{
               type: 7, // IP
               ip: hostname,
-            },
+            }] : []),
             {
               type: 2, // DNS
               value: 'localhost',
@@ -1137,36 +1224,57 @@ let finalCertPath = sslCertPath || defaultCertPath;
 let finalKeyPath = sslKeyPath || defaultKeyPath;
 
 // Check if certificates exist, or if we should auto-generate
+// Note: This runs at top-level, so we use .then() instead of await
+// We'll start HTTPS server after certificate is generated
 if (sslAutoGenerate && (!fs.existsSync(finalCertPath) || !fs.existsSync(finalKeyPath))) {
-  try {
   if (typeof logger !== 'undefined') {
-      logger.info('🔒 Auto-generating self-signed SSL certificate...');
-    } else {
-      console.log('🔒 Auto-generating self-signed SSL certificate...');
-    }
-    
-    const generated = generateSelfSignedCert(finalCertPath, finalKeyPath);
-    sslOptions = {
-      cert: generated.cert,
-      key: generated.key
-    };
-    useHttps = true;
-    
-    if (typeof logger !== 'undefined') {
-      logger.info(`✅ SSL certificate generated: ${finalCertPath}`);
-      logger.info(`   ⚠️  This is a self-signed certificate. Browsers will show a security warning.`);
-      logger.info(`   For production, use a certificate from a trusted CA (Let's Encrypt, etc.)`);
-    } else {
-      console.log(`✅ SSL certificate generated: ${finalCertPath}`);
-      console.log(`   ⚠️  This is a self-signed certificate. Browsers will show a security warning.`);
-    }
-  } catch (err) {
-    if (typeof logger !== 'undefined') {
-      logger.error(`Failed to auto-generate SSL certificate: ${err.message}. Falling back to HTTP.`);
-    } else {
-      console.error(`Failed to auto-generate SSL certificate: ${err.message}. Falling back to HTTP.`);
-    }
+    logger.info('🔒 Auto-generating self-signed SSL certificate...');
+  } else {
+    console.log('🔒 Auto-generating self-signed SSL certificate...');
   }
+  
+  generateSelfSignedCert(finalCertPath, finalKeyPath)
+    .then((generated) => {
+      sslOptions = {
+        cert: generated.cert,
+        key: generated.key
+      };
+      useHttps = true;
+      
+      if (typeof logger !== 'undefined') {
+        logger.info(`✅ SSL certificate generated: ${finalCertPath}`);
+        logger.info(`   ⚠️  This is a self-signed certificate. Browsers will show a security warning.`);
+        logger.info(`   For production, use a certificate from a trusted CA (Let's Encrypt, etc.)`);
+      } else {
+        console.log(`✅ SSL certificate generated: ${finalCertPath}`);
+        console.log(`   ⚠️  This is a self-signed certificate. Browsers will show a security warning.`);
+      }
+      
+      // Create and start HTTPS server after certificate is generated
+      if (useHttps && sslOptions && !httpsServer) {
+        httpsServer = https.createServer(sslOptions, async (req, res) => {
+          await handleHttpRequest(req, res);
+        });
+        
+        const httpsPort = config.get('httpsPort') || 8443;
+        httpsServer.listen(httpsPort, () => {
+          if (typeof logger !== 'undefined') {
+            logger.info(`🔒 HTTPS server listening on port ${httpsPort}`);
+            if (ttsEnabled) {
+              logger.info(`   TTS endpoint: https://${ipAddress || 'localhost'}:${httpsPort}/tts.mp3`);
+            }
+            logger.info(`   Setup wizard: https://${ipAddress || 'localhost'}:${httpsPort}/setup`);
+          }
+        });
+      }
+    })
+    .catch((err) => {
+      if (typeof logger !== 'undefined') {
+        logger.error(`Failed to auto-generate SSL certificate: ${err.message}. Falling back to HTTP.`);
+      } else {
+        console.error(`Failed to auto-generate SSL certificate: ${err.message}. Falling back to HTTP.`);
+      }
+    });
 } else if (finalCertPath && finalKeyPath) {
   // Try to load existing certificates
   try {
@@ -1408,12 +1516,21 @@ async function handleHttpRequest(req, res) {
       try {
         const webauthnHandler = require('./lib/webauthn-handler');
         const enabled = webauthnHandler.isWebAuthnEnabled();
+        // Check if credentials file exists and has credentials
+        // If file doesn't exist or has no credentials, fall back to password login
         const hasCreds = enabled ? await webauthnHandler.hasCredentials() : false;
+        // Get file info for debugging
+        const fileInfo = await webauthnHandler.getCredentialsFileInfo();
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ enabled, hasCredentials: hasCreds }));
+        res.end(JSON.stringify({ 
+          enabled, 
+          hasCredentials: hasCreds,
+          credentialsFile: fileInfo
+        }));
       } catch (err) {
+        // On any error, allow password login fallback
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ enabled: false, hasCredentials: false }));
+        res.end(JSON.stringify({ enabled: false, hasCredentials: false, error: err.message }));
       }
       return;
     }
@@ -1790,8 +1907,9 @@ httpServer = http.createServer(async (req, res) => {
   await handleHttpRequest(req, res);
 });
 
-// Create HTTPS server if SSL is configured
-if (useHttps && sslOptions) {
+// Create HTTPS server if SSL is configured (synchronously if certs already exist)
+// If certs are being generated, HTTPS server will be created in the .then() callback above
+if (useHttps && sslOptions && !httpsServer) {
   httpsServer = https.createServer(sslOptions, async (req, res) => {
     await handleHttpRequest(req, res);
   });
@@ -1885,13 +2003,42 @@ async function handleAdminAPI(req, res, url) {
       res.end(JSON.stringify(configData));
       return;
     }
+
+    // Get config values for specific keys (used by WebAuthn settings)
+    if (urlPath === '/api/admin/config-values' && req.method === 'GET') {
+      try {
+        // Get WebAuthn settings directly from config
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+          exists: true, 
+          values: {
+            webauthnRequireUserVerification: config.get('webauthnRequireUserVerification') === true,
+            webauthnPreferPlatformOnly: config.get('webauthnPreferPlatformOnly') === true,
+            webauthnTimeout: parseInt(config.get('webauthnTimeout') || '60', 10),
+            webauthnResidentKey: config.get('webauthnResidentKey') || 'discouraged',
+            webauthnChallengeExpiration: parseInt(config.get('webauthnChallengeExpiration') || '60', 10),
+            webauthnMaxCredentials: parseInt(config.get('webauthnMaxCredentials') || '0', 10)
+          }
+        }));
+      } catch (err) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ exists: false, values: null }));
+      }
+      return;
+    }
     
     // Update config value
     if (urlPath === '/api/admin/config/update') {
-      const data = JSON.parse(body);
-      const result = await updateConfigValue(data.key, data.value);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(result));
+      try {
+        const data = JSON.parse(body);
+        const result = await updateConfigValue(data.key, data.value);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        logger.error('Error updating config:', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message || 'Failed to update config' }));
+      }
       return;
     }
     
@@ -2152,7 +2299,13 @@ function getConfigForAdmin() {
     soundcraftEnabled: config.get('soundcraftEnabled') || false,
     soundcraftIp: config.get('soundcraftIp') || '',
     soundcraftChannels: config.get('soundcraftChannels') || [],
+    slackAlwaysThread: config.get('slackAlwaysThread') === true, // Default: false
     webauthnRequireUserVerification: config.get('webauthnRequireUserVerification') === true, // Default: false for maximum compatibility
+    webauthnPreferPlatformOnly: config.get('webauthnPreferPlatformOnly') === true, // Default: false to allow both platform and cross-platform
+    webauthnTimeout: parseInt(config.get('webauthnTimeout') || '60', 10), // Default: 60 seconds
+    webauthnResidentKey: config.get('webauthnResidentKey') || 'discouraged', // Default: 'discouraged'
+    webauthnChallengeExpiration: parseInt(config.get('webauthnChallengeExpiration') || '60', 10), // Default: 60 seconds
+    webauthnMaxCredentials: parseInt(config.get('webauthnMaxCredentials') || '0', 10), // Default: 0 (unlimited)
     // Don't expose sensitive values
     telemetryInstanceId: telemetryInstanceId ? maskSensitive(telemetryInstanceId) : '',
     adminPasswordHash: adminPasswordHash ? '[REDACTED]' : ''
@@ -2359,11 +2512,26 @@ async function updateConfigValue(key, value) {
       'voteTimeLimitMinutes', 'ttsEnabled', 'logLevel', 'ipAddress',
       'webPort', 'httpsPort', 'sonos', 'defaultTheme', 'themePercentage',
       'openaiApiKey', 'aiModel', 'soundcraftEnabled', 'soundcraftIp', 'soundcraftChannels',
-      'webauthnEnabled', 'webauthnRpName', 'webauthnRpId', 'webauthnOrigin', 'webauthnRequireUserVerification'
+      'webauthnEnabled', 'webauthnRpName', 'webauthnRpId', 'webauthnOrigin', 'webauthnRequireUserVerification', 'webauthnPreferPlatformOnly',
+      'webauthnTimeout', 'webauthnResidentKey', 'webauthnChallengeExpiration', 'webauthnMaxCredentials'
     ];
     
     if (!allowedKeys.includes(key)) {
       return { success: false, error: 'Key not allowed to be updated via admin' };
+    }
+    
+    // Special handling for logLevel - update logger immediately
+    if (key === 'logLevel') {
+      const validLevels = ['error', 'warn', 'info', 'debug'];
+      if (!validLevels.includes(value)) {
+        return { success: false, error: `Invalid log level. Must be one of: ${validLevels.join(', ')}` };
+      }
+      // Update logger level immediately
+      if (logger && typeof logger.setLevel === 'function') {
+        logger.setLevel(value);
+        // Use warn instead of info to ensure it's always shown regardless of level
+        logger.warn(`Log level changed to: ${value}`);
+      }
     }
     
     // Update in memory
@@ -2663,23 +2831,45 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
     
     // Check if user is confirming a previous suggestion BEFORE parsing
     const ctx = AIHandler.getUserContext(userName);
-    if (ctx && ctx.suggestedAction) {
-      // Check if this looks like a confirmation
-      const confirmationPattern = /\b(ok|yes|do it|sure|yeah|yep|please|go ahead|play it|gör det|ja|kör|varsågod|snälla|spela)\b/i;
-      if (confirmationPattern.test(cleanText)) {
-        logger.info(`User "${userName}" confirmed suggested action: ${ctx.suggestedAction.command} ${ctx.suggestedAction.args.join(' ')}`);
+    if (ctx) {
+      // Check if this looks like a confirmation (more lenient pattern for short affirmatives)
+      const confirmationPattern = /\b(ok|yes|do it|sure|yeah|yep|please|go ahead|play it|gör det|ja|kör|varsågod|snälla|spela|absolutely|definitely|sounds good|let's do it|let's go)\b/i;
+      // Also match if the entire message is just a short affirmative (1-3 words)
+      const isShortAffirmative = /^[\s\w!.,?-]{1,30}$/i.test(cleanText) && confirmationPattern.test(cleanText);
+      
+      if (isShortAffirmative || confirmationPattern.test(cleanText)) {
+        // Prefer suggestedAction if available (preserves args structure)
+        if (ctx.suggestedAction) {
+          logger.info(`User "${userName}" confirmed suggested action: ${ctx.suggestedAction.command} ${ctx.suggestedAction.args.join(' ')}`);
+          
+          parsed = {
+            command: ctx.suggestedAction.command,
+            args: ctx.suggestedAction.args,
+            confidence: 0.95,
+            reasoning: 'User confirmed previous suggestion',
+            summary: 'You got it! Playing those tunes now! 🎵'
+          };
+        } else if (ctx.lastSuggestion) {
+          // Fallback: parse from lastSuggestion string if suggestedAction not available
+          logger.info(`User "${userName}" confirmed last suggestion: ${ctx.lastSuggestion}`);
+          
+          const parts = ctx.lastSuggestion.trim().split(/\s+/);
+          const cmd = parts[0] || 'add';
+          const args = parts.slice(1);
+          
+          parsed = {
+            command: cmd,
+            args: args,
+            confidence: 0.95,
+            reasoning: 'User confirmed previous suggestion',
+            summary: 'You got it! Playing those tunes now! 🎵'
+          };
+        }
         
-        // Use the stored suggestedAction directly to preserve args structure
-        parsed = {
-          command: ctx.suggestedAction.command,
-          args: ctx.suggestedAction.args,
-          confidence: 0.95,
-          reasoning: 'User confirmed previous suggestion',
-          summary: 'You got it! Playing those tunes now! 🎵'
-        };
-        
-        // Clear context since we're executing it
-        AIHandler.clearUserContext(userName);
+        if (parsed) {
+          // Clear context since we're executing it
+          AIHandler.clearUserContext(userName);
+        }
       }
     }
     
@@ -2807,6 +2997,26 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
           }
           
           _slackMessage(msg, channel);
+          
+          // Check for region errors (UPnP error 800) and notify admin channel
+          const regionErrors = result.skipped?.filter(t => t.errorCode === '800') || [];
+          if (regionErrors.length > 0 && global.adminChannel) {
+            const currentMarket = config.get('market') || 'US';
+            const marketOptions = ['US', 'SE', 'GB', 'DE', 'FR', 'CA', 'AU', 'JP', 'NO', 'DK', 'FI'];
+            const marketOptionsList = marketOptions.map(m => m === currentMarket ? `*${m}* (current)` : m).join(', ');
+            
+            _slackMessage(
+              `⚠️ *Spotify Region Warning*\n` +
+              `${regionErrors.length} track(s) failed due to region availability:\n` +
+              `${regionErrors.slice(0, 3).map(t => `• *${t.name}* by ${t.artist}`).join('\n')}${regionErrors.length > 3 ? `\n... and ${regionErrors.length - 3} more` : ''}\n\n` +
+              `Please verify your Spotify region configuration.\n` +
+              `Current region: *${currentMarket}*\n` +
+              `Available options: ${marketOptionsList}\n` +
+              `Update via setup wizard or admin panel.`,
+              global.adminChannel
+            );
+          }
+          
           return;
         } catch (e) {
           logger.error('Multi-add failed: ' + e.message);
@@ -2874,6 +3084,25 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
               return;
             }
 
+            // Check for region errors (UPnP error 800) and notify admin channel
+            const regionErrors = result.skipped?.filter(t => t.errorCode === '800') || [];
+            if (regionErrors.length > 0 && global.adminChannel) {
+              const currentMarket = config.get('market') || 'US';
+              const marketOptions = ['US', 'SE', 'GB', 'DE', 'FR', 'CA', 'AU', 'JP', 'NO', 'DK', 'FI'];
+              const marketOptionsList = marketOptions.map(m => m === currentMarket ? `*${m}* (current)` : m).join(', ');
+              
+              _slackMessage(
+                `⚠️ *Spotify Region Warning*\n` +
+                `${regionErrors.length} track(s) failed due to region availability:\n` +
+                `${regionErrors.slice(0, 3).map(t => `• *${t.name}* by ${t.artist}`).join('\n')}${regionErrors.length > 3 ? `\n... and ${regionErrors.length - 3} more` : ''}\n\n` +
+                `Please verify your Spotify region configuration.\n` +
+                `Current region: *${currentMarket}*\n` +
+                `Available options: ${marketOptionsList}\n` +
+                `Update via setup wizard or admin panel.`,
+                global.adminChannel
+              );
+            }
+
             // Build informative message
             let msg = `🎵 Added ${result.added} tracks`;
             if (result.themeCount > 0) {
@@ -2920,8 +3149,14 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
  * Routes @mentions and natural language to AI, commands directly to processInput
  * Replaces the stub defined earlier
  */
-routeCommand = async function (text, channel, userName, platform = 'slack', isAdmin = false, isMention = false) {
+routeCommand = async function (text, channel, userName, platform = 'slack', isAdmin = false, isMention = false, messageTs = null) {
   logger.info(`>>> routeCommand: text="${text}", isMention=${isMention}`);
+  
+  // Store message timestamp for thread replies (if provided)
+  if (messageTs && platform === 'slack') {
+    messageTimestamps.set(channel, messageTs);
+    logger.debug(`Stored message timestamp ${messageTs} for channel ${channel}`);
+  }
 
   // Clean up copy-pasted text from Slack formatting FIRST
   // Trim whitespace first
@@ -3352,16 +3587,20 @@ async function _showQueue(channel) {
       }
     });
     
+    // Check if we should use threads (always thread if >20 tracks)
+    const shouldUseThread = result.total > 20;
+    const threadOptions = shouldUseThread ? { forceThread: true } : {};
+    
     for (var i in tracks) {
       message += tracks[i] + '\n';
       if (i > 0 && Math.floor(i % 100) === 0) {
-        _slackMessage(message, channel);
+        _slackMessage(message, channel, threadOptions);
         message = '';
       }
     }
     
     if (message) {
-      _slackMessage(message, channel);
+      _slackMessage(message, channel, threadOptions);
     }
   } catch (err) {
     logger.error('Error fetching queue: ' + err);
@@ -3965,6 +4204,23 @@ async function _add(input, channel, userName) {
 
       if (errorCode === '800') {
         _slackMessage('🤷 Track not available in your region. Try searching for different songs! 🎵', channel);
+        
+        // Also notify admin channel about region configuration
+        if (global.adminChannel && channel !== global.adminChannel) {
+          const currentMarket = config.get('market') || 'US';
+          const marketOptions = ['US', 'SE', 'GB', 'DE', 'FR', 'CA', 'AU', 'JP', 'NO', 'DK', 'FI'];
+          const marketOptionsList = marketOptions.map(m => m === currentMarket ? `*${m}* (current)` : m).join(', ');
+          
+          _slackMessage(
+            `⚠️ *Spotify Region Warning*\n` +
+            `Track "*${firstCandidate.name}*" by ${firstCandidate.artist} failed due to region availability.\n\n` +
+            `Please verify your Spotify region configuration.\n` +
+            `Current region: *${currentMarket}*\n` +
+            `Available options: ${marketOptionsList}\n` +
+            `Update via setup wizard or admin panel.`,
+            global.adminChannel
+          );
+        }
       } else {
         _slackMessage('🤷 Couldn\'t add the track. It may not be available or there was an error. Try a different search! 🎵', channel);
       }
@@ -4079,6 +4335,7 @@ async function _addalbum(input, channel, userName) {
 
     if (result.coverUrl) {
       _slackMessage(text, channel, {
+        trackName: result.name, // Track album name for reactions
         blocks: [
           {
             type: "section",
@@ -4095,7 +4352,7 @@ async function _addalbum(input, channel, userName) {
         ]
       });
     } else {
-      _slackMessage(text, channel);
+      _slackMessage(text, channel, { trackName: result.name }); // Track album name for reactions
     }
 
     // Queue tracks in background (don't block user response)
@@ -4308,7 +4565,7 @@ async function _addplaylist(input, channel, userName) {
     text += warningMessage;
 
     logger.info(`Sending playlist confirmation message: ${text}`);
-    _slackMessage(text, channel);
+    _slackMessage(text, channel, { trackName: result.name }); // Track playlist name for reactions
 
     // Queue tracks in background (don't block user response)
     (async () => {
@@ -4984,6 +5241,7 @@ function _setconfig(input, channel, userName) {
 > \`telemetryEnabled\`: ${config.get('telemetryEnabled')}
 > \`soundcraftEnabled\`: ${config.get('soundcraftEnabled') || false}
 > \`soundcraftIp\`: ${config.get('soundcraftIp') || '(not set)'}
+> \`slackAlwaysThread\`: ${config.get('slackAlwaysThread') || false}
 
 *Usage:* \`setconfig <key> <value>\`
 *Example:* \`setconfig gongLimit 5\`
@@ -4992,6 +5250,7 @@ function _setconfig(input, channel, userName) {
 *Example:* \`setconfig telemetryEnabled false\`
 *Example:* \`setconfig soundcraftEnabled true\`
 *Example:* \`setconfig soundcraftIp 192.168.1.100\`
+*Example:* \`setconfig slackAlwaysThread true\`
     `;
     _slackMessage(currentConfig.trim(), channel);
     return;
@@ -5015,7 +5274,8 @@ function _setconfig(input, channel, userName) {
     defaultTheme: { type: 'string', minLen: 0, maxLen: 100 },
     telemetryEnabled: { type: 'boolean' },
     soundcraftEnabled: { type: 'boolean' },
-    soundcraftIp: { type: 'string', minLen: 0, maxLen: 50 }
+    soundcraftIp: { type: 'string', minLen: 0, maxLen: 50 },
+    slackAlwaysThread: { type: 'boolean' }
   };
 
   if (!allowedConfigs[key]) {

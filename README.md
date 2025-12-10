@@ -23,10 +23,37 @@ A democratic music bot for Discord and Slack that lets teams control Sonos speak
 - 🎯 **Role-Based Permissions** - Admin controls for flush, volume, and queue management
 - 🚫 **Gong Ban System** - Tracks voted down become immune to re-queuing
 - 🎛️ **Soundcraft Ui24R Support** - Control mixer volume on multiple buses directly from chat (NEW!)
+- 🔐 **WebAuthn/FIDO2 Security** - Passwordless login with Yubikey, Touch ID, or Face ID (NEW!)
+- 🎨 **Modern Web Interface** - Beautiful setup wizard and admin panel with real-time updates (NEW!)
 
-*Screenshot*
+## Screenshots
 
-![ScreenShot](http://raw.github.com/htilly/zenmusic/master/doc/images/Screenshot.png)
+![Setup Wizard - Welcome](docs/images/Screenshot%201.png)
+
+*Live music playback control and queue management*
+
+![Setup Wizard - Platform Selection](docs/images/Screenshot%202.png)
+
+*Live music playback control and queue management*
+
+![Setup Wizard - Configuration](docs/images/Screenshot%203.png)
+
+*Admin settings in the dedicated admin-channel*
+
+![Admin Panel - Overview](docs/images/Screenshot%204.png)
+
+*Discord and Slack integration*
+
+![Admin Panel - Security Settings](docs/images/Screenshot%205.png)
+
+*Configure your integrations with auto-validation*
+
+![Admin Panel - Now Playing](docs/images/Screenshot%206.png)
+
+*Secure login with WebAuthn/FIDO2 support*
+
+![Login Page](docs/images/Screenshot%207.png)
+
 
 ## License & Commercial Use
 
@@ -85,11 +112,20 @@ Use the `telemetry` admin command in Slack (admin channel) to view current statu
 1. Start SlackONOS: `npm install && node index.js`
 2. Open your browser: `http://localhost:8181/setup` (or `http://YOUR_SERVER_IP:8181/setup`)
 3. Follow the interactive wizard to configure:
-   - Slack tokens (auto-validated)
-   - Sonos device (auto-discovered)
-   - Spotify credentials (auto-validated)
-   - Discord (optional)
+   - **Platform Selection** - Choose Slack, Discord, or both
+   - **Slack Configuration** - Tokens with auto-validation
+   - **Discord Configuration** - Bot token and channel setup
+   - **Sonos Device** - Auto-discovery or manual IP configuration
+   - **Spotify Integration** - Credentials with region selection
+   - **Admin Password** - Set your admin password for web access
 4. Save and restart - you're done!
+
+**Features:**
+- ✅ Real-time validation of all tokens and credentials
+- ✅ Auto-discovery of Sonos devices on your network
+- ✅ Beautiful, modern UI with Slack-inspired design
+- ✅ Pre-fills existing configuration values to prevent accidental changes
+- ✅ Comprehensive error messages and helpful tooltips
 
 **What You Need:**
 1. A Sonos speaker configured with Spotify
@@ -351,6 +387,42 @@ This ensures your venue's vibe is always maintained, even during themed requests
 
 ---
 
+### 🔐 WebAuthn/FIDO2 Security (NEW!)
+
+**Passwordless authentication with hardware security keys!**
+
+SlackONOS now supports WebAuthn/FIDO2 for secure, passwordless login to the admin panel. Use your Yubikey, Touch ID, or Face ID to log in securely.
+
+**Features:**
+- 🔑 **Hardware Security Keys** - Support for Yubikey and other FIDO2 keys
+- 👆 **Biometric Authentication** - Touch ID (macOS) and Face ID (iOS) support
+- 🎛️ **Flexible Configuration** - Choose between platform-only (Touch ID) or cross-platform (Yubikey) authenticators
+- ⚙️ **Advanced Settings** - Configure timeout, challenge expiration, resident keys, and more
+- 🔒 **Secure by Default** - Password fallback available if no credentials are registered
+
+**Setup:**
+1. Log in to the admin panel with your password
+2. Navigate to the **Security** section
+3. Click **Register New Security Key**
+4. Follow the browser prompts to register your key
+5. Next time you log in, use **"Login with Yubikey!"** button
+
+**Configuration Options:**
+- **Require User Verification** - Enable PIN for Yubikey or biometric for Touch ID/Face ID
+- **Prefer Platform Only** - Restrict to Touch ID/Face ID only (reduces QR code prompts on macOS/iOS)
+- **Timeout** - Registration/authentication timeout (10-300 seconds)
+- **Challenge Expiration** - How long challenges remain valid (30-300 seconds)
+- **Resident Key Preference** - Control passkey support (discouraged/preferred/required)
+- **Max Credentials** - Limit number of registered keys per user
+
+**Admin Panel Security:**
+- Collapsible Security section with all authentication settings
+- Change password functionality integrated into Security section
+- Real-time credential management (view, register, delete keys)
+- Secure credential storage in `webauthn-credentials.json`
+
+---
+
 ### Democratic Music Control
 
 **Community Queue Management:**
@@ -398,7 +470,31 @@ The bot queues song requests and plays them in order. If enough people dislike t
 * `setconfig` - View/change runtime settings (gongLimit, voteLimit, defaultTheme, etc.)
 * `configdump` - Show all current configuration values including AI theme context
 * `aiunparsed [N]` - Show last N unparsed AI commands (default: 10)
-    
+
+### 🌐 Web Admin Panel
+
+**Modern web interface for managing your bot!**
+
+Access the admin panel at `http://localhost:8181/admin` (or `https://YOUR_SERVER:8443/admin` with HTTPS).
+
+**Features:**
+- 📊 **Real-Time Status** - Live monitoring of bot status, Sonos connection, and platform integrations
+- 🎵 **Now Playing** - Current track information with playback controls (play, pause, stop)
+- 📋 **Queue Management** - View upcoming tracks and manage the queue
+- ⚙️ **Configuration** - Collapsible section for viewing and editing runtime settings
+- 🔐 **Security** - Collapsible section with:
+  - Password change functionality
+  - WebAuthn/FIDO2 key registration and management
+  - Security settings configuration
+- 📜 **Console Logs** - Real-time log streaming with filtering and search
+- 🔄 **Auto-Refresh** - Server-Sent Events (SSE) for real-time updates without polling
+
+**Authentication:**
+- Password-based login (default)
+- WebAuthn/FIDO2 passwordless login (optional, requires registration)
+- Secure session management
+- Auto-redirect to login on session expiration
+
 ---
 
 ## Use Cases

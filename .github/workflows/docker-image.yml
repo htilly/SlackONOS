@@ -20,6 +20,11 @@ on:
         description: 'Docker tag (e.g., v1.5.0 or latest)'
         required: true
         default: 'manual'
+      include_latest:
+        description: 'Also tag as latest'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   test:
@@ -78,15 +83,24 @@ jobs:
           echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:latest,${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${VERSION},${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${SEMVER}" >> $GITHUB_OUTPUT
           echo "is_release=true" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "github_ref=refs/tags/${VERSION}" >> $GITHUB_OUTPUT
         elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
           # Manual trigger
           TAG="${{ github.event.inputs.tag }}"
-          echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${TAG},${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${TAG}-${SHORT_SHA}" >> $GITHUB_OUTPUT
-          echo "is_release=false" >> $GITHUB_OUTPUT
+          if [ "${{ github.event.inputs.include_latest }}" = "true" ]; then
+            echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:latest,${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${TAG},${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${TAG}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "is_release=true" >> $GITHUB_OUTPUT
+            echo "github_ref=refs/tags/${TAG}" >> $GITHUB_OUTPUT
+          else
+            echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${TAG},${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${TAG}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "is_release=false" >> $GITHUB_OUTPUT
+            echo "github_ref=" >> $GITHUB_OUTPUT
+          fi
         else
           # Develop branch
           echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:develop,${{ secrets.DOCKERHUB_USERNAME }}/slackonos:develop-${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "is_release=false" >> $GITHUB_OUTPUT
+          echo "github_ref=" >> $GITHUB_OUTPUT
         fi
 
     - name: Build and push multi-platform Docker image
@@ -99,6 +113,8 @@ jobs:
         tags: ${{ steps.docker_tags.outputs.tags }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+        build-args: |
+          GITHUB_REF=${{ steps.docker_tags.outputs.github_ref }}
 
     - name: Verify the platforms
       run: docker buildx inspect --bootstrap

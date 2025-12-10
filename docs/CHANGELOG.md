@@ -6,6 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [2.1.0] - 2025-01-27
+
+### Added
+- **Slack Thread Support** - Added `slackAlwaysThread` configuration option to send all bot messages as thread replies
+- **Spotify Region Warnings** - Bot now sends messages to admin channel when tracks fail due to region restrictions (errorCode 800)
+- **Enhanced AI Confirmation Detection** - Improved handling of user confirmations like "do it", "yes", "ok" for AI suggestions
+- **New Screenshots** - Added 7 new screenshots to README and testing documentation showcasing features
+
+### Changed
+- **WebAuthn Enhancements** - Major improvements to WebAuthn/FIDO2 authentication
+  - Enhanced WebAuthn configuration and client integration
+  - Improved user verification and authenticator selection logic
+  - Updated @simplewebauthn/server to v13.2.2 for better compatibility
+  - Reduced WebAuthn debug logging for cleaner output
+- **Admin Panel Improvements**
+  - Collapsed WebAuthn section into new "Security" section with password management
+  - Moved Log Level setting to Console Logs section for better organization
+  - Fixed log level filtering to properly respect configured level (debug/info/warn/error)
+  - Fixed duplicate log entries in admin panel log viewer
+  - Improved SSE connection management with better reconnection handling
+- **Branding Updates** - Complete rebrand from ZenMusic to SlackONOS
+  - Replaced all ZenMusic.png references with SlackONOS.png
+  - Updated CSS colors to match new SlackONOS logo and Slack-inspired palette
+  - Added rounded corners and smoother logo appearance with better styling
+- **UI/UX Improvements**
+  - Translated entire setup wizard from Swedish to English
+  - Improved Spotify region pre-fill in setup wizard (reads existing config value)
+  - Enhanced login page with "Login with Yubikey!" button text
+  - Better visual organization of admin panel sections
+
+### Fixed
+- **Discord Token Validation** - Fixed regex to correctly validate Discord bot tokens with varying lengths
+- **SSL Certificate Generation** - Added defensive checks for ipAddress to prevent certificate generation errors
+- **Log Level Not Respected** - Fixed issue where debug logs were still showing even when log level was set to info
+- **Duplicate Log Entries** - Fixed duplicate log entries appearing in admin panel log viewer
+- **GitHub Actions** - Fixed GITHUB_REF passing to Docker container for correct release version detection
+
+### Dependencies
+- Bumped `selfsigned` from 5.1.1 to 5.2.0
+- Bumped `bcrypt` from 5.1.1 to 6.0.0
+- Bumped `@simplewebauthn/server` from 12.0.0 to 13.2.2
+
+### Documentation
+- Enhanced README with detailed screenshot descriptions
+- Updated Slack documentation (removed gong reactions, added thread support info)
+- Improved testing documentation with new screenshots
+
 ## [2.0.1] - 2024-12-09
 
 ### 🐛 Bug Fixes

@@ -124,7 +124,7 @@ function setupEventListeners() {
   document.getElementById('btn-back-platform')?.addEventListener('click', () => showPage('welcome'));
   document.getElementById('btn-next-platform')?.addEventListener('click', () => {
     if (selectedPlatforms.size === 0) {
-      alert('Välj minst en plattform');
+      alert('Select at least one platform');
       return;
     }
     if (selectedPlatforms.has('slack')) {
@@ -508,12 +508,12 @@ function validateSonos() {
   const selectedDevice = document.querySelector('.device-item.selected');
   
   if (!sonosIp && !selectedDevice) {
-    alert('Välj en Sonos-enhet eller ange IP-adress');
+    alert('Select a Sonos device or enter IP address');
     return false;
   }
   
   if (sonosIp && !/^(\d{1,3}\.){3}\d{1,3}$/.test(sonosIp)) {
-    alert('Ange en giltig IP-adress (ex: 192.168.1.100)');
+    alert('Enter a valid IP address (e.g., 192.168.1.100)');
     return false;
   }
   
@@ -608,7 +608,7 @@ async function discoverSonos() {
   if (!btn) return;
 
   btn.disabled = true;
-  btn.innerHTML = 'Söker... <span class="loading"></span>';
+  btn.innerHTML = 'Searching... <span class="loading"></span>';
   if (list) list.innerHTML = '';
   if (errorDiv) {
     errorDiv.textContent = '';
@@ -647,25 +647,25 @@ async function discoverSonos() {
         });
       } else {
         if (errorDiv) {
-          errorDiv.textContent = 'Inga Sonos-enheter hittades. Kontrollera att de är på och på samma nätverk.';
+          errorDiv.textContent = 'No Sonos devices found. Make sure they are powered on and on the same network.';
           errorDiv.classList.add('error');
         }
       }
     } catch (fetchErr) {
       clearTimeout(timeout);
       if (fetchErr.name === 'AbortError') {
-        throw new Error('Timeout: Upptäckt tog för lång tid (15s)');
+        throw new Error('Timeout: Discovery took too long (15s)');
       }
       throw fetchErr;
     }
   } catch (err) {
     if (errorDiv) {
-      errorDiv.textContent = `Fel: ${err.message}`;
+      errorDiv.textContent = `Error: ${err.message}`;
       errorDiv.classList.add('error');
     }
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<span class="btn-icon">🔍</span> Upptäck Sonos-enheter';
+    btn.innerHTML = '<span class="btn-icon">🔍</span> Discover Sonos Devices';
   }
 }
 
@@ -850,16 +850,16 @@ async function validateSonosConnection() {
   const ipToValidate = selectedDevice ? selectedDevice.dataset.ip : sonosIp;
   
   if (!ipToValidate) {
-    showError(resultDiv, 'Välj en Sonos-enhet eller ange IP-adress');
+    showError(resultDiv, 'Select a Sonos device or enter IP address');
     return;
   }
   
   if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ipToValidate)) {
-    showError(resultDiv, 'Ange en giltig IP-adress (ex: 192.168.1.100)');
+    showError(resultDiv, 'Enter a valid IP address (e.g., 192.168.1.100)');
     return;
   }
 
-  showLoading(resultDiv, 'Validerar anslutning...');
+  showLoading(resultDiv, 'Validating connection...');
 
   try {
     const response = await fetch(`${API_BASE}/validate-sonos`, {
@@ -872,13 +872,13 @@ async function validateSonosConnection() {
 
     if (data.valid) {
       const deviceInfo = data.deviceInfo || {};
-      const deviceName = deviceInfo.roomName || deviceInfo.model || 'Sonos-enhet';
-      showSuccess(resultDiv, `✓ Anslutning lyckades! ${deviceName} (${ipToValidate})`);
+      const deviceName = deviceInfo.roomName || deviceInfo.model || 'Sonos Device';
+      showSuccess(resultDiv, `✓ Connection successful! ${deviceName} (${ipToValidate})`);
     } else {
-      showError(resultDiv, data.error || 'Kunde inte ansluta till Sonos-enheten');
+      showError(resultDiv, data.error || 'Could not connect to Sonos device');
     }
   } catch (err) {
-    showError(resultDiv, `Fel: ${err.message}`);
+    showError(resultDiv, `Error: ${err.message}`);
   }
 }
 
@@ -934,7 +934,7 @@ async function restartApp() {
   const btn = document.getElementById('btn-restart');
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = 'Startar om... <span class="loading"></span>';
+    btn.innerHTML = 'Restarting... <span class="loading"></span>';
   }
 
   try {
@@ -948,7 +948,7 @@ async function restartApp() {
     if (data.success) {
       // Show message and wait a bit before redirecting
       if (btn) {
-        btn.innerHTML = '✓ Startar om appen...';
+        btn.innerHTML = '✓ Restarting app...';
       }
       
       // Wait a moment, then redirect to root (which will show setup or main page)
@@ -956,17 +956,17 @@ async function restartApp() {
         window.location.href = '/';
       }, 2000);
     } else {
-      alert(`Kunde inte starta om: ${data.error || 'Okänt fel'}`);
+      alert(`Could not restart: ${data.error || 'Unknown error'}`);
       if (btn) {
         btn.disabled = false;
-        btn.textContent = 'Starta om appen';
+        btn.textContent = 'Restart App';
       }
     }
   } catch (err) {
-    alert(`Fel vid omstart: ${err.message}`);
+    alert(`Error during restart: ${err.message}`);
     if (btn) {
       btn.disabled = false;
-      btn.textContent = 'Starta om appen';
+      btn.textContent = 'Restart App';
     }
   }
 }

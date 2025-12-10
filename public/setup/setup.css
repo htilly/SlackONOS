@@ -6,17 +6,20 @@
 }
 
 :root {
-  --primary: #8b5cf6;
-  --primary-light: #a78bfa;
-  --primary-dark: #7c3aed;
-  --secondary: #06b6d4;
-  --success: #22c55e;
-  --error: #ef4444;
-  --bg-dark: #0f172a;
-  --bg-card: rgba(15, 23, 42, 0.8);
-  --text: #e2e8f0;
-  --text-muted: #94a3b8;
-  --border: rgba(255, 255, 255, 0.1);
+  /* SlackONOS Brand Colors - Matching logo palette */
+  --primary: #4A154B;        /* Slack purple - primary brand color */
+  --primary-light: #611F69;  /* Lighter purple for gradients */
+  --primary-dark: #350D36;   /* Darker purple for depth */
+  --secondary: #E01E5A;     /* Slack red/pink - accent color */
+  --accent: #36C5F0;        /* Slack blue - secondary accent */
+  --success: #2EB886;       /* Slack green - success states */
+  --error: #E01E5A;         /* Slack red - error states */
+  --warning: #ECB22E;       /* Slack yellow - warnings */
+  --bg-dark: #1A1D29;       /* Dark background matching logo */
+  --bg-card: rgba(26, 29, 41, 0.95);  /* Card background with slight transparency */
+  --text: #FFFFFF;          /* Pure white for maximum contrast */
+  --text-muted: #B0B8C4;    /* Muted text color */
+  --border: rgba(255, 255, 255, 0.15);  /* Slightly more visible borders */
 }
 
 body {
@@ -136,10 +139,12 @@ body {
 .welcome-logo {
   width: 180px;
   height: 180px;
-  border-radius: 20px;
+  border-radius: 32px;  /* Increased for smoother, more rounded corners */
   margin-bottom: 30px;
   animation: logoFloat 3s ease-in-out infinite;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  overflow: hidden;  /* Ensures image respects border-radius */
+  object-fit: cover;  /* Ensures image fills the space nicely */
 }
 
 @keyframes logoFloat {
@@ -149,6 +154,20 @@ body {
   50% {
     transform: translateY(-10px);
   }
+}
+
+/* Logo styling for admin and login pages */
+img[alt*="SlackONOS"], img[alt*="Logo"] {
+  border-radius: 24px;  /* Smooth rounded corners */
+  overflow: hidden;
+  object-fit: contain;
+  box-shadow: 0 8px 24px rgba(74, 21, 75, 0.2);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+img[alt*="SlackONOS"]:hover, img[alt*="Logo"]:hover {
+  transform: scale(1.02);
+  box-shadow: 0 12px 32px rgba(74, 21, 75, 0.3);
 }
 
 .welcome-content h1 {
@@ -209,13 +228,13 @@ body {
 .platform-card:hover {
   transform: translateY(-4px);
   border-color: var(--primary);
-  box-shadow: 0 10px 30px rgba(139, 92, 246, 0.3);
+  box-shadow: 0 10px 30px rgba(74, 21, 75, 0.4);
 }
 
 .platform-card.selected {
   border-color: var(--primary);
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(6, 182, 212, 0.1));
-  box-shadow: 0 10px 30px rgba(139, 92, 246, 0.4);
+  background: linear-gradient(135deg, rgba(74, 21, 75, 0.2), rgba(224, 30, 90, 0.15));
+  box-shadow: 0 10px 30px rgba(74, 21, 75, 0.5);
 }
 
 .platform-icon {
@@ -293,7 +312,7 @@ label {
 .input:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+  box-shadow: 0 0 0 3px rgba(74, 21, 75, 0.3);
   background: rgba(255, 255, 255, 0.08);
 }
 
@@ -322,12 +341,13 @@ small {
 .btn-primary {
   background: linear-gradient(135deg, var(--primary), var(--primary-light));
   color: white;
-  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.4);
+  box-shadow: 0 4px 15px rgba(74, 21, 75, 0.5);
 }
 
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.5);
+  box-shadow: 0 6px 20px rgba(74, 21, 75, 0.6);
+  background: linear-gradient(135deg, var(--primary-light), var(--primary));
 }
 
 .btn-secondary {
@@ -384,8 +404,8 @@ small {
   display: flex;
   gap: 12px;
   padding: 16px;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  background: rgba(54, 197, 240, 0.1);
+  border: 1px solid rgba(54, 197, 240, 0.3);
   border-radius: 12px;
   margin-bottom: 20px;
   color: var(--text);
@@ -402,8 +422,8 @@ small {
 }
 
 .info-box-help {
-  background: rgba(139, 92, 246, 0.1);
-  border-color: rgba(139, 92, 246, 0.3);
+  background: rgba(74, 21, 75, 0.15);
+  border-color: rgba(74, 21, 75, 0.4);
 }
 
 .help-links {
@@ -418,10 +438,10 @@ small {
   align-items: center;
   gap: 6px;
   padding: 8px 14px;
-  background: rgba(139, 92, 246, 0.15);
-  border: 1px solid rgba(139, 92, 246, 0.3);
+  background: rgba(74, 21, 75, 0.2);
+  border: 1px solid rgba(74, 21, 75, 0.4);
   border-radius: 8px;
-  color: var(--primary-light);
+  color: var(--accent);
   text-decoration: none;
   font-size: 14px;
   font-weight: 600;
@@ -429,10 +449,10 @@ small {
 }
 
 .help-link:hover {
-  background: rgba(139, 92, 246, 0.25);
-  border-color: rgba(139, 92, 246, 0.5);
+  background: rgba(74, 21, 75, 0.3);
+  border-color: rgba(97, 31, 105, 0.6);
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+  box-shadow: 0 4px 12px rgba(74, 21, 75, 0.4);
 }
 
 .help-link span {
@@ -451,9 +471,9 @@ small {
 
 .validation-message.success {
   display: block;
-  background: rgba(34, 197, 94, 0.15);
-  border: 1px solid rgba(34, 197, 94, 0.3);
-  color: #86efac;
+  background: rgba(46, 184, 134, 0.15);
+  border: 1px solid rgba(46, 184, 134, 0.3);
+  color: #7DD3A0;
 }
 
 .validation-message.error {
@@ -486,8 +506,8 @@ small {
 
 .device-item.selected {
   border-color: var(--primary);
-  background: linear-gradient(90deg, rgba(139, 92, 246, 0.15), rgba(6, 182, 212, 0.1));
-  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+  background: linear-gradient(90deg, rgba(74, 21, 75, 0.2), rgba(224, 30, 90, 0.15));
+  box-shadow: 0 4px 15px rgba(74, 21, 75, 0.4);
 }
 
 .device-item strong {

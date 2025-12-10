@@ -336,11 +336,10 @@
 <body>
   <div class="admin-container">
     <div class="admin-header">
-      <img src="/setup/ZenMusic.png" alt="SlackONOS Logo" style="max-width: 200px; margin-bottom: 1rem;">
+      <img src="/setup/SlackONOS.png" alt="SlackONOS Logo" style="max-width: 200px; margin-bottom: 1rem;">
       <h1>SlackONOS Admin</h1>
       <p>Manage your bot and monitor status</p>
       <div style="margin-top: 1rem; display: flex; gap: 1rem; justify-content: center;">
-        <button class="btn btn-secondary" id="btn-change-password">Change Password</button>
         <button class="btn btn-secondary" id="btn-logout">Logout</button>
       </div>
     </div>
@@ -381,25 +380,39 @@
       </div>
     </div>
 
-    <!-- WebAuthn Section -->
-    <div class="config-section">
-      <h2>🔐 WebAuthn / FIDO2 Security Keys</h2>
-      <div id="webauthn-status" style="margin-bottom: 1rem; padding: 1rem; background: rgba(255, 255, 255, 0.05); border-radius: 8px;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <div>
-            <strong>Status:</strong> <span id="webauthn-status-text">Checking...</span>
-          </div>
-          <button class="btn btn-secondary" id="btn-enable-webauthn" style="display: none;">Enable WebAuthn</button>
-        </div>
+    <!-- Security Section (collapsed by default) -->
+    <div class="config-section" id="security-section">
+      <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" id="security-toggle">
+        <h2 style="margin: 0;">🔐 Security</h2>
+        <button class="btn btn-ghost" id="btn-toggle-security">Show</button>
       </div>
-      
-      <!-- WebAuthn Settings Toggle -->
-      <div id="webauthn-settings" style="margin-bottom: 1rem; padding: 1rem; background: rgba(255, 255, 255, 0.03); border-radius: 8px; display: none;">
+      <div id="security-body" style="display: none; margin-top: 1rem;">
+        <!-- Change Password Section -->
+        <div style="margin-bottom: 2rem; padding: 1rem; background: rgba(255, 255, 255, 0.03); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
+          <h3 style="margin-top: 0; margin-bottom: 1rem;">Change Admin Password</h3>
+          <button class="btn btn-secondary" id="btn-change-password">Change Password</button>
+        </div>
+
+        <!-- WebAuthn Section -->
+        <div style="margin-bottom: 1rem;">
+          <h3 style="margin-bottom: 1rem;">WebAuthn / FIDO2 Security Keys</h3>
+          <div id="webauthn-status" style="margin-bottom: 1rem; padding: 1rem; background: rgba(255, 255, 255, 0.05); border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <strong>Status:</strong> <span id="webauthn-status-text">Checking...</span>
+              </div>
+              <button class="btn btn-secondary" id="btn-enable-webauthn" style="display: none;">Enable WebAuthn</button>
+            </div>
+          </div>
+          
+          <!-- WebAuthn Settings Toggle -->
+          <div id="webauthn-settings" style="margin-bottom: 1rem; padding: 1rem; background: rgba(255, 255, 255, 0.03); border-radius: 8px; display: none;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
           <div style="flex: 1;">
             <strong style="display: block; margin-bottom: 0.25rem;">Require User Verification (PIN/Biometric)</strong>
             <small style="color: rgba(255,255,255,0.6); font-size: 0.85rem;">
-              When enabled, requires PIN for Yubikey or biometric for Touch ID. Disable for touch-only security keys.
+              When enabled: requires PIN entry for Yubikey or biometric for Touch ID/Face ID<br>
+              When disabled: allows touch-only authentication (no PIN required)
             </small>
           </div>
           <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
@@ -407,23 +420,76 @@
             <span id="webauthn-uv-status" style="font-size: 0.9rem; font-weight: 600;"></span>
           </label>
         </div>
-      </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1);">
+          <div style="flex: 1;">
+            <strong style="display: block; margin-bottom: 0.25rem;">Prefer Platform Only (Touch ID/Face ID)</strong>
+            <small style="color: rgba(255,255,255,0.6); font-size: 0.85rem;">
+              When enabled: <strong style="color: #fbbf24;">ONLY</strong> allows Touch ID/Face ID (blocks Yubikey, may reduce QR prompts)<br>
+              When disabled: allows both platform (Touch ID) and cross-platform (Yubikey) authenticators<br>
+              <em style="color: rgba(255,255,255,0.5);">Note: QR code prompts on macOS/iOS are a system feature and may still appear</em>
+            </small>
+          </div>
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input type="checkbox" id="webauthn-prefer-platform-only" style="width: 18px; height: 18px; cursor: pointer;">
+            <span id="webauthn-platform-only-status" style="font-size: 0.9rem; font-weight: 600;"></span>
+          </label>
+        </div>
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1);">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div>
+              <label for="webauthn-timeout" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Timeout (seconds)</label>
+              <input type="number" id="webauthn-timeout" min="10" max="300" step="10" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
+              <small style="color: rgba(255,255,255,0.6); font-size: 0.8rem;">Registration/authentication timeout (10-300s, default: 60s)</small>
+            </div>
+            <div>
+              <label for="webauthn-challenge-expiration" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Challenge Expiration (seconds)</label>
+              <input type="number" id="webauthn-challenge-expiration" min="30" max="300" step="10" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
+              <small style="color: rgba(255,255,255,0.6); font-size: 0.8rem;">How long challenges remain valid (30-300s, default: 60s)</small>
+            </div>
+            <div>
+              <label for="webauthn-resident-key" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Resident Key Preference</label>
+              <select id="webauthn-resident-key" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
+                <option value="discouraged">Discouraged (No Passkeys)</option>
+                <option value="preferred">Preferred (Allow Passkeys)</option>
+                <option value="required">Required (Force Passkeys)</option>
+              </select>
+              <small style="color: rgba(255,255,255,0.6); font-size: 0.8rem;">Controls passkey support (default: discouraged)</small>
+            </div>
+            <div>
+              <label for="webauthn-max-credentials" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Max Credentials</label>
+              <input type="number" id="webauthn-max-credentials" min="0" max="50" step="1" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
+              <small style="color: rgba(255,255,255,0.6); font-size: 0.8rem;">Max credentials per user (0 = unlimited, default: 0)</small>
+            </div>
+          </div>
+            <button class="btn btn-secondary" id="btn-save-webauthn-advanced" style="margin-top: 1rem; width: 100%;">Save Advanced Settings</button>
+          </div>
 
-      <div id="webauthn-credentials-list" style="margin-bottom: 1rem;">
-        <!-- Credentials will be loaded here -->
+          <div id="webauthn-credentials-list" style="margin-bottom: 1rem;">
+            <!-- Credentials will be loaded here -->
+          </div>
+          <div style="margin-top: 1rem;">
+            <button class="btn btn-primary" id="btn-register-webauthn" style="display: none;">Register New Security Key</button>
+          </div>
+          <div id="webauthn-message" class="validation-message" style="margin-top: 1rem;"></div>
+        </div>
       </div>
-      <div style="margin-top: 1rem;">
-        <button class="btn btn-primary" id="btn-register-webauthn" style="display: none;">Register New Security Key</button>
-      </div>
-      <div id="webauthn-message" class="validation-message" style="margin-top: 1rem;"></div>
     </div>
 
     <!-- Logs Section -->
     <div class="config-section">
       <h2>📋 Console Logs</h2>
-      <div class="logs-controls">
+      <div class="logs-controls" style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem;">
         <button class="btn btn-secondary" id="btn-toggle-logs">Show Logs</button>
         <button class="btn btn-ghost" id="btn-clear-logs">Clear</button>
+        <div style="margin-left: auto; display: flex; align-items: center; gap: 0.5rem;">
+          <label for="log-level-select" style="font-size: 0.9rem; color: rgba(255,255,255,0.8);">Log Level:</label>
+          <select id="log-level-select" style="padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 0.9rem;">
+            <option value="debug">Debug</option>
+            <option value="info" selected>Info</option>
+            <option value="warn">Warn</option>
+            <option value="error">Error</option>
+          </select>
+        </div>
       </div>
       <div id="logs-container" class="logs-container" style="display: none;">
         <div id="logs-content" class="logs-content"></div>
@@ -636,6 +702,7 @@
       window.SimpleWebAuthnBrowser = SimpleWebAuthnBrowser;
     }
   </script>
+  <script src="/setup/webauthn-client.js"></script>
   <script src="/setup/admin.js"></script>
 </body>
 </html>
