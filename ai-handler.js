@@ -331,8 +331,13 @@ Examples of responses that REQUIRE suggestedAction:
 - "I can play some ice-cool tunes" → MUST have suggestedAction with hockey/sports/rock music
 - "I could spin some tracks for you" → MUST have suggestedAction
 - "Want me to play something?" → MUST have suggestedAction with contextual music
+- "I can play some security-themed jams" → MUST have suggestedAction with security/tech/cyber music
+- "But I can play some X for you" → MUST have suggestedAction with relevant X-themed music
+- ANY mention of "play", "spin", "jams", "tunes", "tracks", "songs", "music" in chat response → MUST have suggestedAction
 
-This allows follow-up responses like "yes do it" to trigger the suggested action.
+MANDATORY RULE: If your response contains words like "play", "can play", "could play", "I can", "I could", "want me to", "interested", "jams", "tunes", "tracks", "songs", "music", "anthems" - you MUST include a suggestedAction field with appropriate music based on the context of the conversation.
+
+This allows follow-up responses like "yes", "do it", "ok", "sure" to trigger the suggested action.
 
 IMPORTANT - MULTI-STEP REQUESTS: When user asks to do TWO things (like "clear AND add", "rensa OCH lägg till", "flush then play"), you MUST use the followUp field:
 {

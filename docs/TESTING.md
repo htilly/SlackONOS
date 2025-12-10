@@ -43,6 +43,9 @@ You should see output from all test files:
   50 passing (25ms)
 ```
 
+![Test Output Screenshot](images/Screenshot%20Testing.png)
+*Example of test output in the terminal showing all passing tests*
+
 
 ## When Making Changes
 

@@ -150,7 +150,7 @@
   <div class="wizard-container login-container">
     <div class="wizard login-card">
       <div class="login-header">
-        <img src="/setup/ZenMusic.png" alt="SlackONOS Logo">
+        <img src="/setup/SlackONOS.png" alt="SlackONOS Logo">
         <h1>Admin Login</h1>
         <p>Enter your credentials to access the admin panel</p>
       </div>
@@ -160,7 +160,7 @@
       <!-- WebAuthn Login Section -->
       <div id="webauthn-section" style="display: none; margin-bottom: 1.5rem;">
         <button type="button" class="btn-login" id="btn-webauthn" style="width: 100%; background: linear-gradient(135deg, #06b6d4, #0891b2);">
-          🔐 Login with Security Key
+          🔐 Login with Yubikey!
         </button>
         <div style="text-align: center; margin-top: 1rem; color: rgba(255, 255, 255, 0.6); font-size: 0.85rem;">
           Use your FIDO2 security key or biometric
@@ -191,6 +191,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@9.0.0/dist/bundle/index.umd.min.js"></script>
+  <script src="/setup/webauthn-client.js"></script>
   <script>
     const API_BASE = '/api/auth';
     const form = document.getElementById('login-form');
@@ -207,95 +208,133 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message, meta })
         });
-      } catch (e) {
-        // ignore client log errors
-      }
+      } catch (e) {}
     };
 
-    // Get return URL from query params
     const urlParams = new URLSearchParams(window.location.search);
     const returnUrl = urlParams.get('return') || '/admin';
 
-    // Check WebAuthn status on load
     async function checkWebAuthnStatus() {
       try {
         const response = await fetch(`${API_BASE}/webauthn/status`);
         const data = await response.json();
         
         if (data.enabled && data.hasCredentials) {
-          // WebAuthn is enabled and credentials exist - show WebAuthn button, hide password form
           webauthnSection.style.display = 'block';
           passwordSection.style.display = 'none';
         } else if (data.enabled && !data.hasCredentials) {
-          // WebAuthn enabled but no credentials - show both options (allow password login to register first key)
           webauthnSection.style.display = 'none';
           passwordSection.style.display = 'block';
-          // Show info message that password login is still available
           const infoMsg = document.createElement('div');
           infoMsg.style.cssText = 'text-align: center; margin-bottom: 1rem; padding: 0.75rem; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; color: rgba(255, 255, 255, 0.8); font-size: 0.85rem;';
-          infoMsg.textContent = 'ℹ️ WebAuthn is enabled but no security keys are registered yet. Use password to login and register your first key.';
+          infoMsg.textContent = 'ℹ️ WebAuthn is enabled but no security keys are registered yet. Use password to login and register your first key in the admin panel.';
           passwordSection.insertBefore(infoMsg, passwordSection.firstChild);
         } else {
-          // WebAuthn not enabled - show password form only
           webauthnSection.style.display = 'none';
           passwordSection.style.display = 'block';
         }
       } catch (err) {
-        // On error, show password form
+        console.error('Error checking WebAuthn status:', err);
         webauthnSection.style.display = 'none';
         passwordSection.style.display = 'block';
       }
     }
 
-    // WebAuthn authentication
+    // --------------------------------------------------------
+    // FIX: base64url → ArrayBuffer conversion
+    // --------------------------------------------------------
+    function b64urlToBuffer(b64urlString) {
+      const base64 = b64urlString.replace(/-/g, '+').replace(/_/g, '/');
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes.buffer;
+    }
+
+    // WebAuthn authentication - use WebAuthnClient for consistent handling
     btnWebAuthn?.addEventListener('click', async () => {
       try {
         btnWebAuthn.disabled = true;
         btnWebAuthn.innerHTML = 'Authenticating... <span class="loading"></span>';
         errorDiv.classList.remove('show');
 
-        // Get authentication options
-        const optionsResponse = await fetch(`${API_BASE}/webauthn/authenticate/options`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        });
-        
-        if (!optionsResponse.ok) {
-          logClient('auth-options-error', { status: optionsResponse.status }).catch(() => {});
-          throw new Error('Failed to get authentication options');
-        }
-        
-        const options = await optionsResponse.json();
-
-        await logClient('auth-options-received', { rpId: options.rpId, userVerification: options.userVerification }).catch(() => {});
-
-        // Start WebAuthn authentication
-        const assertionResponse = await SimpleWebAuthnBrowser.startAuthentication(options);
-
-        // Verify authentication
-        const verifyResponse = await fetch(`${API_BASE}/webauthn/authenticate/verify`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(assertionResponse)
-        });
-
-        const verifyData = await verifyResponse.json();
-
-        if (verifyData.verified) {
-          logClient('auth-success').catch(() => {});
-          // Success - redirect
-          window.location.href = returnUrl;
+        // Initialize WebAuthnClient if available, otherwise fall back to manual method
+        if (window.WebAuthnClient) {
+          WebAuthnClient.init({ apiBase: API_BASE });
+          const result = await WebAuthnClient.authenticate();
+          
+          if (result.verified) {
+            window.location.href = returnUrl;
+          } else {
+            showError('Authentication failed. Please try again.');
+            btnWebAuthn.disabled = false;
+            btnWebAuthn.innerHTML = '🔐 Login with Yubikey!';
+          }
         } else {
-          logClient('auth-failed', { error: verifyData.error || 'not verified' }).catch(() => {});
-          showError('Authentication failed. Please try again.');
-          btnWebAuthn.disabled = false;
-          btnWebAuthn.innerHTML = '🔐 Login with Security Key';
+          // Fallback to manual method if WebAuthnClient not available
+          const optionsResponse = await fetch(`${API_BASE}/webauthn/authenticate/options`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          if (!optionsResponse.ok) {
+            throw new Error('Failed to get authentication options');
+          }
+          
+          const options = await optionsResponse.json();
+
+          console.log("LOGIN: RAW OPTIONS FROM SERVER >>>", options);
+          console.log("LOGIN: CHALLENGE TYPE:", typeof options.challenge, options.challenge);
+
+          // Convert allowCredentials[].id from base64url string → ArrayBuffer
+          // BUT: Keep challenge as STRING (SimpleWebAuthnBrowser v9 expects base64url string, not ArrayBuffer)
+          if (options.allowCredentials) {
+            options.allowCredentials = options.allowCredentials.map(c => ({
+              ...c,
+              id: b64urlToBuffer(c.id),
+            }));
+          }
+
+          // Ensure challenge stays as a string (SimpleWebAuthnBrowser v9 expects base64url string)
+          // Do NOT convert challenge to ArrayBuffer - that causes "e.replace is not a function" error
+          if (options.challenge && typeof options.challenge !== 'string') {
+            console.warn("LOGIN: Challenge is not a string, this may cause errors:", typeof options.challenge);
+          }
+
+          const assertionResponse = await SimpleWebAuthnBrowser.startAuthentication(options);
+
+          const verifyResponse = await fetch(`${API_BASE}/webauthn/authenticate/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(assertionResponse)
+          });
+
+          const verifyData = await verifyResponse.json();
+
+          if (verifyData.verified) {
+            window.location.href = returnUrl;
+          } else {
+            showError('Authentication failed. Please try again.');
+            btnWebAuthn.disabled = false;
+            btnWebAuthn.innerHTML = '🔐 Login with Yubikey!';
+          }
         }
       } catch (err) {
-        logClient('auth-error', { error: err.message }).catch(() => {});
-        showError(err.message || 'WebAuthn authentication failed. Please try again.');
+        let errorMessage = err.message || 'WebAuthn authentication failed. Please try again.';
+
+        if (err.name === 'NotAllowedError') {
+          errorMessage = 'Authentication was cancelled or timed out. Please try again.';
+        } else if (err.name === 'InvalidStateError') {
+          errorMessage = 'The key is not registered. Please register your security key first.';
+        } else if (err.name === 'NotSupportedError') {
+          errorMessage = 'WebAuthn is not supported in this browser.';
+        }
+
+        showError(errorMessage);
         btnWebAuthn.disabled = false;
-        btnWebAuthn.innerHTML = '🔐 Login with Security Key';
+        btnWebAuthn.innerHTML = '🔐 Login with Yubikey!';
       }
     });
 
@@ -317,16 +356,13 @@
       try {
         const response = await fetch(`${API_BASE}/login`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password })
         });
         
         const data = await response.json();
         
         if (data.success) {
-          // Redirect to return URL or admin
           window.location.href = returnUrl;
         } else {
           showError(data.error || 'Invalid credentials');
@@ -345,7 +381,6 @@
       errorDiv.classList.add('show');
     }
 
-    // Check WebAuthn status and focus appropriate field
     checkWebAuthnStatus().then(() => {
       if (passwordSection.style.display !== 'none') {
         document.getElementById('username').focus();
@@ -354,4 +389,3 @@
   </script>
 </body>
 </html>
-

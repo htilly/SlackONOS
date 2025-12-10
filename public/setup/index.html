@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="sv">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -59,58 +59,58 @@
       <!-- Welcome Page -->
       <div class="page active" id="page-welcome">
         <div class="welcome-content">
-          <img src="/setup/ZenMusic.png?v=5.0" alt="SlackONOS" class="welcome-logo">
-          <h1>Välkommen till SlackONOS</h1>
-          <p class="welcome-text">Nu startar vi setup</p>
-          <button class="btn btn-primary btn-large" id="btn-start">Starta</button>
+          <img src="/setup/SlackONOS.png?v=5.0" alt="SlackONOS" class="welcome-logo">
+          <h1>Welcome to SlackONOS</h1>
+          <p class="welcome-text">Let's get started with setup</p>
+          <button class="btn btn-primary btn-large" id="btn-start">Start</button>
         </div>
       </div>
 
       <!-- Platform Selection -->
       <div class="page" id="page-platform">
         <div class="page-header">
-          <h2>Vilka plattformar vill du använda?</h2>
-          <p>Välj Slack, Discord eller båda</p>
+          <h2>Which platforms do you want to use?</h2>
+          <p>Choose Slack, Discord, or both</p>
         </div>
         <div class="page-body">
           <div class="platform-options">
             <div class="platform-card" data-platform="slack">
               <div class="platform-icon">💬</div>
               <h3>Slack</h3>
-              <p>Socket Mode och bot-token</p>
+              <p>Socket Mode and bot token</p>
               <div class="check-icon">✓</div>
             </div>
             <div class="platform-card" data-platform="discord">
               <div class="platform-icon">🎮</div>
               <h3>Discord</h3>
-              <p>Bot-token och kanaler</p>
+              <p>Bot token and channels</p>
               <div class="check-icon">✓</div>
             </div>
             <div class="platform-card" data-platform="both">
               <div class="platform-icon">🚀</div>
-              <h3>Båda</h3>
-              <p>Slack och Discord tillsammans</p>
+              <h3>Both</h3>
+              <p>Slack and Discord together</p>
               <div class="check-icon">✓</div>
             </div>
           </div>
         </div>
         <div class="page-footer">
-          <button class="btn btn-secondary" id="btn-back-platform">Tillbaka</button>
-          <button class="btn btn-primary" id="btn-next-platform">Fortsätt</button>
+          <button class="btn btn-secondary" id="btn-back-platform">Back</button>
+          <button class="btn btn-primary" id="btn-next-platform">Continue</button>
         </div>
       </div>
 
       <!-- Slack Setup -->
       <div class="page" id="page-slack">
         <div class="page-header">
-          <h2>Koppla Slack</h2>
-          <p>Ange dina Slack-uppgifter</p>
+          <h2>Connect Slack</h2>
+          <p>Enter your Slack credentials</p>
         </div>
         <div class="page-body">
           <div class="info-box info-box-help">
             <span class="info-icon">📖</span>
             <div>
-              <strong>Behöver hjälp med setup?</strong> Se den utförliga guiden med alla steg, permissions och scopes:
+              <strong>Need help with setup?</strong> See the detailed guide with all steps, permissions and scopes:
               <div class="help-links">
                 <a href="https://github.com/htilly/SlackONOS/blob/develop/SLACK.md" target="_blank" class="help-link">
                   <span>📚</span> Slack Setup Guide
@@ -124,12 +124,12 @@
           <div class="form-group">
             <label>App-Level Token <span class="required">*</span></label>
             <input type="text" id="slack-app-token" placeholder="xapp-1-A0..." class="input">
-            <small>Från Slack app → Socket Mode → App-Level Tokens</small>
+            <small>From Slack app → Socket Mode → App-Level Tokens</small>
           </div>
           <div class="form-group">
             <label>Bot User OAuth Token <span class="required">*</span></label>
             <input type="text" id="slack-bot-token" placeholder="xoxb-123..." class="input">
-            <small>Från Slack app → Install App → Bot User OAuth Token</small>
+            <small>From Slack app → Install App → Bot User OAuth Token</small>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -144,10 +144,10 @@
           <div id="slack-validation" class="validation-message"></div>
         </div>
         <div class="page-footer">
-          <button class="btn btn-secondary" id="btn-back-slack">Tillbaka</button>
+          <button class="btn btn-secondary" id="btn-back-slack">Back</button>
           <div class="footer-right">
-            <button class="btn btn-ghost" id="btn-validate-slack">Validera</button>
-            <button class="btn btn-primary" id="btn-next-slack">Nästa</button>
+            <button class="btn btn-ghost" id="btn-validate-slack">Validate</button>
+            <button class="btn btn-primary" id="btn-next-slack">Next</button>
           </div>
         </div>
       </div>
@@ -155,18 +155,18 @@
       <!-- Discord Setup -->
       <div class="page" id="page-discord">
         <div class="page-header">
-          <h2>Koppla Discord</h2>
-          <p>Valfritt steg - du kan hoppa över detta</p>
+          <h2>Connect Discord</h2>
+          <p>Optional step - you can skip this</p>
         </div>
         <div class="page-body">
           <div class="info-box info-box-success">
             <span class="info-icon">✨</span>
-            <div>Detta steg är valfritt. Du kan lägga till Discord senare.</div>
+            <div>This step is optional. You can add Discord later.</div>
           </div>
           <div class="info-box info-box-help">
             <span class="info-icon">📖</span>
             <div>
-              <strong>Behöver hjälp med setup?</strong> Se den utförliga guiden med alla steg, permissions och scopes:
+              <strong>Need help with setup?</strong> See the detailed guide with all steps, permissions and scopes:
               <div class="help-links">
                 <a href="https://github.com/htilly/SlackONOS/blob/develop/DISCORD.md" target="_blank" class="help-link">
                   <span>📚</span> Discord Setup Guide
@@ -180,24 +180,24 @@
           <div class="form-group">
             <label>Discord Bot Token</label>
             <input type="text" id="discord-token" placeholder="MTIzNDU2..." class="input">
-            <small>Från discord.com/developers → Din applikation → Bot</small>
+            <small>From discord.com/developers → Your application → Bot</small>
           </div>
           <div class="form-group">
-            <label>Channel IDs (kommaseparerade)</label>
+            <label>Channel IDs (comma-separated)</label>
             <input type="text" id="discord-channels" placeholder="123456789, 987654321" class="input">
           </div>
           <div class="form-group">
-            <label>Admin Role Names (kommaseparerade)</label>
+            <label>Admin Role Names (comma-separated)</label>
             <input type="text" id="discord-admin-roles" placeholder="DJ, Music Admin" class="input">
           </div>
           <div id="discord-validation" class="validation-message"></div>
         </div>
         <div class="page-footer">
-          <button class="btn btn-secondary" id="btn-back-discord">Tillbaka</button>
+          <button class="btn btn-secondary" id="btn-back-discord">Back</button>
           <div class="footer-right">
-            <button class="btn btn-ghost" id="btn-skip-discord">Hoppa över</button>
-            <button class="btn btn-ghost" id="btn-validate-discord">Validera</button>
-            <button class="btn btn-primary" id="btn-next-discord">Nästa</button>
+            <button class="btn btn-ghost" id="btn-skip-discord">Skip</button>
+            <button class="btn btn-ghost" id="btn-validate-discord">Validate</button>
+            <button class="btn btn-primary" id="btn-next-discord">Next</button>
           </div>
         </div>
       </div>
@@ -205,12 +205,12 @@
       <!-- Sonos Setup -->
       <div class="page" id="page-sonos">
         <div class="page-header">
-          <h2>Koppla Sonos</h2>
-          <p>Upptäck eller ange din Sonos-högtalare</p>
+          <h2>Connect Sonos</h2>
+          <p>Discover or enter your Sonos speaker</p>
         </div>
         <div class="page-body">
           <button class="btn btn-secondary btn-block" id="btn-discover-sonos">
-            <span class="btn-icon">🔍</span> Upptäck Sonos-enheter
+            <span class="btn-icon">🔍</span> Discover Sonos Devices
           </button>
           <div id="sonos-devices" class="device-list"></div>
           <div id="sonos-error" class="validation-message"></div>
@@ -220,15 +220,15 @@
           <div class="form-group">
             <label>Sonos IP Address <span class="required">*</span></label>
             <input type="text" id="sonos-ip" placeholder="192.168.1.100" class="input">
-            <small>Från Sonos app → Settings → System → About My System</small>
+            <small>From Sonos app → Settings → System → About My System</small>
           </div>
           <div id="sonos-validation" class="validation-message"></div>
         </div>
         <div class="page-footer">
-          <button class="btn btn-secondary" id="btn-back-sonos">Tillbaka</button>
+          <button class="btn btn-secondary" id="btn-back-sonos">Back</button>
           <div class="footer-right">
-            <button class="btn btn-ghost" id="btn-validate-sonos">Validera</button>
-            <button class="btn btn-primary" id="btn-next-sonos">Nästa</button>
+            <button class="btn btn-ghost" id="btn-validate-sonos">Validate</button>
+            <button class="btn btn-primary" id="btn-next-sonos">Next</button>
           </div>
         </div>
       </div>
@@ -236,14 +236,14 @@
       <!-- Spotify Setup -->
       <div class="page" id="page-spotify">
         <div class="page-header">
-          <h2>Koppla Spotify</h2>
-          <p>Ange dina Spotify developer credentials</p>
+          <h2>Connect Spotify</h2>
+          <p>Enter your Spotify developer credentials</p>
         </div>
         <div class="page-body">
           <div class="info-box">
             <span class="info-icon">ℹ️</span>
             <div>
-              <strong>Saknar credentials?</strong> Skapa en app på
+              <strong>Missing credentials?</strong> Create an app at
               <a href="https://developer.spotify.com/dashboard" target="_blank">developer.spotify.com</a>
             </div>
           </div>
@@ -271,10 +271,10 @@
           <div id="spotify-validation" class="validation-message"></div>
         </div>
         <div class="page-footer">
-          <button class="btn btn-secondary" id="btn-back-spotify">Tillbaka</button>
+          <button class="btn btn-secondary" id="btn-back-spotify">Back</button>
           <div class="footer-right">
-            <button class="btn btn-ghost" id="btn-validate-spotify">Validera</button>
-            <button class="btn btn-primary" id="btn-finish">Slutför</button>
+            <button class="btn btn-ghost" id="btn-validate-spotify">Validate</button>
+            <button class="btn btn-primary" id="btn-finish">Finish</button>
           </div>
         </div>
       </div>
@@ -319,24 +319,24 @@
       <div class="page" id="page-success">
         <div class="success-content">
           <div class="success-icon">🎉</div>
-          <h1>Allt klart!</h1>
-          <p class="success-text">Din SlackONOS-bot är nu konfigurerad</p>
+          <h1>All Done!</h1>
+          <p class="success-text">Your SlackONOS bot is now configured</p>
           <div class="success-steps">
             <div class="success-step">
               <span class="step-num">1</span>
-              <span>Starta om SlackONOS</span>
+              <span>Restart SlackONOS</span>
             </div>
             <div class="success-step">
               <span class="step-num">2</span>
-              <span>Bjud in boten till dina kanaler</span>
+              <span>Invite the bot to your channels</span>
             </div>
             <div class="success-step">
               <span class="step-num">3</span>
-              <span>Börja spela musik!</span>
+              <span>Start playing music!</span>
             </div>
           </div>
           <div class="success-buttons">
-            <button class="btn btn-primary btn-large" id="btn-restart">Starta om appen</button>
+            <button class="btn btn-primary btn-large" id="btn-restart">Restart App</button>
             <button class="btn btn-secondary btn-large" id="btn-admin" onclick="window.location.href='/admin'">Admin</button>
           </div>
         </div>
