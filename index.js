@@ -1137,7 +1137,7 @@ async function generateSelfSignedCert(certPath, keyPath) {
 
     // Generate certificate valid for 1 year
     const attrs = [{ name: 'commonName', value: hostname }];
-    const pems = selfsigned.generate(attrs, {
+    const pems = await selfsigned.generate(attrs, {
       days: 365,
       keySize: 2048,
       algorithm: 'sha256',
