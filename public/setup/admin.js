@@ -1166,7 +1166,12 @@ async function setupWebAuthn() {
       }
 
       const options = await optionsResponse.json();
-      showWebAuthnMessage(messageDiv, 'Touch your security key and enter PIN...', 'info');
+      // Check if user verification is required
+      const uvRequired = options.authenticatorSelection?.userVerification === 'required';
+      const msg = uvRequired
+        ? 'Touch your security key and enter PIN (or use Touch ID/Face ID)...'
+        : 'Touch your security key (Yubikey/FIDO2) or use Touch ID/Face ID...';
+      showWebAuthnMessage(messageDiv, msg, 'info');
 
       // Ensure library is loaded
       await ensureWebAuthnLib();
