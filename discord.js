@@ -175,12 +175,7 @@ async function initializeDiscord(config, messageHandler, injectedLogger) {
                         await reactionHandler('vote', trackInfo.trackName, message.channel.id, user.username, 'discord');
                     }
                 }
-                // Handle gong reaction (🔔)
-                else if (emoji === '🔔') {
-                    if (reactionHandler) {
-                        await reactionHandler('gong', trackInfo.trackName, message.channel.id, user.username, 'discord');
-                    }
-                }
+                // Note: Gong reactions removed - gong only works via command on currently playing track
             } catch (error) {
                 logger.error(`[DISCORD] Error handling reaction: ${error.message || error}`);
             }
@@ -246,7 +241,7 @@ async function sendDiscordMessage(channelId, text, options = {}) {
             if (options.addReactions && message) {
                 try {
                     await message.react('🎵');
-                    await message.react('🔔');
+                    // Note: 🔔 gong reaction removed - gong only works via command on currently playing track
                     if (discordLogger) discordLogger.debug(`[DISCORD] Added reactions to message ${message.id}`);
                 } catch (err) {
                     if (discordLogger) discordLogger.warn(`[DISCORD] Failed to add reactions: ${err.message}`);

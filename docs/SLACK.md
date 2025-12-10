@@ -32,6 +32,8 @@ Open "OAuth & Permissions" → scroll to "Bot Token Scopes" and add:
 - `channels:history` — read public channel messages
 - `groups:read` — read private channel list
 - `groups:history` — read private channel messages
+- `reactions:read` — read reactions on messages (required for reaction voting)
+- `users:read` — read user information (for reaction handler)
 - Optional (DMs): `im:history`
 
 Note: You don’t need a Request URL when using Socket Mode.
@@ -41,6 +43,7 @@ Open "Event Subscriptions" → toggle "Enable Events" ON → "Subscribe to bot e
 - `app_mention` — for @SlackONOS mentions
 - `message.channels` — messages in public channels
 - `message.groups` — messages in private channels
+- `reaction_added` — reactions added to messages (required for reaction voting)
 - Optional: `message.im` — direct messages to the bot
 
 Click "Save Changes".
