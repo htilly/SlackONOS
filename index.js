@@ -441,7 +441,7 @@ const DiscordSystem = require('./discord');
 
 // Command router stub - will be properly defined after commandRegistry
 // This allows us to pass it to Slack/Discord initialization
-let routeCommand = async (text, channel, userName, platform = 'slack', isAdmin = false, isMention = false) => {
+let routeCommand = async (text, channel, userName, platform = 'slack', isAdmin = false, isMention = false, messageTs = null) => {
   // Temporary stub - will be replaced after commandRegistry is defined
   logger.warn('routeCommand called before initialization');
 };
@@ -464,6 +464,8 @@ let discord = null;
 let currentPlatform = 'slack';
 let currentChannel = null;
 let currentIsAdmin = false;
+// Map to store message timestamps for thread replies: channel -> ts
+const messageTimestamps = new Map();
 
 // Helper function wrapper for backward compatibility (Slack)
 async function _slackMessage(message, channel_id, options = {}) {
@@ -484,6 +486,18 @@ async function _slackMessage(message, channel_id, options = {}) {
   // Slack context normal path
   try {
     if (slack) {
+      // Check if we should use threads
+      const slackAlwaysThread = config.get('slackAlwaysThread') === true;
+      const shouldUseThread = options.forceThread || (slackAlwaysThread && messageTimestamps.has(targetChannel));
+      
+      if (shouldUseThread) {
+        const threadTs = options.thread_ts || messageTimestamps.get(targetChannel);
+        if (threadTs) {
+          options.thread_ts = threadTs;
+          logger.debug(`Using thread_ts ${threadTs} for channel ${targetChannel}`);
+        }
+      }
+      
       await slack.sendMessage(message, targetChannel, options);
     } else {
       logger.warn('Slack not initialized - cannot send message');
@@ -672,7 +686,9 @@ function ensureConfigDefaults() {
     // Soundcraft mixer integration
     soundcraftEnabled: false,
     soundcraftIp: '',
-    soundcraftChannels: []
+    soundcraftChannels: [],
+    // Slack settings
+    slackAlwaysThread: false
   };
   const applied = [];
   for (const [key, val] of Object.entries(defaults)) {
@@ -859,6 +875,45 @@ try {
       try {
         await slack.init();
         logger.info('✅ Slack connection established.');
+
+        // Set up reaction handler for Slack
+        slack.setReactionHandler(async (action, trackName, channelId, userName, platform) => {
+          logger.info(`[SLACK] Reaction ${action} from ${userName} for track: ${trackName}`);
+
+          // Set platform context
+          currentPlatform = platform;
+          currentChannel = channelId;
+
+          // For reactions, we vote/gong the track that was just added (most recent in queue)
+          // This is more intuitive than requiring a queue position number
+
+          if (action === 'vote') {
+            // Reaction vote is for making the track play sooner
+            // We'll get the queue and find the track by name, then call voting.vote with its position
+            try {
+              const queue = await sonos.getQueue();
+              if (queue && queue.items) {
+                // Find the track by name (case-insensitive, partial match)
+                const trackIndex = queue.items.findIndex(item =>
+                  item.title.toLowerCase().includes(trackName.toLowerCase())
+                );
+
+                if (trackIndex >= 0) {
+                  // voting.vote expects track number from item.id (e.g., "Q:0/123" -> 123)
+                  // But we need to convert from array index to Sonos queue position
+                  const item = queue.items[trackIndex];
+                  const queueTrack = parseInt(item.id.split('/')[1]) - 1; // Convert to 0-based
+                  await voting.vote(['vote', queueTrack.toString()], channelId, userName);
+                } else {
+                  logger.warn(`Track "${trackName}" not found in queue for reaction vote`);
+                }
+              }
+            } catch (err) {
+              logger.error(`Error processing vote reaction: ${err.message}`);
+            }
+          }
+          // Note: Gong reactions removed - gong only works via command on currently playing track
+        });
       } catch (slackErr) {
         logger.error(`Failed to connect to Slack API: ${slackErr.message}`);
         if (!hasDiscord) {
@@ -895,7 +950,7 @@ try {
 
             if (action === 'vote') {
               // Reaction vote is for making the track play sooner
-              // We'll get the queue and find the track by name, then call _vote with its position
+              // We'll get the queue and find the track by name, then call voting.vote with its position
               try {
                 const queue = await sonos.getQueue();
                 if (queue && queue.items) {
@@ -905,8 +960,11 @@ try {
                   );
 
                   if (trackIndex >= 0) {
-                    // Convert to queue position (0-based index matches Sonos internal)
-                    await _vote(['vote', trackIndex.toString()], channelId, userName);
+                    // voting.vote expects track number from item.id (e.g., "Q:0/123" -> 123)
+                    // But we need to convert from array index to Sonos queue position
+                    const item = queue.items[trackIndex];
+                    const queueTrack = parseInt(item.id.split('/')[1]) - 1; // Convert to 0-based
+                    await voting.vote(['vote', queueTrack.toString()], channelId, userName);
                   } else {
                     logger.warn(`Track "${trackName}" not found in queue for reaction vote`);
                   }
@@ -914,10 +972,8 @@ try {
               } catch (err) {
                 logger.error(`Error processing vote reaction: ${err.message}`);
               }
-            } else if (action === 'gong') {
-              // Gong always targets the currently playing track
-              await _gong(channelId, userName);
             }
+            // Note: Gong reactions removed - gong only works via command on currently playing track
           });
         } else {
           logger.warn('Discord returned null (token maybe invalid). Running Slack-only.');
@@ -1064,7 +1120,8 @@ async function generateSelfSignedCert(certPath, keyPath) {
     }
 
     // Get hostname/IP for certificate
-    const hostname = ipAddress || 'localhost';
+    // Ensure hostname is always a valid string (not empty or undefined)
+    const hostname = (ipAddress && ipAddress.trim() !== '' && ipAddress !== 'IP_HOST') ? ipAddress : 'localhost';
 
     // Generate certificate valid for 1 year
     const attrs = [{ name: 'commonName', value: hostname }];
@@ -1092,10 +1149,11 @@ async function generateSelfSignedCert(certPath, keyPath) {
               type: 2, // DNS
               value: hostname,
             },
-            {
+            // Only add IP altName if hostname is a valid IP address
+            ...(hostname !== 'localhost' && /^\d+\.\d+\.\d+\.\d+$/.test(hostname) ? [{
               type: 7, // IP
               ip: hostname,
-            },
+            }] : []),
             {
               type: 2, // DNS
               value: 'localhost',
@@ -1137,36 +1195,57 @@ let finalCertPath = sslCertPath || defaultCertPath;
 let finalKeyPath = sslKeyPath || defaultKeyPath;
 
 // Check if certificates exist, or if we should auto-generate
+// Note: This runs at top-level, so we use .then() instead of await
+// We'll start HTTPS server after certificate is generated
 if (sslAutoGenerate && (!fs.existsSync(finalCertPath) || !fs.existsSync(finalKeyPath))) {
-  try {
   if (typeof logger !== 'undefined') {
-      logger.info('🔒 Auto-generating self-signed SSL certificate...');
-    } else {
-      console.log('🔒 Auto-generating self-signed SSL certificate...');
-    }
-    
-    const generated = generateSelfSignedCert(finalCertPath, finalKeyPath);
-    sslOptions = {
-      cert: generated.cert,
-      key: generated.key
-    };
-    useHttps = true;
-    
-    if (typeof logger !== 'undefined') {
-      logger.info(`✅ SSL certificate generated: ${finalCertPath}`);
-      logger.info(`   ⚠️  This is a self-signed certificate. Browsers will show a security warning.`);
-      logger.info(`   For production, use a certificate from a trusted CA (Let's Encrypt, etc.)`);
-    } else {
-      console.log(`✅ SSL certificate generated: ${finalCertPath}`);
-      console.log(`   ⚠️  This is a self-signed certificate. Browsers will show a security warning.`);
-    }
-  } catch (err) {
-    if (typeof logger !== 'undefined') {
-      logger.error(`Failed to auto-generate SSL certificate: ${err.message}. Falling back to HTTP.`);
-    } else {
-      console.error(`Failed to auto-generate SSL certificate: ${err.message}. Falling back to HTTP.`);
-    }
+    logger.info('🔒 Auto-generating self-signed SSL certificate...');
+  } else {
+    console.log('🔒 Auto-generating self-signed SSL certificate...');
   }
+  
+  generateSelfSignedCert(finalCertPath, finalKeyPath)
+    .then((generated) => {
+      sslOptions = {
+        cert: generated.cert,
+        key: generated.key
+      };
+      useHttps = true;
+      
+      if (typeof logger !== 'undefined') {
+        logger.info(`✅ SSL certificate generated: ${finalCertPath}`);
+        logger.info(`   ⚠️  This is a self-signed certificate. Browsers will show a security warning.`);
+        logger.info(`   For production, use a certificate from a trusted CA (Let's Encrypt, etc.)`);
+      } else {
+        console.log(`✅ SSL certificate generated: ${finalCertPath}`);
+        console.log(`   ⚠️  This is a self-signed certificate. Browsers will show a security warning.`);
+      }
+      
+      // Create and start HTTPS server after certificate is generated
+      if (useHttps && sslOptions && !httpsServer) {
+        httpsServer = https.createServer(sslOptions, async (req, res) => {
+          await handleHttpRequest(req, res);
+        });
+        
+        const httpsPort = config.get('httpsPort') || 8443;
+        httpsServer.listen(httpsPort, () => {
+          if (typeof logger !== 'undefined') {
+            logger.info(`🔒 HTTPS server listening on port ${httpsPort}`);
+            if (ttsEnabled) {
+              logger.info(`   TTS endpoint: https://${ipAddress || 'localhost'}:${httpsPort}/tts.mp3`);
+            }
+            logger.info(`   Setup wizard: https://${ipAddress || 'localhost'}:${httpsPort}/setup`);
+          }
+        });
+      }
+    })
+    .catch((err) => {
+      if (typeof logger !== 'undefined') {
+        logger.error(`Failed to auto-generate SSL certificate: ${err.message}. Falling back to HTTP.`);
+      } else {
+        console.error(`Failed to auto-generate SSL certificate: ${err.message}. Falling back to HTTP.`);
+      }
+    });
 } else if (finalCertPath && finalKeyPath) {
   // Try to load existing certificates
   try {
@@ -1790,8 +1869,9 @@ httpServer = http.createServer(async (req, res) => {
   await handleHttpRequest(req, res);
 });
 
-// Create HTTPS server if SSL is configured
-if (useHttps && sslOptions) {
+// Create HTTPS server if SSL is configured (synchronously if certs already exist)
+// If certs are being generated, HTTPS server will be created in the .then() callback above
+if (useHttps && sslOptions && !httpsServer) {
   httpsServer = https.createServer(sslOptions, async (req, res) => {
     await handleHttpRequest(req, res);
   });
@@ -2152,6 +2232,7 @@ function getConfigForAdmin() {
     soundcraftEnabled: config.get('soundcraftEnabled') || false,
     soundcraftIp: config.get('soundcraftIp') || '',
     soundcraftChannels: config.get('soundcraftChannels') || [],
+    slackAlwaysThread: config.get('slackAlwaysThread') === true, // Default: false
     webauthnRequireUserVerification: config.get('webauthnRequireUserVerification') === true, // Default: false for maximum compatibility
     // Don't expose sensitive values
     telemetryInstanceId: telemetryInstanceId ? maskSensitive(telemetryInstanceId) : '',
@@ -2920,8 +3001,14 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
  * Routes @mentions and natural language to AI, commands directly to processInput
  * Replaces the stub defined earlier
  */
-routeCommand = async function (text, channel, userName, platform = 'slack', isAdmin = false, isMention = false) {
+routeCommand = async function (text, channel, userName, platform = 'slack', isAdmin = false, isMention = false, messageTs = null) {
   logger.info(`>>> routeCommand: text="${text}", isMention=${isMention}`);
+  
+  // Store message timestamp for thread replies (if provided)
+  if (messageTs && platform === 'slack') {
+    messageTimestamps.set(channel, messageTs);
+    logger.debug(`Stored message timestamp ${messageTs} for channel ${channel}`);
+  }
 
   // Clean up copy-pasted text from Slack formatting FIRST
   // Trim whitespace first
@@ -3352,16 +3439,20 @@ async function _showQueue(channel) {
       }
     });
     
+    // Check if we should use threads (always thread if >20 tracks)
+    const shouldUseThread = result.total > 20;
+    const threadOptions = shouldUseThread ? { forceThread: true } : {};
+    
     for (var i in tracks) {
       message += tracks[i] + '\n';
       if (i > 0 && Math.floor(i % 100) === 0) {
-        _slackMessage(message, channel);
+        _slackMessage(message, channel, threadOptions);
         message = '';
       }
     }
     
     if (message) {
-      _slackMessage(message, channel);
+      _slackMessage(message, channel, threadOptions);
     }
   } catch (err) {
     logger.error('Error fetching queue: ' + err);
@@ -4079,6 +4170,7 @@ async function _addalbum(input, channel, userName) {
 
     if (result.coverUrl) {
       _slackMessage(text, channel, {
+        trackName: result.name, // Track album name for reactions
         blocks: [
           {
             type: "section",
@@ -4095,7 +4187,7 @@ async function _addalbum(input, channel, userName) {
         ]
       });
     } else {
-      _slackMessage(text, channel);
+      _slackMessage(text, channel, { trackName: result.name }); // Track album name for reactions
     }
 
     // Queue tracks in background (don't block user response)
@@ -4308,7 +4400,7 @@ async function _addplaylist(input, channel, userName) {
     text += warningMessage;
 
     logger.info(`Sending playlist confirmation message: ${text}`);
-    _slackMessage(text, channel);
+    _slackMessage(text, channel, { trackName: result.name }); // Track playlist name for reactions
 
     // Queue tracks in background (don't block user response)
     (async () => {
@@ -4984,6 +5076,7 @@ function _setconfig(input, channel, userName) {
 > \`telemetryEnabled\`: ${config.get('telemetryEnabled')}
 > \`soundcraftEnabled\`: ${config.get('soundcraftEnabled') || false}
 > \`soundcraftIp\`: ${config.get('soundcraftIp') || '(not set)'}
+> \`slackAlwaysThread\`: ${config.get('slackAlwaysThread') || false}
 
 *Usage:* \`setconfig <key> <value>\`
 *Example:* \`setconfig gongLimit 5\`
@@ -4992,6 +5085,7 @@ function _setconfig(input, channel, userName) {
 *Example:* \`setconfig telemetryEnabled false\`
 *Example:* \`setconfig soundcraftEnabled true\`
 *Example:* \`setconfig soundcraftIp 192.168.1.100\`
+*Example:* \`setconfig slackAlwaysThread true\`
     `;
     _slackMessage(currentConfig.trim(), channel);
     return;
@@ -5015,7 +5109,8 @@ function _setconfig(input, channel, userName) {
     defaultTheme: { type: 'string', minLen: 0, maxLen: 100 },
     telemetryEnabled: { type: 'boolean' },
     soundcraftEnabled: { type: 'boolean' },
-    soundcraftIp: { type: 'string', minLen: 0, maxLen: 50 }
+    soundcraftIp: { type: 'string', minLen: 0, maxLen: 50 },
+    slackAlwaysThread: { type: 'boolean' }
   };
 
   if (!allowedConfigs[key]) {
