@@ -1499,12 +1499,21 @@ async function handleHttpRequest(req, res) {
       try {
         const webauthnHandler = require('./lib/webauthn-handler');
         const enabled = webauthnHandler.isWebAuthnEnabled();
+        // Check if credentials file exists and has credentials
+        // If file doesn't exist or has no credentials, fall back to password login
         const hasCreds = enabled ? await webauthnHandler.hasCredentials() : false;
+        // Get file info for debugging
+        const fileInfo = await webauthnHandler.getCredentialsFileInfo();
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ enabled, hasCredentials: hasCreds }));
+        res.end(JSON.stringify({ 
+          enabled, 
+          hasCredentials: hasCreds,
+          credentialsFile: fileInfo
+        }));
       } catch (err) {
+        // On any error, allow password login fallback
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ enabled: false, hasCredentials: false }));
+        res.end(JSON.stringify({ enabled: false, hasCredentials: false, error: err.message }));
       }
       return;
     }
@@ -1977,13 +1986,42 @@ async function handleAdminAPI(req, res, url) {
       res.end(JSON.stringify(configData));
       return;
     }
+
+    // Get config values for specific keys (used by WebAuthn settings)
+    if (urlPath === '/api/admin/config-values' && req.method === 'GET') {
+      try {
+        // Get WebAuthn settings directly from config
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+          exists: true, 
+          values: {
+            webauthnRequireUserVerification: config.get('webauthnRequireUserVerification') === true,
+            webauthnPreferPlatformOnly: config.get('webauthnPreferPlatformOnly') === true,
+            webauthnTimeout: parseInt(config.get('webauthnTimeout') || '60', 10),
+            webauthnResidentKey: config.get('webauthnResidentKey') || 'discouraged',
+            webauthnChallengeExpiration: parseInt(config.get('webauthnChallengeExpiration') || '60', 10),
+            webauthnMaxCredentials: parseInt(config.get('webauthnMaxCredentials') || '0', 10)
+          }
+        }));
+      } catch (err) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ exists: false, values: null }));
+      }
+      return;
+    }
     
     // Update config value
     if (urlPath === '/api/admin/config/update') {
-      const data = JSON.parse(body);
-      const result = await updateConfigValue(data.key, data.value);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(result));
+      try {
+        const data = JSON.parse(body);
+        const result = await updateConfigValue(data.key, data.value);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        logger.error('Error updating config:', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message || 'Failed to update config' }));
+      }
       return;
     }
     
@@ -2246,6 +2284,11 @@ function getConfigForAdmin() {
     soundcraftChannels: config.get('soundcraftChannels') || [],
     slackAlwaysThread: config.get('slackAlwaysThread') === true, // Default: false
     webauthnRequireUserVerification: config.get('webauthnRequireUserVerification') === true, // Default: false for maximum compatibility
+    webauthnPreferPlatformOnly: config.get('webauthnPreferPlatformOnly') === true, // Default: false to allow both platform and cross-platform
+    webauthnTimeout: parseInt(config.get('webauthnTimeout') || '60', 10), // Default: 60 seconds
+    webauthnResidentKey: config.get('webauthnResidentKey') || 'discouraged', // Default: 'discouraged'
+    webauthnChallengeExpiration: parseInt(config.get('webauthnChallengeExpiration') || '60', 10), // Default: 60 seconds
+    webauthnMaxCredentials: parseInt(config.get('webauthnMaxCredentials') || '0', 10), // Default: 0 (unlimited)
     // Don't expose sensitive values
     telemetryInstanceId: telemetryInstanceId ? maskSensitive(telemetryInstanceId) : '',
     adminPasswordHash: adminPasswordHash ? '[REDACTED]' : ''
@@ -2452,7 +2495,8 @@ async function updateConfigValue(key, value) {
       'voteTimeLimitMinutes', 'ttsEnabled', 'logLevel', 'ipAddress',
       'webPort', 'httpsPort', 'sonos', 'defaultTheme', 'themePercentage',
       'openaiApiKey', 'aiModel', 'soundcraftEnabled', 'soundcraftIp', 'soundcraftChannels',
-      'webauthnEnabled', 'webauthnRpName', 'webauthnRpId', 'webauthnOrigin', 'webauthnRequireUserVerification'
+      'webauthnEnabled', 'webauthnRpName', 'webauthnRpId', 'webauthnOrigin', 'webauthnRequireUserVerification', 'webauthnPreferPlatformOnly',
+      'webauthnTimeout', 'webauthnResidentKey', 'webauthnChallengeExpiration', 'webauthnMaxCredentials'
     ];
     
     if (!allowedKeys.includes(key)) {

@@ -408,6 +408,49 @@
             <span id="webauthn-uv-status" style="font-size: 0.9rem; font-weight: 600;"></span>
           </label>
         </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1);">
+          <div style="flex: 1;">
+            <strong style="display: block; margin-bottom: 0.25rem;">Prefer Platform Only (Touch ID/Face ID)</strong>
+            <small style="color: rgba(255,255,255,0.6); font-size: 0.85rem;">
+              When enabled: <strong style="color: #fbbf24;">ONLY</strong> allows Touch ID/Face ID (blocks Yubikey, may reduce QR prompts)<br>
+              When disabled: allows both platform (Touch ID) and cross-platform (Yubikey) authenticators<br>
+              <em style="color: rgba(255,255,255,0.5);">Note: QR code prompts on macOS/iOS are a system feature and may still appear</em>
+            </small>
+          </div>
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input type="checkbox" id="webauthn-prefer-platform-only" style="width: 18px; height: 18px; cursor: pointer;">
+            <span id="webauthn-platform-only-status" style="font-size: 0.9rem; font-weight: 600;"></span>
+          </label>
+        </div>
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1);">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div>
+              <label for="webauthn-timeout" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Timeout (seconds)</label>
+              <input type="number" id="webauthn-timeout" min="10" max="300" step="10" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
+              <small style="color: rgba(255,255,255,0.6); font-size: 0.8rem;">Registration/authentication timeout (10-300s, default: 60s)</small>
+            </div>
+            <div>
+              <label for="webauthn-challenge-expiration" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Challenge Expiration (seconds)</label>
+              <input type="number" id="webauthn-challenge-expiration" min="30" max="300" step="10" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
+              <small style="color: rgba(255,255,255,0.6); font-size: 0.8rem;">How long challenges remain valid (30-300s, default: 60s)</small>
+            </div>
+            <div>
+              <label for="webauthn-resident-key" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Resident Key Preference</label>
+              <select id="webauthn-resident-key" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
+                <option value="discouraged">Discouraged (No Passkeys)</option>
+                <option value="preferred">Preferred (Allow Passkeys)</option>
+                <option value="required">Required (Force Passkeys)</option>
+              </select>
+              <small style="color: rgba(255,255,255,0.6); font-size: 0.8rem;">Controls passkey support (default: discouraged)</small>
+            </div>
+            <div>
+              <label for="webauthn-max-credentials" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Max Credentials</label>
+              <input type="number" id="webauthn-max-credentials" min="0" max="50" step="1" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
+              <small style="color: rgba(255,255,255,0.6); font-size: 0.8rem;">Max credentials per user (0 = unlimited, default: 0)</small>
+            </div>
+          </div>
+          <button class="btn btn-secondary" id="btn-save-webauthn-advanced" style="margin-top: 1rem; width: 100%;">Save Advanced Settings</button>
+        </div>
       </div>
 
       <div id="webauthn-credentials-list" style="margin-bottom: 1rem;">
@@ -637,6 +680,7 @@
       window.SimpleWebAuthnBrowser = SimpleWebAuthnBrowser;
     }
   </script>
+  <script src="/setup/webauthn-client.js"></script>
   <script src="/setup/admin.js"></script>
 </body>
 </html>
