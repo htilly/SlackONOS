@@ -1121,7 +1121,19 @@ async function generateSelfSignedCert(certPath, keyPath) {
 
     // Get hostname/IP for certificate
     // Ensure hostname is always a valid string (not empty or undefined)
-    const hostname = (ipAddress && ipAddress.trim() !== '' && ipAddress !== 'IP_HOST') ? ipAddress : 'localhost';
+    // Defensive check: handle undefined, null, empty string, or invalid values
+    let hostname = 'localhost'; // Default fallback
+    if (ipAddress && typeof ipAddress === 'string') {
+      const trimmed = ipAddress.trim();
+      if (trimmed !== '' && trimmed !== 'IP_HOST') {
+        hostname = trimmed;
+      }
+    }
+    
+    // Final safety check - ensure hostname is never undefined or empty
+    if (!hostname || typeof hostname !== 'string' || hostname.trim() === '') {
+      hostname = 'localhost';
+    }
 
     // Generate certificate valid for 1 year
     const attrs = [{ name: 'commonName', value: hostname }];
