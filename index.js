@@ -2831,23 +2831,45 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
     
     // Check if user is confirming a previous suggestion BEFORE parsing
     const ctx = AIHandler.getUserContext(userName);
-    if (ctx && ctx.suggestedAction) {
-      // Check if this looks like a confirmation
-      const confirmationPattern = /\b(ok|yes|do it|sure|yeah|yep|please|go ahead|play it|gör det|ja|kör|varsågod|snälla|spela)\b/i;
-      if (confirmationPattern.test(cleanText)) {
-        logger.info(`User "${userName}" confirmed suggested action: ${ctx.suggestedAction.command} ${ctx.suggestedAction.args.join(' ')}`);
+    if (ctx) {
+      // Check if this looks like a confirmation (more lenient pattern for short affirmatives)
+      const confirmationPattern = /\b(ok|yes|do it|sure|yeah|yep|please|go ahead|play it|gör det|ja|kör|varsågod|snälla|spela|absolutely|definitely|sounds good|let's do it|let's go)\b/i;
+      // Also match if the entire message is just a short affirmative (1-3 words)
+      const isShortAffirmative = /^[\s\w!.,?-]{1,30}$/i.test(cleanText) && confirmationPattern.test(cleanText);
+      
+      if (isShortAffirmative || confirmationPattern.test(cleanText)) {
+        // Prefer suggestedAction if available (preserves args structure)
+        if (ctx.suggestedAction) {
+          logger.info(`User "${userName}" confirmed suggested action: ${ctx.suggestedAction.command} ${ctx.suggestedAction.args.join(' ')}`);
+          
+          parsed = {
+            command: ctx.suggestedAction.command,
+            args: ctx.suggestedAction.args,
+            confidence: 0.95,
+            reasoning: 'User confirmed previous suggestion',
+            summary: 'You got it! Playing those tunes now! 🎵'
+          };
+        } else if (ctx.lastSuggestion) {
+          // Fallback: parse from lastSuggestion string if suggestedAction not available
+          logger.info(`User "${userName}" confirmed last suggestion: ${ctx.lastSuggestion}`);
+          
+          const parts = ctx.lastSuggestion.trim().split(/\s+/);
+          const cmd = parts[0] || 'add';
+          const args = parts.slice(1);
+          
+          parsed = {
+            command: cmd,
+            args: args,
+            confidence: 0.95,
+            reasoning: 'User confirmed previous suggestion',
+            summary: 'You got it! Playing those tunes now! 🎵'
+          };
+        }
         
-        // Use the stored suggestedAction directly to preserve args structure
-        parsed = {
-          command: ctx.suggestedAction.command,
-          args: ctx.suggestedAction.args,
-          confidence: 0.95,
-          reasoning: 'User confirmed previous suggestion',
-          summary: 'You got it! Playing those tunes now! 🎵'
-        };
-        
-        // Clear context since we're executing it
-        AIHandler.clearUserContext(userName);
+        if (parsed) {
+          // Clear context since we're executing it
+          AIHandler.clearUserContext(userName);
+        }
       }
     }
     
