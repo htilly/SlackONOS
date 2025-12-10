@@ -150,7 +150,7 @@
   <div class="wizard-container login-container">
     <div class="wizard login-card">
       <div class="login-header">
-        <img src="/setup/ZenMusic.png" alt="SlackONOS Logo">
+        <img src="/setup/SlackONOS.png" alt="SlackONOS Logo">
         <h1>Admin Login</h1>
         <p>Enter your credentials to access the admin panel</p>
       </div>
@@ -160,7 +160,7 @@
       <!-- WebAuthn Login Section -->
       <div id="webauthn-section" style="display: none; margin-bottom: 1.5rem;">
         <button type="button" class="btn-login" id="btn-webauthn" style="width: 100%; background: linear-gradient(135deg, #06b6d4, #0891b2);">
-          🔐 Login with Security Key
+          🔐 Login with Yubikey!
         </button>
         <div style="text-align: center; margin-top: 1rem; color: rgba(255, 255, 255, 0.6); font-size: 0.85rem;">
           Use your FIDO2 security key or biometric
@@ -219,28 +219,6 @@
         const response = await fetch(`${API_BASE}/webauthn/status`);
         const data = await response.json();
         
-        // Debug: Show credentials file path and content
-        if (data.credentialsFile) {
-          console.log("🔐 FIDO Credentials File Debug:");
-          console.log("Path:", data.credentialsFile.path);
-          console.log("Exists:", data.credentialsFile.exists);
-          console.log("Size:", data.credentialsFile.size, "bytes");
-          console.log("Content:", data.credentialsFile.content);
-          
-          // Also display in page for easy viewing
-          const debugDiv = document.createElement('div');
-          debugDiv.style.cssText = 'margin: 1rem 0; padding: 1rem; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; font-family: monospace; font-size: 0.85rem; color: rgba(255, 255, 255, 0.9);';
-          debugDiv.innerHTML = `
-            <strong style="color: #8b5cf6;">🔐 FIDO Credentials File Debug:</strong><br>
-            <strong>Path:</strong> ${data.credentialsFile.path}<br>
-            <strong>Exists:</strong> ${data.credentialsFile.exists ? '✅ Yes' : '❌ No'}<br>
-            <strong>Size:</strong> ${data.credentialsFile.size || 0} bytes<br>
-            <strong>Content:</strong><br>
-            <pre style="margin-top: 0.5rem; padding: 0.5rem; background: rgba(0, 0, 0, 0.5); border-radius: 4px; overflow-x: auto; max-height: 300px; overflow-y: auto;">${JSON.stringify(data.credentialsFile.content, null, 2)}</pre>
-          `;
-          document.body.insertBefore(debugDiv, document.body.firstChild);
-        }
-        
         if (data.enabled && data.hasCredentials) {
           webauthnSection.style.display = 'block';
           passwordSection.style.display = 'none';
@@ -292,7 +270,7 @@
           } else {
             showError('Authentication failed. Please try again.');
             btnWebAuthn.disabled = false;
-            btnWebAuthn.innerHTML = '🔐 Login with Security Key';
+            btnWebAuthn.innerHTML = '🔐 Login with Yubikey!';
           }
         } else {
           // Fallback to manual method if WebAuthnClient not available
@@ -340,7 +318,7 @@
           } else {
             showError('Authentication failed. Please try again.');
             btnWebAuthn.disabled = false;
-            btnWebAuthn.innerHTML = '🔐 Login with Security Key';
+            btnWebAuthn.innerHTML = '🔐 Login with Yubikey!';
           }
         }
       } catch (err) {
@@ -356,7 +334,7 @@
 
         showError(errorMessage);
         btnWebAuthn.disabled = false;
-        btnWebAuthn.innerHTML = '🔐 Login with Security Key';
+        btnWebAuthn.innerHTML = '🔐 Login with Yubikey!';
       }
     });
 

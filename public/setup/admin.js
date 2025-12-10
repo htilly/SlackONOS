@@ -22,10 +22,12 @@ document.addEventListener('DOMContentLoaded', () => {
   setupPasswordChange();
   setupWebAuthn();
   setupConfigCollapse();
+  setupSecurityCollapse();
   setupPlayerControls();
   loadAllData();
   setupRefreshButton();
   setupLogViewer();
+  loadLogLevel(); // Load log level setting
   startEventStream(); // Use real-time updates instead of polling
   // Keep auto-refresh as fallback (longer interval)
   startAutoRefresh(60000); // Fallback refresh every 60 seconds
@@ -235,7 +237,6 @@ async function loadConfig() {
       { key: 'httpsPort', label: 'HTTPS Port', type: 'number', min: 1, max: 65535, description: 'Port for HTTPS server' },
       { key: 'sonos', label: 'Sonos IP Address', type: 'text', description: 'IP address of Sonos speaker' },
       { key: 'ttsEnabled', label: 'TTS Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable text-to-speech announcements' },
-      { key: 'logLevel', label: 'Log Level', type: 'select', options: ['debug', 'info', 'warn', 'error'], description: 'Logging verbosity level' },
       { key: 'defaultTheme', label: 'Default Theme', type: 'text', description: 'Default music theme (e.g., lounge, club, office)' },
       { key: 'themePercentage', label: 'Theme Percentage', type: 'number', min: 0, max: 100, description: 'Percentage of theme tracks to mix in (0-100)' },
       { key: 'openaiApiKey', label: 'OpenAI API Key', type: 'text', description: 'OpenAI API key for natural language parsing (starts with sk-)' },
@@ -458,6 +459,28 @@ function setupConfigCollapse() {
   });
 }
 
+function setupSecurityCollapse() {
+  const toggle = document.getElementById('btn-toggle-security');
+  const body = document.getElementById('security-body');
+  const toggleDiv = document.getElementById('security-toggle');
+  if (!toggle || !body || !toggleDiv) return;
+  
+  // Make the entire header clickable
+  toggleDiv.addEventListener('click', () => {
+    const isHidden = body.style.display === 'none' || body.style.display === '';
+    body.style.display = isHidden ? 'block' : 'none';
+    toggle.textContent = isHidden ? 'Hide' : 'Show';
+  });
+  
+  // Also make the button itself clickable
+  toggle.addEventListener('click', (e) => {
+    e.stopPropagation(); // Prevent double-trigger
+    const isHidden = body.style.display === 'none' || body.style.display === '';
+    body.style.display = isHidden ? 'block' : 'none';
+    toggle.textContent = isHidden ? 'Hide' : 'Show';
+  });
+}
+
 function stopAutoRefresh() { if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; } }
 
 let logEventSource = null;
@@ -468,31 +491,120 @@ function setupLogViewer() {
   const clearBtn = document.getElementById('btn-clear-logs');
   const logsContainer = document.getElementById('logs-container');
   const logsContent = document.getElementById('logs-content');
+  const logLevelSelect = document.getElementById('log-level-select');
+  
   if (!toggleBtn || !logsContainer) return;
+  
   toggleBtn.addEventListener('click', () => {
     logsVisible = !logsVisible;
     logsContainer.style.display = logsVisible ? 'block' : 'none';
     toggleBtn.textContent = logsVisible ? 'Hide Logs' : 'Show Logs';
     if (logsVisible) startLogStream(); else stopLogStream();
   });
+  
   if (clearBtn) clearBtn.addEventListener('click', () => { logsContent.innerHTML = ''; });
+  
+  // Handle log level change
+  if (logLevelSelect) {
+    logLevelSelect.addEventListener('change', async (e) => {
+      const newLevel = e.target.value;
+      const originalValue = logLevelSelect.value;
+      try {
+        const response = await fetch(`${API_BASE}/config/update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'logLevel', value: newLevel })
+        });
+        if (response.status === 401) {
+          window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
+          return;
+        }
+        const result = await response.json();
+        if (result.success) {
+          // Show brief confirmation
+          logLevelSelect.style.borderColor = '#4ade80';
+          setTimeout(() => {
+            logLevelSelect.style.borderColor = 'rgba(255,255,255,0.2)';
+          }, 1000);
+        } else {
+          // Revert on error
+          logLevelSelect.value = originalValue;
+          alert(`Failed to update log level: ${result.error || 'Unknown error'}`);
+        }
+      } catch (err) {
+        console.error('Error updating log level:', err);
+        logLevelSelect.value = originalValue;
+        alert(`Failed to update log level: ${err.message}`);
+      }
+    });
+  }
+}
+
+async function loadLogLevel() {
+  try {
+    const response = await fetch(`${API_BASE}/config`);
+    if (response.status === 401) {
+      window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
+      return;
+    }
+    const config = await response.json();
+    const logLevelSelect = document.getElementById('log-level-select');
+    if (logLevelSelect && config.logLevel) {
+      logLevelSelect.value = config.logLevel;
+    }
+  } catch (err) {
+    console.error('Error loading log level:', err);
+  }
 }
 
 function startLogStream() {
-  fetch(`${API_BASE}/logs/buffer`)
-    .then(response => {
-      if (response.status === 401) { window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname); return null; }
-      return response.json();
-    })
-    .then(data => {
-      const logsContent = document.getElementById('logs-content');
-      logsContent.innerHTML = '';
-      if (data && data.logs && data.logs.length > 0) data.logs.forEach(log => addLogEntry(log));
-    })
-    .catch(err => console.error('Error loading log buffer:', err));
-  logEventSource = new EventSource(`${API_BASE}/logs`);
-  logEventSource.onmessage = (event) => { try { const data = JSON.parse(event.data); if (data.type === 'log') addLogEntry(data); } catch (err) { console.error('Error parsing log event:', err); } };
-  logEventSource.onerror = (err) => { console.error('Log stream error:', err); setTimeout(() => { if (logsVisible && (!logEventSource || logEventSource.readyState === EventSource.CLOSED)) startLogStream(); }, 5000); };
+  // Close existing connection if any
+  if (logEventSource) {
+    logEventSource.close();
+    logEventSource = null;
+  }
+  
+  // Clear existing logs
+  const logsContent = document.getElementById('logs-content');
+  if (logsContent) {
+    logsContent.innerHTML = '';
+  }
+  
+  // Create EventSource - server will send buffer on connect, then stream new logs
+  // Only create if we don't already have an active connection
+  if (!logEventSource || logEventSource.readyState === EventSource.CLOSED) {
+    logEventSource = new EventSource(`${API_BASE}/logs`);
+    
+    logEventSource.onopen = () => {
+      // Connection opened - server will send buffer automatically
+      console.log('Log stream connected');
+    };
+    
+    logEventSource.onmessage = (event) => { 
+      try { 
+        const data = JSON.parse(event.data); 
+        // Only process log entries, ignore 'connected' and heartbeat messages
+        if (data.type === 'log') {
+          addLogEntry(data);
+        }
+        // Ignore 'connected' type messages
+      } catch (err) { 
+        console.error('Error parsing log event:', err); 
+      } 
+    };
+    
+    logEventSource.onerror = (err) => { 
+      console.error('Log stream error:', err); 
+      // Only reconnect if logs are still visible and connection is closed
+      if (logsVisible && logEventSource && logEventSource.readyState === EventSource.CLOSED) {
+        setTimeout(() => {
+          if (logsVisible) {
+            startLogStream();
+          }
+        }, 5000);
+      }
+    };
+  }
 }
 
 function stopLogStream() { if (logEventSource) { logEventSource.close(); logEventSource = null; } }

@@ -239,7 +239,16 @@ const logger = new WinstonWrapper({
   ],
 });
 
-// Override logger methods to broadcast to SSE clients
+// Helper function to check if a log level should be broadcast based on current logger level
+function shouldBroadcastLog(level) {
+  const currentLevel = logger.getLevel ? logger.getLevel() : 'info';
+  const levelPriority = { error: 0, warn: 1, info: 2, debug: 3 };
+  const currentPriority = levelPriority[currentLevel] !== undefined ? levelPriority[currentLevel] : 2; // Default to 'info'
+  const logPriority = levelPriority[level] !== undefined ? levelPriority[level] : 2;
+  return logPriority <= currentPriority;
+}
+
+// Override logger methods to broadcast to SSE clients (respecting log level)
 const originalDebug = logger.debug.bind(logger);
 const originalInfo = logger.info.bind(logger);
 const originalWarn = logger.warn.bind(logger);
@@ -247,42 +256,50 @@ const originalError = logger.error.bind(logger);
 
 logger.debug = function(msg) {
   originalDebug(msg);
-  const logEntry = {
-    timestamp: new Date().toISOString(),
-    level: 'debug',
-    message: msg
-  };
-  broadcastLog(logEntry);
+  if (shouldBroadcastLog('debug')) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'debug',
+      message: msg
+    };
+    broadcastLog(logEntry);
+  }
 };
 
 logger.info = function(msg) {
   originalInfo(msg);
-  const logEntry = {
-    timestamp: new Date().toISOString(),
-    level: 'info',
-    message: msg
-  };
-  broadcastLog(logEntry);
+  if (shouldBroadcastLog('info')) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'info',
+      message: msg
+    };
+    broadcastLog(logEntry);
+  }
 };
 
 logger.warn = function(msg) {
   originalWarn(msg);
-  const logEntry = {
-    timestamp: new Date().toISOString(),
-    level: 'warn',
-    message: msg
-  };
-  broadcastLog(logEntry);
+  if (shouldBroadcastLog('warn')) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'warn',
+      message: msg
+    };
+    broadcastLog(logEntry);
+  }
 };
 
 logger.error = function(msg) {
   originalError(msg);
-  const logEntry = {
-    timestamp: new Date().toISOString(),
-    level: 'error',
-    message: msg
-  };
-  broadcastLog(logEntry);
+  if (shouldBroadcastLog('error')) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'error',
+      message: msg
+    };
+    broadcastLog(logEntry);
+  }
 };
 
 // Log any file migrations that occurred during startup
@@ -2503,6 +2520,20 @@ async function updateConfigValue(key, value) {
       return { success: false, error: 'Key not allowed to be updated via admin' };
     }
     
+    // Special handling for logLevel - update logger immediately
+    if (key === 'logLevel') {
+      const validLevels = ['error', 'warn', 'info', 'debug'];
+      if (!validLevels.includes(value)) {
+        return { success: false, error: `Invalid log level. Must be one of: ${validLevels.join(', ')}` };
+      }
+      // Update logger level immediately
+      if (logger && typeof logger.setLevel === 'function') {
+        logger.setLevel(value);
+        // Use warn instead of info to ensure it's always shown regardless of level
+        logger.warn(`Log level changed to: ${value}`);
+      }
+    }
+    
     // Update in memory
     config.set(key, value);
     
@@ -2944,6 +2975,26 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
           }
           
           _slackMessage(msg, channel);
+          
+          // Check for region errors (UPnP error 800) and notify admin channel
+          const regionErrors = result.skipped?.filter(t => t.errorCode === '800') || [];
+          if (regionErrors.length > 0 && global.adminChannel) {
+            const currentMarket = config.get('market') || 'US';
+            const marketOptions = ['US', 'SE', 'GB', 'DE', 'FR', 'CA', 'AU', 'JP', 'NO', 'DK', 'FI'];
+            const marketOptionsList = marketOptions.map(m => m === currentMarket ? `*${m}* (current)` : m).join(', ');
+            
+            _slackMessage(
+              `⚠️ *Spotify Region Warning*\n` +
+              `${regionErrors.length} track(s) failed due to region availability:\n` +
+              `${regionErrors.slice(0, 3).map(t => `• *${t.name}* by ${t.artist}`).join('\n')}${regionErrors.length > 3 ? `\n... and ${regionErrors.length - 3} more` : ''}\n\n` +
+              `Please verify your Spotify region configuration.\n` +
+              `Current region: *${currentMarket}*\n` +
+              `Available options: ${marketOptionsList}\n` +
+              `Update via setup wizard or admin panel.`,
+              global.adminChannel
+            );
+          }
+          
           return;
         } catch (e) {
           logger.error('Multi-add failed: ' + e.message);
@@ -3009,6 +3060,25 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
             if (!result.added) {
               _slackMessage(`🤷 Couldn't find tracks for "${query}" in followUp.`, channel);
               return;
+            }
+
+            // Check for region errors (UPnP error 800) and notify admin channel
+            const regionErrors = result.skipped?.filter(t => t.errorCode === '800') || [];
+            if (regionErrors.length > 0 && global.adminChannel) {
+              const currentMarket = config.get('market') || 'US';
+              const marketOptions = ['US', 'SE', 'GB', 'DE', 'FR', 'CA', 'AU', 'JP', 'NO', 'DK', 'FI'];
+              const marketOptionsList = marketOptions.map(m => m === currentMarket ? `*${m}* (current)` : m).join(', ');
+              
+              _slackMessage(
+                `⚠️ *Spotify Region Warning*\n` +
+                `${regionErrors.length} track(s) failed due to region availability:\n` +
+                `${regionErrors.slice(0, 3).map(t => `• *${t.name}* by ${t.artist}`).join('\n')}${regionErrors.length > 3 ? `\n... and ${regionErrors.length - 3} more` : ''}\n\n` +
+                `Please verify your Spotify region configuration.\n` +
+                `Current region: *${currentMarket}*\n` +
+                `Available options: ${marketOptionsList}\n` +
+                `Update via setup wizard or admin panel.`,
+                global.adminChannel
+              );
             }
 
             // Build informative message
@@ -4112,6 +4182,23 @@ async function _add(input, channel, userName) {
 
       if (errorCode === '800') {
         _slackMessage('🤷 Track not available in your region. Try searching for different songs! 🎵', channel);
+        
+        // Also notify admin channel about region configuration
+        if (global.adminChannel && channel !== global.adminChannel) {
+          const currentMarket = config.get('market') || 'US';
+          const marketOptions = ['US', 'SE', 'GB', 'DE', 'FR', 'CA', 'AU', 'JP', 'NO', 'DK', 'FI'];
+          const marketOptionsList = marketOptions.map(m => m === currentMarket ? `*${m}* (current)` : m).join(', ');
+          
+          _slackMessage(
+            `⚠️ *Spotify Region Warning*\n` +
+            `Track "*${firstCandidate.name}*" by ${firstCandidate.artist} failed due to region availability.\n\n` +
+            `Please verify your Spotify region configuration.\n` +
+            `Current region: *${currentMarket}*\n` +
+            `Available options: ${marketOptionsList}\n` +
+            `Update via setup wizard or admin panel.`,
+            global.adminChannel
+          );
+        }
       } else {
         _slackMessage('🤷 Couldn\'t add the track. It may not be available or there was an error. Try a different search! 🎵', channel);
       }
