@@ -391,22 +391,22 @@
         <div style="margin-bottom: 2rem; padding: 1rem; background: rgba(255, 255, 255, 0.03); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
           <h3 style="margin-top: 0; margin-bottom: 1rem;">Change Admin Password</h3>
           <button class="btn btn-secondary" id="btn-change-password">Change Password</button>
-        </div>
+    </div>
 
-        <!-- WebAuthn Section -->
+    <!-- WebAuthn Section -->
         <div style="margin-bottom: 1rem;">
           <h3 style="margin-bottom: 1rem;">WebAuthn / FIDO2 Security Keys</h3>
-          <div id="webauthn-status" style="margin-bottom: 1rem; padding: 1rem; background: rgba(255, 255, 255, 0.05); border-radius: 8px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <div>
-                <strong>Status:</strong> <span id="webauthn-status-text">Checking...</span>
-              </div>
-              <button class="btn btn-secondary" id="btn-enable-webauthn" style="display: none;">Enable WebAuthn</button>
-            </div>
+      <div id="webauthn-status" style="margin-bottom: 1rem; padding: 1rem; background: rgba(255, 255, 255, 0.05); border-radius: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <strong>Status:</strong> <span id="webauthn-status-text">Checking...</span>
           </div>
-          
-          <!-- WebAuthn Settings Toggle -->
-          <div id="webauthn-settings" style="margin-bottom: 1rem; padding: 1rem; background: rgba(255, 255, 255, 0.03); border-radius: 8px; display: none;">
+          <button class="btn btn-secondary" id="btn-enable-webauthn" style="display: none;">Enable WebAuthn</button>
+        </div>
+      </div>
+      
+      <!-- WebAuthn Settings Toggle -->
+      <div id="webauthn-settings" style="margin-bottom: 1rem; padding: 1rem; background: rgba(255, 255, 255, 0.03); border-radius: 8px; display: none;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
           <div style="flex: 1;">
             <strong style="display: block; margin-bottom: 0.25rem;">Require User Verification (PIN/Biometric)</strong>
@@ -462,15 +462,15 @@
             </div>
           </div>
             <button class="btn btn-secondary" id="btn-save-webauthn-advanced" style="margin-top: 1rem; width: 100%;">Save Advanced Settings</button>
-          </div>
+      </div>
 
-          <div id="webauthn-credentials-list" style="margin-bottom: 1rem;">
-            <!-- Credentials will be loaded here -->
-          </div>
-          <div style="margin-top: 1rem;">
-            <button class="btn btn-primary" id="btn-register-webauthn" style="display: none;">Register New Security Key</button>
-          </div>
-          <div id="webauthn-message" class="validation-message" style="margin-top: 1rem;"></div>
+      <div id="webauthn-credentials-list" style="margin-bottom: 1rem;">
+        <!-- Credentials will be loaded here -->
+      </div>
+      <div style="margin-top: 1rem;">
+        <button class="btn btn-primary" id="btn-register-webauthn" style="display: none;">Register New Security Key</button>
+      </div>
+      <div id="webauthn-message" class="validation-message" style="margin-top: 1rem;"></div>
         </div>
       </div>
     </div>

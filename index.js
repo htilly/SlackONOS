@@ -280,48 +280,48 @@ const originalError = logger.error.bind(logger);
 logger.debug = function(msg) {
   originalDebug(msg);
   if (shouldBroadcastLog('debug')) {
-    const logEntry = {
-      timestamp: new Date().toISOString(),
-      level: 'debug',
-      message: msg
-    };
-    broadcastLog(logEntry);
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level: 'debug',
+    message: msg
+  };
+  broadcastLog(logEntry);
   }
 };
 
 logger.info = function(msg) {
   originalInfo(msg);
   if (shouldBroadcastLog('info')) {
-    const logEntry = {
-      timestamp: new Date().toISOString(),
-      level: 'info',
-      message: msg
-    };
-    broadcastLog(logEntry);
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level: 'info',
+    message: msg
+  };
+  broadcastLog(logEntry);
   }
 };
 
 logger.warn = function(msg) {
   originalWarn(msg);
   if (shouldBroadcastLog('warn')) {
-    const logEntry = {
-      timestamp: new Date().toISOString(),
-      level: 'warn',
-      message: msg
-    };
-    broadcastLog(logEntry);
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level: 'warn',
+    message: msg
+  };
+  broadcastLog(logEntry);
   }
 };
 
 logger.error = function(msg) {
   originalError(msg);
   if (shouldBroadcastLog('error')) {
-    const logEntry = {
-      timestamp: new Date().toISOString(),
-      level: 'error',
-      message: msg
-    };
-    broadcastLog(logEntry);
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level: 'error',
+    message: msg
+  };
+  broadcastLog(logEntry);
   }
 };
 
@@ -878,7 +878,7 @@ try {
       if (useHttps) {
         logger.info(`📝 Please complete setup at: https://${ipAddress}:${httpsPort}/setup`);
       } else {
-        logger.info(`📝 Please complete setup at: http://${ipAddress}:${webPort}/setup`);
+      logger.info(`📝 Please complete setup at: http://${ipAddress}:${webPort}/setup`);
       }
       logger.info('   The bot will start normally once configuration is complete.');
       // HTTP server is already started above, so we can exit gracefully here
@@ -1130,7 +1130,7 @@ try {
         if (useHttps) {
           logger.info(`   Setup wizard: https://${ipAddress}:${httpsPort}/setup`);
         } else {
-          logger.info(`   Setup wizard: http://${ipAddress}:${webPort}/setup`);
+        logger.info(`   Setup wizard: http://${ipAddress}:${webPort}/setup`);
         }
         // Don't exit - keep server running for setup
       } else {
@@ -1411,13 +1411,13 @@ async function handleHttpRequest(req, res) {
         const passwordSet = authHandler ? authHandler.isPasswordSet() : false;
         if (passwordSet) {
           // Password is set, require authentication
-          if (authHandler) {
-            const authResult = authHandler.verifyAuth(req);
-            if (!authResult.authenticated) {
-              res.writeHead(401, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
-              return;
-            }
+        if (authHandler) {
+          const authResult = authHandler.verifyAuth(req);
+          if (!authResult.authenticated) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
+            return;
+          }
           }
         }
         // During setup (no password), allow registration without authentication
@@ -1444,14 +1444,14 @@ async function handleHttpRequest(req, res) {
         const passwordSet = authHandler ? authHandler.isPasswordSet() : false;
         if (passwordSet) {
           // Password is set, require authentication
-          if (authHandler) {
-            const authResult = authHandler.verifyAuth(req);
-            if (!authResult.authenticated) {
-              res.writeHead(401, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
-              return;
-            }
+        if (authHandler) {
+          const authResult = authHandler.verifyAuth(req);
+          if (!authResult.authenticated) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
+            return;
           }
+        }
         }
         // During setup (no password), allow registration without authentication
         let body = '';
@@ -2081,10 +2081,10 @@ async function handleAdminAPI(req, res, url) {
     // Update config value
     if (urlPath === '/api/admin/config/update') {
       try {
-        const data = JSON.parse(body);
-        const result = await updateConfigValue(data.key, data.value);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(result));
+      const data = JSON.parse(body);
+      const result = await updateConfigValue(data.key, data.value);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
       } catch (err) {
         logger.error('Error updating config:', err);
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -2619,7 +2619,7 @@ httpServer.listen(webPort, () => {
   if (useHttps) {
     logger.info(`   Setup wizard: https://${ipAddress}:${httpsPort}/setup`);
   } else {
-    logger.info(`   Setup wizard: http://${ipAddress}:${webPort}/setup`);
+  logger.info(`   Setup wizard: http://${ipAddress}:${webPort}/setup`);
   }
   
   // Start platform initialization after server is ready
@@ -2897,15 +2897,15 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
       if (isShortAffirmative || confirmationPattern.test(cleanText)) {
         // Prefer suggestedAction if available (preserves args structure)
         if (ctx.suggestedAction) {
-          logger.info(`User "${userName}" confirmed suggested action: ${ctx.suggestedAction.command} ${ctx.suggestedAction.args.join(' ')}`);
-          
-          parsed = {
-            command: ctx.suggestedAction.command,
-            args: ctx.suggestedAction.args,
-            confidence: 0.95,
-            reasoning: 'User confirmed previous suggestion',
-            summary: 'You got it! Playing those tunes now! 🎵'
-          };
+        logger.info(`User "${userName}" confirmed suggested action: ${ctx.suggestedAction.command} ${ctx.suggestedAction.args.join(' ')}`);
+        
+        parsed = {
+          command: ctx.suggestedAction.command,
+          args: ctx.suggestedAction.args,
+          confidence: 0.95,
+          reasoning: 'User confirmed previous suggestion',
+          summary: 'You got it! Playing those tunes now! 🎵'
+        };
         } else if (ctx.lastSuggestion) {
           // Fallback: parse from lastSuggestion string if suggestedAction not available
           logger.info(`User "${userName}" confirmed last suggestion: ${ctx.lastSuggestion}`);
@@ -2924,8 +2924,8 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
         }
         
         if (parsed) {
-          // Clear context since we're executing it
-          AIHandler.clearUserContext(userName);
+        // Clear context since we're executing it
+        AIHandler.clearUserContext(userName);
         }
       }
     }
