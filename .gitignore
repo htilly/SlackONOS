@@ -4,8 +4,13 @@ node_modules/
 *.log
 config/config.json
 config/userActions.json
+config/webauthn-credentials.json
+config/ssl/
 docker-compose.yml
 test/config/test-config.json
+docker-compose.override.yml
+
+./cursorrules
 
 # Test artifacts
 test/timing-log.json

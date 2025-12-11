@@ -282,32 +282,57 @@
       <!-- Password Setup Page -->
       <div class="page" id="page-password">
         <div class="page-header">
-          <h2>Set Admin Password</h2>
-          <p id="password-page-description">Protect your admin panel with a password</p>
+          <h2>Set Up Authentication</h2>
+          <p id="password-page-description">Choose your preferred authentication method</p>
         </div>
         <div class="page-body">
           <div class="info-box info-box-warning" id="password-required-notice" style="display: none;">
             <span class="info-icon">⚠️</span>
             <div>
-              <strong>Password Required:</strong> You must set an admin password before continuing with setup.
+              <strong>Authentication Required:</strong> You must set up at least one authentication method before continuing with setup.
             </div>
           </div>
-          <div class="info-box info-box-warning" id="password-optional-notice">
-            <span class="info-icon">🔒</span>
-            <div>
-              <strong>Security Notice:</strong> This password will be required to access the setup wizard and admin panel after initial setup is complete.
+          
+          <!-- Yubikey Enrollment Section (Preferred) -->
+          <div id="yubikey-section" style="margin-bottom: 2rem; padding: 1.5rem; background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(8, 145, 178, 0.1)); border: 2px solid rgba(6, 182, 212, 0.3); border-radius: 12px;">
+            <div style="text-align: center; margin-bottom: 1rem;">
+              <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🔐</div>
+              <h3 style="margin: 0 0 0.5rem 0; color: #06b6d4;">Recommended: Enroll Yubikey</h3>
+              <p style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem; margin: 0;">
+                Use a FIDO2 security key for passwordless authentication
+              </p>
             </div>
+            <button class="btn btn-primary" id="btn-enroll-yubikey" style="width: 100%; background: linear-gradient(135deg, #06b6d4, #0891b2); font-size: 1.1rem; padding: 1rem;">
+              🔐 Enroll Yubikey
+            </button>
+            <div id="yubikey-message" class="validation-message" style="margin-top: 1rem;"></div>
           </div>
-          <div class="form-group">
-            <label>Password <span class="required">*</span></label>
-            <input type="password" id="password" placeholder="Enter password (min 8 characters)" class="input">
-            <small>Minimum 8 characters</small>
+          
+          <!-- Divider -->
+          <div style="text-align: center; margin: 2rem 0; position: relative;">
+            <div style="position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: rgba(255, 255, 255, 0.1);"></div>
+            <span style="background: rgba(15, 23, 42, 0.8); padding: 0 1rem; color: rgba(255, 255, 255, 0.5); font-size: 0.9rem;">Or set a password</span>
           </div>
-          <div class="form-group">
-            <label>Confirm Password <span class="required">*</span></label>
-            <input type="password" id="password-confirm" placeholder="Confirm password" class="input">
+          
+          <!-- Password Section -->
+          <div id="password-form-section">
+            <div class="info-box info-box-warning" id="password-optional-notice">
+              <span class="info-icon">🔒</span>
+              <div>
+                <strong>Security Notice:</strong> This password will be required to access the setup wizard and admin panel after initial setup is complete.
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Password <span class="required" id="password-required-indicator">*</span></label>
+              <input type="password" id="password" placeholder="Enter password (min 8 characters)" class="input">
+              <small>Minimum 8 characters</small>
+            </div>
+            <div class="form-group">
+              <label>Confirm Password <span class="required" id="password-confirm-required-indicator">*</span></label>
+              <input type="password" id="password-confirm" placeholder="Confirm password" class="input">
+            </div>
+            <div id="password-validation" class="validation-message"></div>
           </div>
-          <div id="password-validation" class="validation-message"></div>
         </div>
         <div class="page-footer">
           <button class="btn btn-secondary" id="btn-back-password">Back</button>
@@ -344,6 +369,8 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@9.0.0/dist/bundle/index.umd.min.js"></script>
+  <script src="/setup/webauthn-client.js"></script>
   <script src="/setup/setup.js?v=5.0"></script>
 </body>
 </html>

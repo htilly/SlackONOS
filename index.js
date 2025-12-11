@@ -48,29 +48,52 @@ const musicHelper = require('./music-helper');
 const gongMessage = fs.readFileSync('templates/messages/gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('templates/messages/vote.txt', 'utf8').split('\n').filter(Boolean);
 const ttsMessage = fs.readFileSync('templates/messages/tts.txt', 'utf8').split('\n').filter(Boolean);
+const { execSync } = require('child_process');
 
 // Try to get release tag from GitHub Actions (e.g., GITHUB_REF=refs/tags/v1.2.3)
 const getReleaseVersion = () => {
-  // 1. GitHub release tag (from GitHub Actions)
+  // 1. GitHub release tag (from GitHub Actions or Docker build)
   const githubRef = process.env.GITHUB_REF || '';
+  
+  // Check for refs/tags/vX.Y.Z format
   const tagMatch = githubRef.match(/refs\/tags\/(.+)$/);
   if (tagMatch) {
     return tagMatch[1]; // e.g., "v1.2.3"
   }
   
+  // Also check if GITHUB_REF is just the tag name (without refs/tags/ prefix)
+  // This can happen if set directly as environment variable
+  if (githubRef && githubRef.startsWith('v') && /^v\d+\.\d+\.\d+/.test(githubRef)) {
+    return githubRef; // e.g., "v2.1.0"
+  }
+  
   // 2. Git commit SHA (for native/local development)
   try {
     const sha = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+    // Try to get tag from git if available
+    try {
+      const tag = execSync('git describe --tags --exact-match HEAD 2>/dev/null', { encoding: 'utf8' }).trim();
+      if (tag) {
+        return tag; // Return exact tag if on tagged commit
+      }
+    } catch (e) {
+      // No exact tag, continue with SHA
+    }
     return `dev-${sha}`; // e.g., "dev-a3f2b1c"
   } catch (e) {
     // 3. Fallback for Docker/no git (use package.json version)
     const pkgVersion = require('./package.json').version;
-    return `${pkgVersion}-dev`; // e.g., "1.0.0-dev"
+    // If GITHUB_REF is empty or not set, assume dev build
+    if (!githubRef || githubRef === '') {
+      return `${pkgVersion}-dev`; // e.g., "2.1.0-dev"
+    }
+    // If GITHUB_REF is set but doesn't match expected patterns, 
+    // return package version without -dev (might be a release build with wrong format)
+    return pkgVersion; // e.g., "2.1.0"
   }
 };
 const releaseVersion = getReleaseVersion();
 
-const { execSync } = require('child_process');
 const SLACK_API_URL_LIST = 'https://slack.com/api/conversations.list';
 const userActionsFile = path.join(__dirname, 'config/userActions.json');
 const blacklistFile = path.join(__dirname, 'config/blacklist.json');
@@ -850,7 +873,13 @@ try {
     // If setup is needed and no platforms configured, start server only for setup wizard
     if (setupStatus.needed && !hasSlack && !hasDiscord) {
       logger.warn('⚠️  Configuration incomplete - starting in setup mode');
-      logger.info(`📝 Please complete setup at: http://${ipAddress}:${webPort}/setup`);
+      const httpsPort = config.get('httpsPort') || 8443;
+      const useHttps = config.get('useHttps') !== false && (config.get('sslAutoGenerate') !== false || (config.get('sslCertPath') && config.get('sslKeyPath')));
+      if (useHttps) {
+        logger.info(`📝 Please complete setup at: https://${ipAddress}:${httpsPort}/setup`);
+      } else {
+        logger.info(`📝 Please complete setup at: http://${ipAddress}:${webPort}/setup`);
+      }
       logger.info('   The bot will start normally once configuration is complete.');
       // HTTP server is already started above, so we can exit gracefully here
       // Don't throw error, just log and let server run for setup wizard
@@ -1096,7 +1125,13 @@ try {
     setTimeout(() => {
       if (httpServer && httpServer.listening) {
         logger.warn('⚠️  HTTP server is still running - you can access the setup wizard to fix configuration');
-        logger.info(`   Setup wizard: http://${ipAddress}:${webPort}/setup`);
+        const httpsPort = config.get('httpsPort') || 8443;
+        const useHttps = config.get('useHttps') !== false && (config.get('sslAutoGenerate') !== false || (config.get('sslCertPath') && config.get('sslKeyPath')));
+        if (useHttps) {
+          logger.info(`   Setup wizard: https://${ipAddress}:${httpsPort}/setup`);
+        } else {
+          logger.info(`   Setup wizard: http://${ipAddress}:${webPort}/setup`);
+        }
         // Don't exit - keep server running for setup
       } else {
         process.exit(1);
@@ -1372,14 +1407,25 @@ async function handleHttpRequest(req, res) {
     if (urlPath === '/api/auth/webauthn/register/options' && req.method === 'POST') {
       try {
         const webauthnHandler = require('./lib/webauthn-handler');
-        // Verify authentication first (must be logged in to register WebAuthn)
-        if (authHandler) {
-          const authResult = authHandler.verifyAuth(req);
-          if (!authResult.authenticated) {
-            res.writeHead(401, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
-            return;
+        // Allow registration during setup (when no password is set) OR when authenticated
+        const passwordSet = authHandler ? authHandler.isPasswordSet() : false;
+        if (passwordSet) {
+          // Password is set, require authentication
+          if (authHandler) {
+            const authResult = authHandler.verifyAuth(req);
+            if (!authResult.authenticated) {
+              res.writeHead(401, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
+              return;
+            }
           }
+        }
+        // During setup (no password), allow registration without authentication
+        // First, ensure WebAuthn is enabled
+        if (!webauthnHandler.isWebAuthnEnabled()) {
+          // Enable WebAuthn automatically during setup
+          config.set('webauthnEnabled', true);
+          config.save();
         }
         const options = await webauthnHandler.generateRegistrationOptions(req);
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1394,15 +1440,20 @@ async function handleHttpRequest(req, res) {
     if (urlPath === '/api/auth/webauthn/register/verify' && req.method === 'POST') {
       try {
         const webauthnHandler = require('./lib/webauthn-handler');
-        // Verify authentication first
-        if (authHandler) {
-          const authResult = authHandler.verifyAuth(req);
-          if (!authResult.authenticated) {
-            res.writeHead(401, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
-            return;
+        // Allow registration during setup (when no password is set) OR when authenticated
+        const passwordSet = authHandler ? authHandler.isPasswordSet() : false;
+        if (passwordSet) {
+          // Password is set, require authentication
+          if (authHandler) {
+            const authResult = authHandler.verifyAuth(req);
+            if (!authResult.authenticated) {
+              res.writeHead(401, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
+              return;
+            }
           }
         }
+        // During setup (no password), allow registration without authentication
         let body = '';
         const chunks = [];
         for await (const chunk of req) {
@@ -2563,7 +2614,13 @@ httpServer.listen(webPort, () => {
   if (ttsEnabled) {
     logger.info(`   TTS endpoint: http://${ipAddress}:${webPort}/tts.mp3`);
   }
-  logger.info(`   Setup wizard: http://${ipAddress}:${webPort}/setup`);
+  // Show HTTPS URL if HTTPS is enabled, otherwise HTTP
+  const httpsPort = config.get('httpsPort') || 8443;
+  if (useHttps) {
+    logger.info(`   Setup wizard: https://${ipAddress}:${httpsPort}/setup`);
+  } else {
+    logger.info(`   Setup wizard: http://${ipAddress}:${webPort}/setup`);
+  }
   
   // Start platform initialization after server is ready
   // This is done in the startup sequence below

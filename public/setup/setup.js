@@ -30,13 +30,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function checkSetupStatus() {
   try {
-    // FIRST: Always check if password is set
+    // FIRST: Always check if password or WebAuthn credentials are set
     const response = await fetch(`${API_BASE}/status`);
     const data = await response.json();
     
-    // If password is not set, force password setup first
-    if (!data.passwordSet) {
-      // No password set - must set password first
+    // Check WebAuthn status
+    let hasWebAuthn = false;
+    try {
+      const webauthnResponse = await fetch('/api/auth/webauthn/status');
+      const webauthnData = await webauthnResponse.json();
+      hasWebAuthn = webauthnData.enabled && webauthnData.hasCredentials;
+    } catch (err) {
+      // WebAuthn check failed, assume no credentials
+    }
+    
+    // If neither password nor WebAuthn credentials are set, force authentication setup
+    if (!data.passwordSet && !hasWebAuthn) {
+      // No authentication method set - must set up authentication first
       showPage('password');
       // Disable back button on password page when forced
       const backBtn = document.getElementById('btn-back-password');
@@ -47,9 +57,17 @@ async function checkSetupStatus() {
       const requiredNotice = document.getElementById('password-required-notice');
       const optionalNotice = document.getElementById('password-optional-notice');
       const description = document.getElementById('password-page-description');
-      if (requiredNotice) requiredNotice.style.display = 'block';
+      if (requiredNotice) {
+        requiredNotice.style.display = 'block';
+        requiredNotice.innerHTML = `
+          <span class="info-icon">⚠️</span>
+          <div>
+            <strong>Authentication Required:</strong> You must set up at least one authentication method (Yubikey or password) before continuing with setup.
+          </div>
+        `;
+      }
       if (optionalNotice) optionalNotice.style.display = 'none';
-      if (description) description.textContent = 'You must set an admin password before continuing';
+      if (description) description.textContent = 'Choose your preferred authentication method';
       return;
     }
     
@@ -219,7 +237,30 @@ function setupEventListeners() {
       showPage('spotify');
     }
   });
+  
+  // Yubikey Enrollment
+  document.getElementById('btn-enroll-yubikey')?.addEventListener('click', async () => {
+    await enrollYubikey();
+  });
+  
   document.getElementById('btn-next-password')?.addEventListener('click', async () => {
+    // Check if Yubikey is already enrolled - if so, skip password
+    const hasYubikey = await checkYubikeyEnrolled();
+    if (hasYubikey) {
+      // Yubikey is enrolled, proceed without password
+      const backBtn = document.getElementById('btn-back-password');
+      const isForcedSetup = backBtn && backBtn.style.display === 'none';
+      
+      if (isForcedSetup) {
+        window.location.reload();
+      } else {
+        await finishSetup();
+        showPage('success');
+      }
+      return;
+    }
+    
+    // No Yubikey, require password
     if (await setupPassword()) {
       // Check if we're in forced password setup mode (no back button)
       const backBtn = document.getElementById('btn-back-password');
@@ -242,6 +283,14 @@ function setupEventListeners() {
 
 async function showPage(pageId) {
   currentPage = pageId;
+  
+  // If showing password page, check Yubikey status and update UI
+  if (pageId === 'password') {
+    const hasYubikey = await checkYubikeyEnrolled();
+    if (hasYubikey) {
+      updatePasswordSectionForYubikey();
+    }
+  }
   document.querySelectorAll('.page').forEach(page => {
     page.classList.remove('active');
   });
@@ -556,24 +605,182 @@ function validateSpotify() {
   return true;
 }
 
+// Check if Yubikey is enrolled
+async function checkYubikeyEnrolled() {
+  try {
+    const response = await fetch('/api/auth/webauthn/status');
+    const data = await response.json();
+    return data.enabled && data.hasCredentials;
+  } catch (err) {
+    return false;
+  }
+}
+
+// Enroll Yubikey
+async function enrollYubikey() {
+  const btn = document.getElementById('btn-enroll-yubikey');
+  const messageDiv = document.getElementById('yubikey-message');
+  
+  if (!btn || !messageDiv) return;
+  
+  btn.disabled = true;
+  btn.textContent = 'Preparing...';
+  showMessage(messageDiv, 'Preparing registration...', 'info');
+  
+  try {
+    // Ensure WebAuthnClient is available
+    if (!window.WebAuthnClient) {
+      // Wait for script to load
+      await new Promise(resolve => {
+        if (window.WebAuthnClient) {
+          resolve();
+          return;
+        }
+        let attempts = 0;
+        const checkInterval = setInterval(() => {
+          attempts++;
+          if (window.WebAuthnClient || attempts >= 20) {
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, 50);
+      });
+    }
+    
+    if (!window.WebAuthnClient) {
+      throw new Error('WebAuthn client library failed to load. Please refresh the page.');
+    }
+    
+    // Initialize WebAuthnClient
+    WebAuthnClient.init({ apiBase: '/api/auth' });
+    
+    // WebAuthn will be enabled automatically by the server during setup if needed
+    // Just check status to inform user
+    try {
+      const statusResponse = await fetch('/api/auth/webauthn/status');
+      const statusData = await statusResponse.json();
+      
+      if (!statusData.enabled) {
+        showMessage(messageDiv, 'WebAuthn will be enabled automatically...', 'info');
+      }
+    } catch (err) {
+      // Ignore status check errors, server will handle enabling
+    }
+    
+    // Now register the Yubikey
+    showMessage(messageDiv, 'Touch your security key...', 'info');
+    btn.textContent = 'Touch your key...';
+    
+    const result = await WebAuthnClient.register({ promptDeviceName: true });
+    
+    if (result.verified) {
+      showMessage(messageDiv, '✓ Yubikey enrolled successfully! You can now skip password setup.', 'success');
+      btn.textContent = '✓ Enrolled';
+      btn.style.background = 'linear-gradient(135deg, #4ade80, #22c55e)';
+      
+      // Update UI to show password is optional
+      updatePasswordSectionForYubikey();
+      
+      // Auto-proceed after a short delay
+      setTimeout(() => {
+        const backBtn = document.getElementById('btn-back-password');
+        const isForcedSetup = backBtn && backBtn.style.display === 'none';
+        
+        if (isForcedSetup) {
+          window.location.reload();
+        } else {
+          finishSetup().then(() => {
+            showPage('success');
+          });
+        }
+      }, 2000);
+    } else {
+      throw new Error('Registration verification failed');
+    }
+  } catch (err) {
+    let errorMessage = err.message || 'Failed to enroll Yubikey. Please try again.';
+    
+    if (err.name === 'NotAllowedError') {
+      errorMessage = 'Registration was cancelled or timed out. Please try again.';
+    } else if (err.name === 'NotSupportedError') {
+      errorMessage = 'WebAuthn is not supported in this browser.';
+    }
+    
+    showMessage(messageDiv, errorMessage, 'error');
+    btn.disabled = false;
+    btn.textContent = '🔐 Enroll Yubikey';
+  }
+}
+
+// Update password section to show it's optional when Yubikey is enrolled
+function updatePasswordSectionForYubikey() {
+  const passwordRequired = document.getElementById('password-required-indicator');
+  const passwordConfirmRequired = document.getElementById('password-confirm-required-indicator');
+  const passwordOptionalNotice = document.getElementById('password-optional-notice');
+  
+  if (passwordRequired) passwordRequired.style.display = 'none';
+  if (passwordConfirmRequired) passwordConfirmRequired.style.display = 'none';
+  
+  if (passwordOptionalNotice) {
+    passwordOptionalNotice.innerHTML = `
+      <span class="info-icon">ℹ️</span>
+      <div>
+        <strong>Optional:</strong> You can set a password as a backup authentication method, or skip it since you've enrolled a Yubikey.
+      </div>
+    `;
+    passwordOptionalNotice.className = 'info-box info-box-info';
+  }
+}
+
+// Helper function to show messages
+function showMessage(element, message, type) {
+  if (!element) return;
+  element.textContent = message;
+  element.className = `validation-message ${type} show`;
+}
+
 async function setupPassword() {
   const password = document.getElementById('password')?.value;
   const passwordConfirm = document.getElementById('password-confirm')?.value;
   const validationDiv = document.getElementById('password-validation');
   
-  if (!password || !passwordConfirm) {
-    showError(validationDiv, 'Please enter both password and confirmation');
-    return false;
-  }
+  // Check if Yubikey is enrolled - if so, password is optional
+  const hasYubikey = await checkYubikeyEnrolled();
   
-  if (password.length < 8) {
-    showError(validationDiv, 'Password must be at least 8 characters');
-    return false;
-  }
-  
-  if (password !== passwordConfirm) {
-    showError(validationDiv, 'Passwords do not match');
-    return false;
+  if (!hasYubikey) {
+    // No Yubikey, password is required
+    if (!password || !passwordConfirm) {
+      showError(validationDiv, 'Please enter both password and confirmation');
+      return false;
+    }
+    
+    if (password.length < 8) {
+      showError(validationDiv, 'Password must be at least 8 characters');
+      return false;
+    }
+    
+    if (password !== passwordConfirm) {
+      showError(validationDiv, 'Passwords do not match');
+      return false;
+    }
+  } else {
+    // Yubikey is enrolled, password is optional
+    if (password || passwordConfirm) {
+      // User wants to set password, validate it
+      if (password && password.length < 8) {
+        showError(validationDiv, 'Password must be at least 8 characters');
+        return false;
+      }
+      
+      if (password !== passwordConfirm) {
+        showError(validationDiv, 'Passwords do not match');
+        return false;
+      }
+    }
+    // If no password provided and Yubikey is enrolled, that's fine - skip password setup
+    if (!password && !passwordConfirm) {
+      return true; // Skip password, proceed
+    }
   }
   
   showLoading(validationDiv, 'Setting up password...');
