@@ -115,7 +115,7 @@
               // Already a string - keep it as-is
               return item;
             }
-            
+  
             // If it's already an ArrayBuffer or Uint8Array, convert back to base64url string
             if (item.id instanceof ArrayBuffer || item.id instanceof Uint8Array) {
               const uint8Array = item.id instanceof ArrayBuffer ? new Uint8Array(item.id) : item.id;
@@ -173,8 +173,8 @@
               clone.user.id = userIdBytes.buffer;
             } else if (Array.isArray(clone.user.id)) {
               clone.user.id = new Uint8Array(clone.user.id).buffer;
-            }
-          } catch (e) {
+          }
+        } catch (e) {
             // Don't throw - let SimpleWebAuthnBrowser handle it
           }
         }
@@ -232,7 +232,7 @@
   
       async register({ promptDeviceName = false } = {}) {
         try {
-          await ensureSimpleWebAuthn();
+        await ensureSimpleWebAuthn();
         } catch (e) {
           console.error('[WebAuthnClient] Error ensuring SimpleWebAuthn:', e);
           throw new Error('Failed to load WebAuthn library: ' + (e && typeof e === 'object' && 'message' in e ? e.message : String(e)));
@@ -262,8 +262,8 @@
         }
 
         try {
-          options = convertCredentialIdArrays(options);
-          
+        options = convertCredentialIdArrays(options);
+  
           // Final check: ensure challenge is a string (base64url) before passing to SimpleWebAuthnBrowser
           if (options.challenge && typeof options.challenge !== 'string') {
             throw new Error('Challenge must be a string (base64url) but got: ' + typeof options.challenge);
@@ -315,10 +315,10 @@
           throw new Error('Failed to fetch authentication options');
 
         let options = await resp.json();
-
+  
         try {
-          options = convertCredentialIdArrays(options);
-          
+        options = convertCredentialIdArrays(options);
+  
           // Ensure challenge is a string
           if (options.challenge && typeof options.challenge !== 'string') {
             throw new Error('Challenge must be a string (base64url) but got: ' + typeof options.challenge);
@@ -348,8 +348,8 @@
         const verifyResp = await fetch(
           this.apiBase + '/webauthn/authenticate/verify',
           {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(assertion),
           },
         );

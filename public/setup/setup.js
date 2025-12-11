@@ -749,18 +749,18 @@ async function setupPassword() {
   
   if (!hasYubikey) {
     // No Yubikey, password is required
-    if (!password || !passwordConfirm) {
-      showError(validationDiv, 'Please enter both password and confirmation');
-      return false;
-    }
-    
-    if (password.length < 8) {
-      showError(validationDiv, 'Password must be at least 8 characters');
-      return false;
-    }
-    
-    if (password !== passwordConfirm) {
-      showError(validationDiv, 'Passwords do not match');
+  if (!password || !passwordConfirm) {
+    showError(validationDiv, 'Please enter both password and confirmation');
+    return false;
+  }
+  
+  if (password.length < 8) {
+    showError(validationDiv, 'Password must be at least 8 characters');
+    return false;
+  }
+  
+  if (password !== passwordConfirm) {
+    showError(validationDiv, 'Passwords do not match');
       return false;
     }
   } else {
@@ -769,7 +769,7 @@ async function setupPassword() {
       // User wants to set password, validate it
       if (password && password.length < 8) {
         showError(validationDiv, 'Password must be at least 8 characters');
-        return false;
+    return false;
       }
       
       if (password !== passwordConfirm) {
