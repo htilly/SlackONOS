@@ -4871,7 +4871,7 @@ function _currentTrackTitle(channel, cb) {
       if (track) {
         cb(null, { title: track.title, artist: track.artist, uri: track.uri });
       } else {
-        cb(null, 'nothing');
+        cb(null, null);
       }
     })
     .catch((err) => {
