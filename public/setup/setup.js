@@ -16,6 +16,7 @@ const pageOrder = [
   'discord',    // Conditional
   'sonos',
   'spotify',
+  'openai',
   'password',
   'success'
 ];
@@ -209,32 +210,29 @@ function setupEventListeners() {
   document.getElementById('btn-finish')?.addEventListener('click', async () => {
     if (validateSpotify()) {
       saveSpotifyData();
-      // Check if password is already set - if so, skip password step
-      try {
-        const statusResponse = await fetch(`${API_BASE}/status`);
-        const statusData = await statusResponse.json();
-        if (statusData.passwordSet) {
-          // Password already set, skip to success
-          await finishSetup();
-          showPage('success');
-        } else {
-          // No password set, go to password setup
-          showPage('password');
-        }
-      } catch (err) {
-        // On error, go to password step
-        showPage('password');
-      }
+      showPage('openai');
     }
   });
   document.getElementById('btn-validate-spotify')?.addEventListener('click', validateSpotifyCredentials);
+
+  // OpenAI
+  document.getElementById('btn-back-openai')?.addEventListener('click', () => showPage('spotify'));
+  document.getElementById('btn-skip-openai')?.addEventListener('click', async () => {
+    // Skip OpenAI setup, go to password
+    await checkPasswordAndContinue();
+  });
+  document.getElementById('btn-next-openai')?.addEventListener('click', async () => {
+    if (saveOpenAIData()) {
+      await checkPasswordAndContinue();
+    }
+  });
 
   // Password Setup
   document.getElementById('btn-back-password')?.addEventListener('click', () => {
     // Check if password was required (no back button shown)
     const backBtn = document.getElementById('btn-back-password');
     if (backBtn && backBtn.style.display !== 'none') {
-      showPage('spotify');
+      showPage('openai');
     }
   });
   
@@ -496,6 +494,22 @@ async function populateConfigFields(pageId) {
         spotifyMarketSelect.value = configValues.market;
       }
       break;
+    case 'openai':
+      const openaiApiKeyInput = document.getElementById('openai-api-key');
+      const openaiModelSelect = document.getElementById('openai-model');
+      const openaiPromptInput = document.getElementById('openai-prompt');
+      
+      if (openaiApiKeyInput && configValues.openaiApiKey) {
+        openaiApiKeyInput.value = configValues.openaiApiKey;
+        createCredentialToggle('openai-api-key', configValues.openaiApiKey);
+      }
+      if (openaiModelSelect && configValues.aiModel) {
+        openaiModelSelect.value = configValues.aiModel;
+      }
+      if (openaiPromptInput && configValues.aiPrompt) {
+        openaiPromptInput.value = configValues.aiPrompt;
+      }
+      break;
   }
 }
 
@@ -603,6 +617,48 @@ function validateSpotify() {
   }
   
   return true;
+}
+
+function saveOpenAIData() {
+  const apiKeyInput = document.getElementById('openai-api-key');
+  const modelInput = document.getElementById('openai-model');
+  const promptInput = document.getElementById('openai-prompt');
+  
+  const apiKey = apiKeyInput?.value?.trim() || '';
+  const model = modelInput?.value || 'gpt-4o';
+  const prompt = promptInput?.value?.trim() || '';
+  
+  // Only save API key if it was entered (not masked/empty)
+  if (apiKey && !isMaskedValue(apiKey)) {
+    configData.openaiApiKey = apiKey;
+  }
+  
+  // Always save model and prompt (even if empty)
+  configData.aiModel = model;
+  if (prompt) {
+    configData.aiPrompt = prompt;
+  }
+  
+  return true;
+}
+
+async function checkPasswordAndContinue() {
+  // Check if password is already set - if so, skip password step
+  try {
+    const statusResponse = await fetch(`${API_BASE}/status`);
+    const statusData = await statusResponse.json();
+    if (statusData.passwordSet) {
+      // Password already set, skip to success
+      await finishSetup();
+      showPage('success');
+    } else {
+      // No password set, go to password setup
+      showPage('password');
+    }
+  } catch (err) {
+    // On error, go to password step
+    showPage('password');
+  }
 }
 
 // Check if Yubikey is enrolled
@@ -1091,6 +1147,7 @@ async function validateSonosConnection() {
 
 async function finishSetup() {
   saveSpotifyData();
+  saveOpenAIData();
   
   // Clear Discord data if not selected
   if (!selectedPlatforms.has('discord')) {

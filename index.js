@@ -191,6 +191,38 @@ config.argv()
     telemetryHost: 'https://us.i.posthog.com'
   });
 
+// JSON config files cannot contain real comments, so historically we used "_comment_*" keys.
+// These should never be persisted in the real runtime config because they clutter it.
+// If a user copied config.json.example → config.json, strip them automatically.
+function stripCommentKeysFromConfigFile() {
+  try {
+    const cfgPath = path.join(__dirname, 'config', 'config.json');
+    if (!fs.existsSync(cfgPath)) return;
+    const raw = fs.readFileSync(cfgPath, 'utf8');
+    const obj = JSON.parse(raw);
+    if (!obj || typeof obj !== 'object') return;
+
+    let changed = false;
+    for (const k of Object.keys(obj)) {
+      if (k && typeof k === 'string' && k.startsWith('_comment_')) {
+        delete obj[k];
+        changed = true;
+      }
+    }
+    if (changed) {
+      fs.writeFileSync(cfgPath, JSON.stringify(obj, null, 2) + '\n', { encoding: 'utf8' });
+      if (typeof logger !== 'undefined' && logger && logger.info) {
+        logger.info('Removed _comment_* keys from config/config.json');
+      }
+    }
+  } catch (e) {
+    // Best-effort only. Avoid logging sensitive config contents.
+  }
+}
+
+// Strip any "_comment_*" keys that may have been copied into the real config file
+stripCommentKeysFromConfigFile();
+
 // Application Config Values (let for runtime changes)
 let gongLimit = config.get('gongLimit');
 let voteImmuneLimit = config.get('voteImmuneLimit');
@@ -218,6 +250,7 @@ if (!global.statusStreamClients) {
 // Track current track for change detection
 let lastTrackInfo = null;
 let statusPollInterval = null;
+
 
 // Custom transport to capture logs in memory
 class MemoryLogTransport extends winston.transports.Console {
@@ -728,7 +761,9 @@ function ensureConfigDefaults() {
     soundcraftIp: '',
     soundcraftChannels: [],
     // Slack settings
-    slackAlwaysThread: false
+    slackAlwaysThread: false,
+    // Crossfade settings
+    crossfadeEnabled: true
   };
   const applied = [];
   for (const [key, val] of Object.entries(defaults)) {
@@ -945,11 +980,8 @@ try {
                 );
 
                 if (trackIndex >= 0) {
-                  // voting.vote expects track number from item.id (e.g., "Q:0/123" -> 123)
-                  // But we need to convert from array index to Sonos queue position
-                  const item = queue.items[trackIndex];
-                  const queueTrack = parseInt(item.id.split('/')[1]) - 1; // Convert to 0-based
-                  await voting.vote(['vote', queueTrack.toString()], channelId, userName);
+                  // voting.vote expects the same 0-based index shown by `list` (#0..)
+                  await voting.vote(['vote', trackIndex.toString()], channelId, userName);
                 } else {
                   logger.warn(`Track "${trackName}" not found in queue for reaction vote`);
                 }
@@ -1006,11 +1038,8 @@ try {
                   );
 
                   if (trackIndex >= 0) {
-                    // voting.vote expects track number from item.id (e.g., "Q:0/123" -> 123)
-                    // But we need to convert from array index to Sonos queue position
-                    const item = queue.items[trackIndex];
-                    const queueTrack = parseInt(item.id.split('/')[1]) - 1; // Convert to 0-based
-                    await voting.vote(['vote', queueTrack.toString()], channelId, userName);
+                    // voting.vote expects the same 0-based index shown by `list` (#0..)
+                    await voting.vote(['vote', trackIndex.toString()], channelId, userName);
                   } else {
                     logger.warn(`Track "${trackName}" not found in queue for reaction vote`);
                   }
@@ -1087,6 +1116,20 @@ try {
           logger.info(`   Channels: ${channels.join(', ')}`);
         } else {
           logger.warn(`⚠️ Soundcraft enabled but not connected (IP: ${config.get('soundcraftIp')})`);
+        }
+      }
+
+      // Apply crossfade setting if configured
+      const crossfadeEnabled = config.get('crossfadeEnabled');
+      if (crossfadeEnabled) {
+        try {
+          await sonos.avTransportService().SetCrossfadeMode({
+            InstanceID: 0,
+            CrossfadeMode: '1'
+          });
+          logger.info('🎵✨ Crossfade enabled on startup');
+        } catch (err) {
+          logger.warn('⚠️ Could not enable crossfade on startup: ' + err.message);
         }
       }
     }
@@ -2350,6 +2393,7 @@ function getConfigForAdmin() {
     soundcraftEnabled: config.get('soundcraftEnabled') || false,
     soundcraftIp: config.get('soundcraftIp') || '',
     soundcraftChannels: config.get('soundcraftChannels') || [],
+    crossfadeEnabled: config.get('crossfadeEnabled') === true,
     slackAlwaysThread: config.get('slackAlwaysThread') === true, // Default: false
     webauthnRequireUserVerification: config.get('webauthnRequireUserVerification') === true, // Default: false for maximum compatibility
     webauthnPreferPlatformOnly: config.get('webauthnPreferPlatformOnly') === true, // Default: false to allow both platform and cross-platform
@@ -2562,7 +2606,7 @@ async function updateConfigValue(key, value) {
       'gongLimit', 'voteLimit', 'voteImmuneLimit', 'flushVoteLimit',
       'voteTimeLimitMinutes', 'ttsEnabled', 'logLevel', 'ipAddress',
       'webPort', 'httpsPort', 'sonos', 'defaultTheme', 'themePercentage',
-      'openaiApiKey', 'aiModel', 'soundcraftEnabled', 'soundcraftIp', 'soundcraftChannels',
+      'openaiApiKey', 'aiModel', 'soundcraftEnabled', 'soundcraftIp', 'soundcraftChannels', 'crossfadeEnabled',
       'webauthnEnabled', 'webauthnRpName', 'webauthnRpId', 'webauthnOrigin', 'webauthnRequireUserVerification', 'webauthnPreferPlatformOnly',
       'webauthnTimeout', 'webauthnResidentKey', 'webauthnChallengeExpiration', 'webauthnMaxCredentials'
     ];
@@ -2584,16 +2628,102 @@ async function updateConfigValue(key, value) {
         logger.warn(`Log level changed to: ${value}`);
       }
     }
+
+    // Apply some config changes to runtime immediately (so restart isn't required)
+    // NOTE: values from the web UI may arrive as strings
+    const numericKeys = new Set([
+      'gongLimit',
+      'voteLimit',
+      'voteImmuneLimit',
+      'flushVoteLimit',
+      'voteTimeLimitMinutes',
+      'maxVolume',
+      'webPort',
+      'httpsPort',
+      'themePercentage',
+      'webauthnTimeout',
+      'webauthnChallengeExpiration',
+      'webauthnMaxCredentials'
+    ]);
+
+    let coercedValue = value;
+    if (numericKeys.has(key)) {
+      const numValue = Number(value);
+      if (Number.isNaN(numValue)) {
+        return { success: false, error: `Invalid value for "${key}". Must be a number.` };
+      }
+      coercedValue = numValue;
+    }
+
+    const booleanKeys = new Set([
+      'ttsEnabled',
+      'telemetryEnabled',
+      'soundcraftEnabled',
+      'webauthnEnabled',
+      'webauthnRequireUserVerification',
+      'webauthnPreferPlatformOnly',
+      'crossfadeEnabled',
+      'useHttps',
+      'sslAutoGenerate'
+    ]);
+
+    if (booleanKeys.has(key)) {
+      if (typeof value === 'string') {
+        const v = value.trim().toLowerCase();
+        coercedValue = (v === 'true' || v === '1' || v === 'yes' || v === 'on');
+      } else {
+        coercedValue = Boolean(value);
+      }
+    }
+
+    // Update runtime variables for common settings
+    if (numericKeys.has(key)) {
+      switch (key) {
+        case 'gongLimit':
+          gongLimit = coercedValue;
+          break;
+        case 'voteLimit':
+          voteLimit = coercedValue;
+          break;
+        case 'voteImmuneLimit':
+          voteImmuneLimit = coercedValue;
+          break;
+        case 'flushVoteLimit':
+          flushVoteLimit = coercedValue;
+          break;
+        case 'voteTimeLimitMinutes':
+          voteTimeLimitMinutes = coercedValue;
+          break;
+        case 'maxVolume':
+          maxVolume = coercedValue;
+          break;
+      }
+
+      // Sync voting module config when any vote-related limits change
+      if (['gongLimit', 'voteLimit', 'voteImmuneLimit', 'flushVoteLimit', 'voteTimeLimitMinutes'].includes(key)) {
+        try {
+          voting.setConfig({
+            gongLimit,
+            voteLimit,
+            voteImmuneLimit,
+            flushVoteLimit,
+            voteTimeLimitMinutes,
+          });
+        } catch (e) {
+          logger.warn('Failed to sync voting config after admin update: ' + (e && e.message ? e.message : e));
+        }
+      }
+    }
     
     // Update in memory
-    config.set(key, value);
+    config.set(key, coercedValue);
     
     // Save to file
     config.save((err) => {
       if (err) {
         logger.error('Failed to save config:', err);
       } else {
-        logger.info(`Config updated via admin: ${key} = ${value}`);
+        logger.info(`Config updated via admin: ${key} = ${coercedValue}`);
       }
     });
     
@@ -2722,6 +2852,7 @@ const commandRegistry = new Map([
   ['shuffle', { fn: _shuffle, admin: true }],
   ['normal', { fn: _normal, admin: true }],
   ['setvolume', { fn: _setVolume, admin: true }],
+  ['setcrossfade', { fn: _setCrossfade, admin: true, aliases: ['crossfade'] }],
   ['setconfig', { fn: _setconfig, admin: true, aliases: ['getconfig', 'config'] }],
   ['blacklist', { fn: _blacklist, admin: true }],
   ['trackblacklist', { fn: _trackblacklist, admin: true, aliases: ['songblacklist', 'bantrack', 'bansong'] }],
@@ -3614,7 +3745,7 @@ async function _showQueue(channel) {
     if (track) {
       logger.debug(`Current track: queuePosition=${track.queuePosition}, title="${track.title}", artist="${track.artist}"`);
     }
-    
+
     const tracks = [];
 
     result.items.map(function (item, i) {
@@ -3628,13 +3759,20 @@ async function _showQueue(channel) {
       const isCurrentTrack = positionMatch || (nameMatch && sourceInfo && sourceInfo.type === 'queue');
 
       // Check if track is gong banned (immune)
-      if (voting.isTrackGongBanned(item.title)) {
+      const isImmune = voting.isTrackGongBanned({ title: item.title, artist: item.artist, uri: item.uri });
+      if (isImmune) {
         prefix = ':lock: ';
         trackTitle = item.title;
       } else if (isCurrentTrack && sourceInfo && sourceInfo.type === 'queue') {
         trackTitle = '*' + trackTitle + '*';
       } else {
         trackTitle = '_' + trackTitle + '_';
+      }
+
+      // Add star prefix for ANY track that has active votes (regardless of position)
+      const hasVotes = voting.hasActiveVotes(i, item.uri, item.title, item.artist);
+      if (hasVotes) {
+        prefix = ':star: ' + prefix;
       }
 
       if (isCurrentTrack && sourceInfo && sourceInfo.type === 'queue') {
@@ -4731,7 +4869,7 @@ function _currentTrackTitle(channel, cb) {
     .currentTrack()
     .then((track) => {
       if (track) {
-        cb(null, track.title);
+        cb(null, { title: track.title, artist: track.artist, uri: track.uri });
       } else {
         cb(null, 'nothing');
       }
@@ -4860,7 +4998,7 @@ function _currentTrack(channel, cb) {
             }
           }
 
-          if (voting.isTrackGongBanned(track.title)) {
+          if (voting.isTrackGongBanned({ title: track.title, artist: track.artist, uri: track.uri })) {
             message += '\n🔒 (Immune to GONG)';
           }
           _slackMessage(message, channel);
@@ -5054,6 +5192,60 @@ function _normal(input, channel, userName) {
     });
 }
 
+async function _setCrossfade(input, channel, userName) {
+  _logUserAction(userName, 'setCrossfade');
+  // Admin check now handled in processInput (platform-aware)
+  
+  try {
+    // If no argument, show current status
+    if (!input || input.length < 2) {
+      const result = await sonos.avTransportService().GetCrossfadeMode();
+      const isEnabled = result.CrossfadeMode === '1' || result.CrossfadeMode === 1;
+      const status = isEnabled ? 'enabled' : 'disabled';
+      const emoji = isEnabled ? '🎵✨' : '🎵';
+      _slackMessage(`${emoji} Crossfade is currently *${status}*. Use \`setcrossfade on\` or \`setcrossfade off\` to change it.`, channel);
+      return;
+    }
+
+    const arg = input[1].toLowerCase();
+    
+    if (arg === 'on' || arg === 'enable' || arg === 'true' || arg === '1') {
+      // Enable crossfade
+      await sonos.avTransportService().SetCrossfadeMode({
+        InstanceID: 0,
+        CrossfadeMode: '1'
+      });
+      config.set('crossfadeEnabled', true);
+      config.save((err) => {
+        if (err) {
+          logger.warn('Failed to save crossfadeEnabled config: ' + err.message);
+        }
+      });
+      _slackMessage('🎵✨ *Crossfade enabled!* Tracks will now smoothly fade into each other. 🎶', channel);
+      logger.info('Crossfade enabled by ' + userName);
+    } else if (arg === 'off' || arg === 'disable' || arg === 'false' || arg === '0') {
+      // Disable crossfade
+      await sonos.avTransportService().SetCrossfadeMode({
+        InstanceID: 0,
+        CrossfadeMode: '0'
+      });
+      config.set('crossfadeEnabled', false);
+      config.save((err) => {
+        if (err) {
+          logger.warn('Failed to save crossfadeEnabled config: ' + err.message);
+        }
+      });
+      _slackMessage('🎵 Crossfade *disabled*. Tracks will play with normal transitions. ✅', channel);
+      logger.info('Crossfade disabled by ' + userName);
+    } else {
+      _slackMessage('🤔 Usage: `setcrossfade [on|off]`\n\nExample: `setcrossfade on` to enable smooth transitions between tracks.', channel);
+    }
+  } catch (err) {
+    logger.error('Error setting crossfade mode: ' + err);
+    _slackMessage('🚨 Error setting crossfade mode. Make sure you\'re playing from the queue (not external source). Try again! 🔄', channel);
+  }
+}
+
 function _removeTrack(input, channel) {
   // Admin check now handled in processInput (platform-aware)
   if (!input || input.length < 2) {
@@ -5157,6 +5349,7 @@ function _help(input, channel) {
 
     // Generate config values list for admin help
     let configList = '';
+    let adminUrl = '';
     if (isAdminUser) {
       configList = `
         • \`gongLimit\`: ${gongLimit}
@@ -5166,6 +5359,20 @@ function _help(input, channel) {
         • \`maxVolume\`: ${maxVolume}
         • \`searchLimit\`: ${searchLimit}
         • \`voteTimeLimitMinutes\`: ${voteTimeLimitMinutes}`;
+      
+      // Generate admin panel URL
+      const httpsPort = config.get('httpsPort') || 8443;
+      const useHttps = config.get('useHttps') !== false && (config.get('sslAutoGenerate') !== false || (config.get('sslCertPath') && config.get('sslKeyPath')));
+      if (ipAddress && ipAddress !== '' && ipAddress !== 'IP_HOST') {
+        if (useHttps) {
+          adminUrl = `https://${ipAddress}:${httpsPort}/admin`;
+        } else {
+          adminUrl = `http://${ipAddress}:${webPort}/admin`;
+        }
+      } else {
+        // Fallback if IP not configured
+        adminUrl = `http://localhost:${webPort}/admin`;
+      }
     }
 
     // Replace template variables in all messages
@@ -5176,7 +5383,8 @@ function _help(input, channel) {
       .replace(/{{flushVoteLimit}}/g, flushVoteLimit)
       .replace(/{{voteTimeLimitMinutes}}/g, voteTimeLimitMinutes)
       .replace(/{{searchLimit}}/g, searchLimit)
-      .replace(/{{configValues}}/g, configList));
+      .replace(/{{configValues}}/g, configList)
+      .replace(/{{adminUrl}}/g, adminUrl));
 
     // Send messages (Discord: multiple if needed; Slack: single combined)
     if (currentPlatform === 'discord') {
@@ -5276,7 +5484,7 @@ async function _trackblacklist(input, channel, userName) {
   }
 }
 
-function _setconfig(input, channel, userName) {
+async function _setconfig(input, channel, userName) {
   _logUserAction(userName, 'setconfig');
   // Admin check now handled in processInput (platform-aware)
 
@@ -5298,6 +5506,8 @@ function _setconfig(input, channel, userName) {
 > \`telemetryEnabled\`: ${config.get('telemetryEnabled')}
 > \`soundcraftEnabled\`: ${config.get('soundcraftEnabled') || false}
 > \`soundcraftIp\`: ${config.get('soundcraftIp') || '(not set)'}
+> \`crossfadeEnabled\`: ${config.get('crossfadeEnabled') || false}
+> \`crossfadeDurationSeconds\`: ${Number(config.get('crossfadeDurationSeconds') || 6)}
 > \`slackAlwaysThread\`: ${config.get('slackAlwaysThread') || false}
 
 *Usage:* \`setconfig <key> <value>\`
@@ -5307,6 +5517,8 @@ function _setconfig(input, channel, userName) {
 *Example:* \`setconfig telemetryEnabled false\`
 *Example:* \`setconfig soundcraftEnabled true\`
 *Example:* \`setconfig soundcraftIp 192.168.1.100\`
+*Example:* \`setconfig crossfadeEnabled true\`
+*Example:* \`setconfig crossfadeDurationSeconds 6\`
 *Example:* \`setconfig slackAlwaysThread true\`
     `;
     _slackMessage(currentConfig.trim(), channel);
@@ -5326,21 +5538,26 @@ function _setconfig(input, channel, userName) {
     searchLimit: { type: 'number', min: 1, max: 50 },
     voteTimeLimitMinutes: { type: 'number', min: 1, max: 60 },
     themePercentage: { type: 'number', min: 0, max: 100 },
+    crossfadeDurationSeconds: { type: 'number', min: 0, max: 30 },
     aiModel: { type: 'string', minLen: 1, maxLen: 50, allowed: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
     aiPrompt: { type: 'string', minLen: 1, maxLen: 500 },
     defaultTheme: { type: 'string', minLen: 0, maxLen: 100 },
     telemetryEnabled: { type: 'boolean' },
     soundcraftEnabled: { type: 'boolean' },
     soundcraftIp: { type: 'string', minLen: 0, maxLen: 50 },
+    crossfadeEnabled: { type: 'boolean' },
     slackAlwaysThread: { type: 'boolean' }
   };
 
-  if (!allowedConfigs[key]) {
+  // Make config key case-insensitive
+  const normalizedKey = Object.keys(allowedConfigs).find(k => k.toLowerCase() === key.toLowerCase());
+  if (!normalizedKey) {
     _slackMessage(`❌ Invalid config key "${key}". Use \`setconfig\` without arguments to see available options! ⚙️`, channel);
     return;
   }
 
-  const configDef = allowedConfigs[key];
+  const configDef = allowedConfigs[normalizedKey];
+  const actualKey = normalizedKey; // Use normalized key for all operations
 
   // Validate value
   if (configDef.type === 'number') {
@@ -5354,10 +5571,10 @@ function _setconfig(input, channel, userName) {
       return;
     }
 
-    const oldValue = config.get(key);
+    const oldValue = config.get(actualKey);
 
     // Update runtime variable
-    switch (key) {
+    switch (actualKey) {
       case 'gongLimit':
         gongLimit = numValue;
         break;
@@ -5391,31 +5608,50 @@ function _setconfig(input, channel, userName) {
     });
 
     // Persist to config file
-    config.set(key, numValue);
+    config.set(actualKey, numValue);
     config.save(function (err) {
       if (err) {
         logger.error('Error saving config: ' + err);
-        _slackMessage(`⚠️ Updated \`${key}\` to \`${numValue}\` in memory, but failed to save to disk! Changes won't persist after restart. 🚨`, channel);
+        _slackMessage(`⚠️ Updated \`${actualKey}\` to \`${numValue}\` in memory, but failed to save to disk! Changes won't persist after restart. 🚨`, channel);
         return;
       }
-      _slackMessage(`✅ Successfully updated \`${key}\` from \`${oldValue}\` to \`${numValue}\` and saved to config.`, channel);
+      _slackMessage(`✅ Successfully updated \`${actualKey}\` from \`${oldValue}\` to \`${numValue}\` and saved to config.`, channel);
     });
   } else if (configDef.type === 'string') {
     const newValue = input.slice(2).join(' ').trim();
     if (newValue.length < (configDef.minLen || 1) || newValue.length > (configDef.maxLen || 500)) {
-      _slackMessage(`📝 Value length for \`${key}\` must be between ${configDef.minLen} and ${configDef.maxLen} characters.`, channel);
+      _slackMessage(`📝 Value length for \`${actualKey}\` must be between ${configDef.minLen} and ${configDef.maxLen} characters.`, channel);
       return;
     }
-    // Check allowed values if specified
-    if (configDef.allowed && !configDef.allowed.includes(newValue)) {
-      _slackMessage(`📝 Invalid value for \`${key}\`. Allowed values: ${configDef.allowed.join(', ')}`, channel);
+    // Check allowed values if specified (case-insensitive)
+    if (configDef.allowed) {
+      const normalizedValue = newValue.toLowerCase();
+      const matchedValue = configDef.allowed.find(a => a.toLowerCase() === normalizedValue);
+      if (!matchedValue) {
+        _slackMessage(`📝 Invalid value for \`${actualKey}\`. Allowed values: ${configDef.allowed.join(', ')}`, channel);
+        return;
+      }
+      // Use the original case from allowed list
+      const finalValue = matchedValue;
+      const oldValue = config.get(actualKey) || '';
+      config.set(actualKey, finalValue);
+      
+      config.save(function (err) {
+        if (err) {
+          logger.error('Error saving config: ' + err);
+          _slackMessage(`⚠️ Updated \`${actualKey}\` in memory, but failed to save to disk!`, channel);
+          return;
+        }
+        _slackMessage(`✅ Successfully updated \`${actualKey}\` and saved to config.\nOld: \`${oldValue.slice(0, 80)}${oldValue.length > 80 ? '…' : ''}\`\nNew: \`${finalValue.slice(0, 80)}${finalValue.length > 80 ? '…' : ''}\``, channel);
+      });
       return;
     }
-    const oldValue = config.get(key) || '';
-    config.set(key, newValue);
+    
+    const oldValue = config.get(actualKey) || '';
+    config.set(actualKey, newValue);
     
     // Update Soundcraft IP if changed
-    if (key === 'soundcraftIp') {
+    if (actualKey === 'soundcraftIp') {
       soundcraft.config.soundcraftIp = newValue;
       if (soundcraft.config.soundcraftEnabled && newValue) {
         // Reconnect with new IP
@@ -5433,10 +5669,10 @@ function _setconfig(input, channel, userName) {
     config.save(function (err) {
       if (err) {
         logger.error('Error saving config: ' + err);
-        _slackMessage(`⚠️ Updated \`${key}\` in memory, but failed to save to disk!`, channel);
+        _slackMessage(`⚠️ Updated \`${actualKey}\` in memory, but failed to save to disk!`, channel);
         return;
       }
-      _slackMessage(`✅ Successfully updated \`${key}\` and saved to config.\nOld: \`${oldValue.slice(0, 80)}${oldValue.length > 80 ? '…' : ''}\`\nNew: \`${newValue.slice(0, 80)}${newValue.length > 80 ? '…' : ''}\``, channel);
+      _slackMessage(`✅ Successfully updated \`${actualKey}\` and saved to config.\nOld: \`${oldValue.slice(0, 80)}${oldValue.length > 80 ? '…' : ''}\`\nNew: \`${newValue.slice(0, 80)}${newValue.length > 80 ? '…' : ''}\``, channel);
     });
   } else if (configDef.type === 'boolean') {
     const lowerValue = value.toLowerCase();
@@ -5451,11 +5687,17 @@ function _setconfig(input, channel, userName) {
       return;
     }
     
-    const oldValue = config.get(key);
-    config.set(key, boolValue);
+    const oldValue = config.get(actualKey);
+    // Special-case crossfade: apply via Sonos immediately and persist using the dedicated handler
+    if (actualKey === 'crossfadeEnabled') {
+      await _setCrossfade(['setcrossfade', boolValue ? 'on' : 'off'], channel, userName);
+      return;
+    }
+
+    config.set(actualKey, boolValue);
     
     // Update Soundcraft connection if changing soundcraftEnabled
-    if (key === 'soundcraftEnabled') {
+    if (actualKey === 'soundcraftEnabled') {
       if (boolValue && !soundcraft.isEnabled()) {
         // Enable and connect
         soundcraft.config.soundcraftEnabled = true;
@@ -5477,10 +5719,10 @@ function _setconfig(input, channel, userName) {
     config.save(function (err) {
       if (err) {
         logger.error('Error saving config: ' + err);
-        _slackMessage(`⚠️ Updated \`${key}\` to \`${boolValue}\` in memory, but failed to save to disk!`, channel);
+        _slackMessage(`⚠️ Updated \`${actualKey}\` to \`${boolValue}\` in memory, but failed to save to disk!`, channel);
         return;
       }
-      _slackMessage(`✅ Successfully updated \`${key}\` from \`${oldValue}\` to \`${boolValue}\` and saved to config.`, channel);
+      _slackMessage(`✅ Successfully updated \`${actualKey}\` from \`${oldValue}\` to \`${boolValue}\` and saved to config.`, channel);
     });
   }
 }

@@ -279,6 +279,55 @@
         </div>
       </div>
 
+      <!-- OpenAI Setup -->
+      <div class="page" id="page-openai">
+        <div class="page-header">
+          <h2>Configure OpenAI (Optional)</h2>
+          <p>Enable natural language parsing for better user experience</p>
+        </div>
+        <div class="page-body">
+          <div class="info-box">
+            <span class="info-icon">ℹ️</span>
+            <div>
+              <strong>What is this?</strong> OpenAI integration allows users to talk to the bot naturally instead of using commands.
+              <br><br>
+              <strong>Example:</strong> "Play some Christmas music" instead of "add christmas"
+              <br><br>
+              <strong>Missing API key?</strong> Get one at
+              <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys</a>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>OpenAI API Key</label>
+            <input type="password" id="openai-api-key" placeholder="sk-..." class="input">
+            <small>Leave empty to skip. You can add this later in the admin panel.</small>
+          </div>
+          <div class="form-group">
+            <label>AI Model</label>
+            <select id="openai-model" class="input">
+              <option value="gpt-4o">GPT-4o (Recommended, fastest)</option>
+              <option value="gpt-4o-mini">GPT-4o Mini (Cheaper, still fast)</option>
+              <option value="gpt-4">GPT-4 (More capable, slower)</option>
+              <option value="gpt-3.5-turbo">GPT-3.5 Turbo (Legacy, cheapest)</option>
+            </select>
+            <small>Choose based on your needs and budget</small>
+          </div>
+          <div class="form-group">
+            <label>AI Prompt (Optional)</label>
+            <textarea id="openai-prompt" placeholder="You are a funny, upbeat DJ for a Slack music bot..." class="input" rows="3"></textarea>
+            <small>Customize how the AI responds to users. Leave empty for default.</small>
+          </div>
+          <div id="openai-validation" class="validation-message"></div>
+        </div>
+        <div class="page-footer">
+          <button class="btn btn-secondary" id="btn-back-openai">Back</button>
+          <div class="footer-right">
+            <button class="btn btn-ghost" id="btn-skip-openai">Skip</button>
+            <button class="btn btn-primary" id="btn-next-openai">Next</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Password Setup Page -->
       <div class="page" id="page-password">
         <div class="page-header">

@@ -242,7 +242,8 @@ async function loadConfig() {
       { key: 'openaiApiKey', label: 'OpenAI API Key', type: 'text', description: 'OpenAI API key for natural language parsing (starts with sk-)' },
       { key: 'aiModel', label: 'AI Model', type: 'select', options: ['gpt-4o', 'gpt-4o-mini', 'gpt-4', 'gpt-3.5-turbo'], description: 'OpenAI model for natural language parsing' },
       { key: 'soundcraftEnabled', label: 'Soundcraft Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable Soundcraft mixer integration' },
-      { key: 'soundcraftIp', label: 'Soundcraft IP Address', type: 'text', description: 'IP address of Soundcraft mixer' }
+      { key: 'crossfadeEnabled', label: 'Crossfade Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable smooth transitions between tracks (requires queue playback)' },
+      { key: 'crossfadeDurationSeconds', label: 'Crossfade Duration (seconds)', type: 'number', min: 0, max: 30, description: 'How many seconds to fade around track transitions (best-effort). 0 disables fading.' }
     ];
     editableConfig.forEach(item => {
       const configItem = createConfigItem(item, config[item.key]);
