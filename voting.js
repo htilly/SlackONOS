@@ -129,9 +129,15 @@ function _trackKey(title, artist, uri) {
 }
 
 function _normalizeTrackRef(trackRef, artist) {
-  if (trackRef && typeof trackRef === 'object') {
+  // Handle null/undefined (no track playing)
+  if (!trackRef) {
+    return { title: '', artist: '', uri: '' };
+  }
+  // Handle object (track info)
+  if (typeof trackRef === 'object') {
     return { title: _normalizeStr(trackRef.title), artist: _normalizeStr(trackRef.artist), uri: _normalizeStr(trackRef.uri) };
   }
+  // Handle string (legacy format or track name only)
   return { title: _normalizeStr(trackRef), artist: _normalizeStr(artist), uri: '' };
 }
 
