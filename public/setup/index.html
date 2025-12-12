@@ -279,19 +279,92 @@
         </div>
       </div>
 
+      <!-- OpenAI Setup -->
+      <div class="page" id="page-openai">
+        <div class="page-header">
+          <h2>Configure OpenAI (Optional)</h2>
+          <p>Enable natural language parsing for better user experience</p>
+        </div>
+        <div class="page-body">
+          <div class="info-box">
+            <span class="info-icon">ℹ️</span>
+            <div>
+              <strong>What is this?</strong> OpenAI integration allows users to talk to the bot naturally instead of using commands.
+              <br><br>
+              <strong>Example:</strong> "Play some Christmas music" instead of "add christmas"
+              <br><br>
+              <strong>Missing API key?</strong> Get one at
+              <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys</a>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>OpenAI API Key</label>
+            <input type="password" id="openai-api-key" placeholder="sk-..." class="input">
+            <small>Leave empty to skip. You can add this later in the admin panel.</small>
+          </div>
+          <div class="form-group">
+            <label>AI Model</label>
+            <select id="openai-model" class="input">
+              <option value="gpt-4o">GPT-4o (Recommended, fastest)</option>
+              <option value="gpt-4o-mini">GPT-4o Mini (Cheaper, still fast)</option>
+              <option value="gpt-4">GPT-4 (More capable, slower)</option>
+              <option value="gpt-3.5-turbo">GPT-3.5 Turbo (Legacy, cheapest)</option>
+            </select>
+            <small>Choose based on your needs and budget</small>
+          </div>
+          <div class="form-group">
+            <label>AI Prompt (Optional)</label>
+            <textarea id="openai-prompt" placeholder="You are a funny, upbeat DJ for a Slack music bot..." class="input" rows="3"></textarea>
+            <small>Customize how the AI responds to users. Leave empty for default.</small>
+          </div>
+          <div id="openai-validation" class="validation-message"></div>
+        </div>
+        <div class="page-footer">
+          <button class="btn btn-secondary" id="btn-back-openai">Back</button>
+          <div class="footer-right">
+            <button class="btn btn-ghost" id="btn-skip-openai">Skip</button>
+            <button class="btn btn-primary" id="btn-next-openai">Next</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Password Setup Page -->
       <div class="page" id="page-password">
         <div class="page-header">
-          <h2>Set Admin Password</h2>
-          <p id="password-page-description">Protect your admin panel with a password</p>
+          <h2>Set Up Authentication</h2>
+          <p id="password-page-description">Choose your preferred authentication method</p>
         </div>
         <div class="page-body">
           <div class="info-box info-box-warning" id="password-required-notice" style="display: none;">
             <span class="info-icon">⚠️</span>
             <div>
-              <strong>Password Required:</strong> You must set an admin password before continuing with setup.
+              <strong>Authentication Required:</strong> You must set up at least one authentication method before continuing with setup.
             </div>
           </div>
+          
+          <!-- Yubikey Enrollment Section (Preferred) -->
+          <div id="yubikey-section" style="margin-bottom: 2rem; padding: 1.5rem; background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(8, 145, 178, 0.1)); border: 2px solid rgba(6, 182, 212, 0.3); border-radius: 12px;">
+            <div style="text-align: center; margin-bottom: 1rem;">
+              <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🔐</div>
+              <h3 style="margin: 0 0 0.5rem 0; color: #06b6d4;">Recommended: Enroll Yubikey</h3>
+              <p style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem; margin: 0;">
+                Use a FIDO2 security key for passwordless authentication
+              </p>
+            </div>
+            <button class="btn btn-primary" id="btn-enroll-yubikey" style="width: 100%; background: linear-gradient(135deg, #06b6d4, #0891b2); font-size: 1.1rem; padding: 1rem;">
+              🔐 Enroll Yubikey
+            </button>
+            <div id="yubikey-message" class="validation-message" style="margin-top: 1rem;"></div>
+          </div>
+          
+          <!-- Divider -->
+          <div style="text-align: center; margin: 2rem 0; position: relative;">
+            <div style="position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: rgba(255, 255, 255, 0.1);"></div>
+            <span style="background: rgba(15, 23, 42, 0.8); padding: 0 1rem; color: rgba(255, 255, 255, 0.5); font-size: 0.9rem;">Or set a password</span>
+          </div>
+          
+          <!-- Password Section -->
+          <div id="password-form-section">
           <div class="info-box info-box-warning" id="password-optional-notice">
             <span class="info-icon">🔒</span>
             <div>
@@ -299,15 +372,16 @@
             </div>
           </div>
           <div class="form-group">
-            <label>Password <span class="required">*</span></label>
+              <label>Password <span class="required" id="password-required-indicator">*</span></label>
             <input type="password" id="password" placeholder="Enter password (min 8 characters)" class="input">
             <small>Minimum 8 characters</small>
           </div>
           <div class="form-group">
-            <label>Confirm Password <span class="required">*</span></label>
+              <label>Confirm Password <span class="required" id="password-confirm-required-indicator">*</span></label>
             <input type="password" id="password-confirm" placeholder="Confirm password" class="input">
           </div>
           <div id="password-validation" class="validation-message"></div>
+          </div>
         </div>
         <div class="page-footer">
           <button class="btn btn-secondary" id="btn-back-password">Back</button>
@@ -344,6 +418,8 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@9.0.0/dist/bundle/index.umd.min.js"></script>
+  <script src="/setup/webauthn-client.js"></script>
   <script src="/setup/setup.js?v=5.0"></script>
 </body>
 </html>

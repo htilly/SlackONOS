@@ -157,19 +157,26 @@
       
       <div id="error-message" class="error-message"></div>
       
-      <!-- WebAuthn Login Section -->
-      <div id="webauthn-section" style="display: none; margin-bottom: 1.5rem;">
-        <button type="button" class="btn-login" id="btn-webauthn" style="width: 100%; background: linear-gradient(135deg, #06b6d4, #0891b2);">
+      <!-- WebAuthn Login Section (Primary - Passwordless) -->
+      <div id="webauthn-section" style="display: none; margin-bottom: 2rem;">
+        <div style="text-align: center; margin-bottom: 1.5rem;">
+          <div style="font-size: 3rem; margin-bottom: 0.5rem;">🔐</div>
+          <h3 style="margin: 0 0 0.5rem 0; color: #06b6d4; font-size: 1.3rem;">Passwordless Login</h3>
+          <p style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem; margin: 0;">
+          Use your FIDO2 security key or biometric
+          </p>
+        </div>
+        <button type="button" class="btn-login" id="btn-webauthn" style="width: 100%; background: linear-gradient(135deg, #06b6d4, #0891b2); font-size: 1.1rem; padding: 1rem; font-weight: 600;">
           🔐 Login with Yubikey!
         </button>
-        <div style="text-align: center; margin-top: 1rem; color: rgba(255, 255, 255, 0.6); font-size: 0.85rem;">
-          Use your FIDO2 security key or biometric
-        </div>
       </div>
       
-      <div id="password-section">
-        <div style="text-align: center; margin-bottom: 1rem; color: rgba(255, 255, 255, 0.6); font-size: 0.9rem; padding-bottom: 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
-          Or login with password
+      <!-- Password Login Section (Secondary) -->
+      <div id="password-section" style="display: none;">
+        <!-- Divider -->
+        <div style="text-align: center; margin: 2rem 0; position: relative;">
+          <div style="position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: rgba(255, 255, 255, 0.1);"></div>
+          <span style="background: rgba(15, 23, 42, 0.8); padding: 0 1rem; color: rgba(255, 255, 255, 0.5); font-size: 0.9rem;">Or use password</span>
         </div>
         <form id="login-form">
           <div class="form-group">
@@ -182,8 +189,8 @@
             <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="Enter your password">
           </div>
           
-          <button type="submit" class="btn-login" id="btn-login">
-            Login
+          <button type="submit" class="btn-login" id="btn-login" style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.6), rgba(167, 139, 250, 0.6));">
+            Login with Password
           </button>
         </form>
       </div>
@@ -219,9 +226,11 @@
         const response = await fetch(`${API_BASE}/webauthn/status`);
         const data = await response.json();
         
+        // Passwordless-first approach: Show Yubikey as primary if available
         if (data.enabled && data.hasCredentials) {
+          // Yubikey available - show as primary, password as fallback
           webauthnSection.style.display = 'block';
-          passwordSection.style.display = 'none';
+          passwordSection.style.display = 'block'; // Show password as secondary option
         } else if (data.enabled && !data.hasCredentials) {
           webauthnSection.style.display = 'none';
           passwordSection.style.display = 'block';
@@ -274,16 +283,16 @@
           }
         } else {
           // Fallback to manual method if WebAuthnClient not available
-          const optionsResponse = await fetch(`${API_BASE}/webauthn/authenticate/options`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-          });
-          
-          if (!optionsResponse.ok) {
-            throw new Error('Failed to get authentication options');
-          }
-          
-          const options = await optionsResponse.json();
+        const optionsResponse = await fetch(`${API_BASE}/webauthn/authenticate/options`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (!optionsResponse.ok) {
+          throw new Error('Failed to get authentication options');
+        }
+        
+        const options = await optionsResponse.json();
 
           console.log("LOGIN: RAW OPTIONS FROM SERVER >>>", options);
           console.log("LOGIN: CHALLENGE TYPE:", typeof options.challenge, options.challenge);
@@ -303,21 +312,21 @@
             console.warn("LOGIN: Challenge is not a string, this may cause errors:", typeof options.challenge);
           }
 
-          const assertionResponse = await SimpleWebAuthnBrowser.startAuthentication(options);
+        const assertionResponse = await SimpleWebAuthnBrowser.startAuthentication(options);
 
-          const verifyResponse = await fetch(`${API_BASE}/webauthn/authenticate/verify`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(assertionResponse)
-          });
+        const verifyResponse = await fetch(`${API_BASE}/webauthn/authenticate/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(assertionResponse)
+        });
 
-          const verifyData = await verifyResponse.json();
+        const verifyData = await verifyResponse.json();
 
-          if (verifyData.verified) {
-            window.location.href = returnUrl;
-          } else {
-            showError('Authentication failed. Please try again.');
-            btnWebAuthn.disabled = false;
+        if (verifyData.verified) {
+          window.location.href = returnUrl;
+        } else {
+          showError('Authentication failed. Please try again.');
+          btnWebAuthn.disabled = false;
             btnWebAuthn.innerHTML = '🔐 Login with Yubikey!';
           }
         }

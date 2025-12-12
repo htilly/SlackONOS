@@ -67,7 +67,7 @@ async function loadStatus() {
     });
   } catch (err) {
     console.error('Error loading status:', err);
-    document.getElementById('status-grid').innerHTML =
+    document.getElementById('status-grid').innerHTML = 
       '<div class="status-card"><h3>❌ Error loading status</h3><p class="error-message">' + err.message + '</p></div>';
   }
 }
@@ -181,7 +181,7 @@ async function loadNowPlaying() {
     content.innerHTML = html;
   } catch (err) {
     console.error('Error loading now playing:', err);
-    document.getElementById('now-playing-content').innerHTML =
+    document.getElementById('now-playing-content').innerHTML = 
       '<p class="error-message">Error loading: ' + err.message + '</p>';
   }
 }
@@ -242,7 +242,8 @@ async function loadConfig() {
       { key: 'openaiApiKey', label: 'OpenAI API Key', type: 'text', description: 'OpenAI API key for natural language parsing (starts with sk-)' },
       { key: 'aiModel', label: 'AI Model', type: 'select', options: ['gpt-4o', 'gpt-4o-mini', 'gpt-4', 'gpt-3.5-turbo'], description: 'OpenAI model for natural language parsing' },
       { key: 'soundcraftEnabled', label: 'Soundcraft Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable Soundcraft mixer integration' },
-      { key: 'soundcraftIp', label: 'Soundcraft IP Address', type: 'text', description: 'IP address of Soundcraft mixer' }
+      { key: 'crossfadeEnabled', label: 'Crossfade Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable smooth transitions between tracks (requires queue playback)' },
+      { key: 'crossfadeDurationSeconds', label: 'Crossfade Duration (seconds)', type: 'number', min: 0, max: 30, description: 'How many seconds to fade around track transitions (best-effort). 0 disables fading.' }
     ];
     editableConfig.forEach(item => {
       const configItem = createConfigItem(item, config[item.key]);
@@ -250,7 +251,7 @@ async function loadConfig() {
     });
   } catch (err) {
     console.error('Error loading config:', err);
-    document.getElementById('config-items').innerHTML =
+    document.getElementById('config-items').innerHTML = 
       '<p class="error-message">Error loading: ' + err.message + '</p>';
   }
 }
@@ -526,11 +527,11 @@ function setupLogViewer() {
           setTimeout(() => {
             logLevelSelect.style.borderColor = 'rgba(255,255,255,0.2)';
           }, 1000);
-        } else {
+    } else {
           // Revert on error
           logLevelSelect.value = originalValue;
           alert(`Failed to update log level: ${result.error || 'Unknown error'}`);
-        }
+    }
       } catch (err) {
         console.error('Error updating log level:', err);
         logLevelSelect.value = originalValue;
@@ -543,10 +544,10 @@ function setupLogViewer() {
 async function loadLogLevel() {
   try {
     const response = await fetch(`${API_BASE}/config`);
-    if (response.status === 401) {
-      window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
+      if (response.status === 401) {
+        window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
       return;
-    }
+      }
     const config = await response.json();
     const logLevelSelect = document.getElementById('log-level-select');
     if (logLevelSelect && config.logLevel) {
@@ -565,46 +566,46 @@ function startLogStream() {
   }
   
   // Clear existing logs
-  const logsContent = document.getElementById('logs-content');
+      const logsContent = document.getElementById('logs-content');
   if (logsContent) {
-    logsContent.innerHTML = '';
-  }
+      logsContent.innerHTML = '';
+      }
   
   // Create EventSource - server will send buffer on connect, then stream new logs
   // Only create if we don't already have an active connection
   if (!logEventSource || logEventSource.readyState === EventSource.CLOSED) {
-    logEventSource = new EventSource(`${API_BASE}/logs`);
+  logEventSource = new EventSource(`${API_BASE}/logs`);
     
     logEventSource.onopen = () => {
       // Connection opened - server will send buffer automatically
       console.log('Log stream connected');
     };
-    
-    logEventSource.onmessage = (event) => { 
-      try { 
-        const data = JSON.parse(event.data); 
+  
+  logEventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
         // Only process log entries, ignore 'connected' and heartbeat messages
-        if (data.type === 'log') {
-          addLogEntry(data);
-        }
+      if (data.type === 'log') {
+        addLogEntry(data);
+      }
         // Ignore 'connected' type messages
-      } catch (err) { 
-        console.error('Error parsing log event:', err); 
-      } 
-    };
-    
-    logEventSource.onerror = (err) => { 
-      console.error('Log stream error:', err); 
+    } catch (err) {
+      console.error('Error parsing log event:', err);
+    }
+  };
+  
+  logEventSource.onerror = (err) => {
+    console.error('Log stream error:', err);
       // Only reconnect if logs are still visible and connection is closed
       if (logsVisible && logEventSource && logEventSource.readyState === EventSource.CLOSED) {
-        setTimeout(() => {
+    setTimeout(() => {
           if (logsVisible) {
-            startLogStream();
-          }
-        }, 5000);
+        startLogStream();
       }
-    };
-  }
+    }, 5000);
+      }
+  };
+}
 }
 
 function stopLogStream() { if (logEventSource) { logEventSource.close(); logEventSource = null; } }
@@ -621,7 +622,7 @@ function addLogEntry(log) {
   logsContent.appendChild(entry);
   const logsContainer = document.getElementById('logs-container'); if (logsContainer) logsContainer.scrollTop = logsContainer.scrollHeight;
   while (logsContent.children.length > 1000) logsContent.removeChild(logsContent.firstChild);
-}
+  }
 
 function setupLogout() {
   const btnLogout = document.getElementById('btn-logout');
@@ -692,15 +693,15 @@ async function setupWebAuthn() {
     await new Promise(resolve => {
       if (window.WebAuthnClient) {
         resolve();
-        return;
-      }
+      return;
+    }
       // Check every 50ms for up to 1 second
       let attempts = 0;
       const checkInterval = setInterval(() => {
         attempts++;
         if (window.WebAuthnClient || attempts >= 20) {
           clearInterval(checkInterval);
-          resolve();
+              resolve();
         }
       }, 50);
     });
@@ -892,9 +893,9 @@ async function setupWebAuthn() {
       showWebAuthnMessage(messageDiv, 'Touch your security key…', 'info');
       const result = await WebAuthnClient.register({ promptDeviceName: true });
 
-      showWebAuthnMessage(messageDiv, '✓ Security key registered successfully!', 'success');
-      await loadWebAuthnCredentials();
-      await loadWebAuthnStatus();
+        showWebAuthnMessage(messageDiv, '✓ Security key registered successfully!', 'success');
+        await loadWebAuthnCredentials();
+        await loadWebAuthnStatus();
     } catch (err) {
       console.error('[WebAuthn] registration error', err);
       // Safely extract error message - be very defensive
@@ -950,7 +951,7 @@ async function setupWebAuthn() {
 
   function showWebAuthnMessage(element, message, type) {
     if (!element) return; element.textContent = message; element.className = `validation-message ${type} show`; if (type === 'success') setTimeout(() => { element.classList.remove('show'); }, 3000);
-  }
+    }
 
   await loadWebAuthnStatus();
 }
