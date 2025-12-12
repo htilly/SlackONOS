@@ -1,6 +1,6 @@
 # Terms of Service
 
-**Last Updated:** [Date]
+**Last Updated:** December 12, 2025
 
 ## Acceptance of Terms
 
@@ -99,7 +99,7 @@ We reserve the right to terminate or suspend access to the Software (if applicab
 
 ## Governing Law
 
-These Terms shall be governed by and construed in accordance with the laws of [Jurisdiction], without regard to its conflict of law provisions.
+These Terms shall be governed by and construed in accordance with the laws of Sweden, without regard to its conflict of law provisions.
 
 ## Severability
 
@@ -112,8 +112,8 @@ These Terms constitute the entire agreement between you and the Software authors
 ## Contact
 
 For questions about these Terms:
-- Open an issue on GitHub: [Repository URL]
-- Review documentation: See README.md and other docs in repository
+- Open an issue on GitHub: https://github.com/htilly/SlackONOS/issues
+- Review documentation: https://github.com/htilly/SlackONOS/blob/develop/README.md
 
 ## Acknowledgment
 

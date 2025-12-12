@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last Updated:** [Date]
+**Last Updated:** December 12, 2025
 
 ## Introduction
 
@@ -113,8 +113,8 @@ We may update this Privacy Policy from time to time. Changes will be posted in t
 ## Contact
 
 For questions about this Privacy Policy:
-- Open an issue on GitHub: [Repository URL]
-- Review documentation: See README.md and other docs in repository
+- Open an issue on GitHub: https://github.com/htilly/SlackONOS/issues
+- Review documentation: https://github.com/htilly/SlackONOS/blob/develop/README.md
 
 ## Compliance
 
