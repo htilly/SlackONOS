@@ -1,0 +1,16 @@
+services:
+  slackonos:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: slackonos:local
+    container_name: slackonos
+    hostname: slackonos
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config
+    ports:
+      - 8181:8181
+      - 8443:8443

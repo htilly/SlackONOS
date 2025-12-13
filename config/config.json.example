@@ -46,5 +46,8 @@
     "webauthnRpId": "localhost",
     "webauthnOrigin": "",
     "webauthnRequireUserVerification": false,
-    "_comment_webauthn": "WebAuthn/FIDO2: Enable passwordless login with security keys/biometrics. Recommended: configure via the Web Admin Panel under Security. (JSON has no comments, so this is stored as a dummy field.)"
+    "_comment_webauthn": "WebAuthn/FIDO2: Enable passwordless login with security keys/biometrics. Recommended: configure via the Web Admin Panel under Security. (JSON has no comments, so this is stored as a dummy field.)",
+    "githubToken": "ghp_...",
+    "slackWebhookUrl": "https://hooks.slack.com/services/...",
+    "_comment_aicode": "AI Code Agent (optional): githubToken requires 'repo' scope for triggering GitHub Actions. slackWebhookUrl is used for notifications back to Slack when PR is created/fails."
 }

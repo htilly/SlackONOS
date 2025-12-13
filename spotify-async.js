@@ -302,7 +302,8 @@ module.exports = function (config, injectedLogger) {
             return data.albums.items.map(album => ({
                 name: album.name,
                 artist: album.artists[0].name,
-                uri: album.uri
+                uri: album.uri,
+                popularity: album.popularity // Keep popularity for sorting
             }));
         },
 
@@ -314,25 +315,19 @@ module.exports = function (config, injectedLogger) {
                 market: config.market
             });
 
-            logger.info(`[SPOTIFY DEBUG] Playlist search for "${term}": ${JSON.stringify(data.playlists)}`);
-
             if (!data.playlists || !data.playlists.items) {
-                logger.warn('[SPOTIFY DEBUG] No playlists or items in response');
                 return [];
             }
 
-            logger.info(`[SPOTIFY DEBUG] Found ${data.playlists.items.length} items before filtering`);
-
             const filtered = data.playlists.items
                 .filter(playlist => playlist && playlist.name); // Filter out null/undefined items
-
-            logger.info(`[SPOTIFY DEBUG] ${filtered.length} items after filtering`);
 
             return filtered.map(playlist => ({
                 name: playlist.name,
                 owner: playlist.owner?.display_name || 'Unknown',
                 tracks: playlist.tracks?.total || 0,
-                uri: playlist.uri
+                uri: playlist.uri,
+                followers: playlist.followers?.total || 0 // Keep followers for sorting
             }));
         },
 

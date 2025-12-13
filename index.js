@@ -2188,6 +2188,11 @@ async function handleAdminAPI(req, res, url) {
 /**
  * Get admin status for all integrations
  */
+// Cache Spotify status to avoid hitting API too frequently
+let spotifyStatusCache = null;
+let spotifyStatusCacheTime = 0;
+const SPOTIFY_STATUS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 async function getAdminStatus() {
   const status = {
     slack: { configured: false, connected: false },
@@ -2240,22 +2245,35 @@ async function getAdminStatus() {
     }
   }
   
-  // Check Spotify
+  // Check Spotify (with caching to avoid excessive API calls)
   const spotifyClientId = config.get('spotifyClientId');
   const spotifyClientSecret = config.get('spotifyClientSecret');
   if (spotifyClientId && spotifyClientSecret) {
     status.spotify.configured = true;
-    try {
-      // Try a simple API call to check connection
-      await spotify.searchTrackList('test', 1);
-      status.spotify.connected = true;
-      status.spotify.details = {
-        market: config.get('market') || 'N/A',
-        clientId: spotifyClientId ? spotifyClientId.slice(0,6) + '…' : 'N/A'
-      };
-    } catch (err) {
-      status.spotify.connected = false;
-      status.spotify.error = err.message;
+    
+    // Use cached status if available and fresh (< 5 minutes old)
+    const now = Date.now();
+    if (spotifyStatusCache && (now - spotifyStatusCacheTime) < SPOTIFY_STATUS_CACHE_TTL) {
+      status.spotify = { ...spotifyStatusCache };
+    } else {
+      // Cache expired or not available, check Spotify API
+      try {
+        await spotify.searchTrackList('test', 1);
+        status.spotify.connected = true;
+        status.spotify.details = {
+          market: config.get('market') || 'N/A',
+          clientId: spotifyClientId ? spotifyClientId.slice(0,6) + '…' : 'N/A'
+        };
+        // Update cache
+        spotifyStatusCache = { ...status.spotify };
+        spotifyStatusCacheTime = now;
+      } catch (err) {
+        status.spotify.connected = false;
+        status.spotify.error = err.message;
+        // Cache error state too
+        spotifyStatusCache = { ...status.spotify };
+        spotifyStatusCacheTime = now;
+      }
     }
   }
   
@@ -2881,6 +2899,7 @@ const commandRegistry = new Map([
   ['stats', { fn: _stats, admin: true }],
   ['configdump', { fn: _configdump, admin: true, aliases: ['cfgdump', 'confdump'] }],
   ['aiunparsed', { fn: _aiUnparsed, admin: true, aliases: ['aiun', 'aiunknown'] }],
+  ['aicode', { fn: _aicode, admin: true }],
   ['test', { fn: (args, ch, u) => _addToSpotifyPlaylist(args, ch), admin: true }]
 ]);
 
@@ -4388,8 +4407,11 @@ async function _add(input, channel, userName) {
       return;
     }
 
+    // Sort tracks by relevance using the same logic as search command
+    const sortedTracks = _sortTracksByRelevance(tracks, track);
+
     // Pre-validate all candidates in parallel before attempting to queue
-    const candidates = tracks
+    const candidates = sortedTracks
       .filter(t => musicHelper.isValidSpotifyUri(t.uri))
       .map(t => ({
         name: t.name,
@@ -4536,8 +4558,35 @@ async function _addalbum(input, channel, userName) {
   logger.info('Album to add: ' + album);
 
   try {
-    const result = await spotify.getAlbum(album);
+    // If it's a Spotify URI, use getAlbum directly
+    if (album.startsWith('spotify:album:') || album.includes('spotify.com/album/')) {
+      const result = await spotify.getAlbum(album);
+      await _queueAlbum(result, album, channel, userName);
+      return;
+    }
     
+    // Otherwise search and sort by relevance
+    const albums = await spotify.searchAlbumList(album, 3);
+    if (!albums || albums.length === 0) {
+      _slackMessage("🤷 Couldn't find that album. Try including the artist name or checking the spelling! 🎶", channel);
+      return;
+    }
+    
+    // Sort by relevance and take first result
+    const sortedAlbums = _sortAlbumsByRelevance(albums, album);
+    const result = { ...sortedAlbums[0], uri: sortedAlbums[0].uri };
+    logger.info(`Selected album: ${result.name} by ${result.artist}`);
+    
+    await _queueAlbum(result, album, channel, userName);
+  } catch (err) {
+    logger.error('Error adding album: ' + err.message);
+    _slackMessage('🔎 Couldn\'t find that album. Try a Spotify link, or use `searchalbum <name>` to pick one. 🎵', channel);
+  }
+}
+
+// Helper function to queue an album (shared between URI and search flows)
+async function _queueAlbum(result, albumSearchTerm, channel, userName) {
+  try {
     // Check for blacklisted tracks in the album
     const albumTracks = await spotify.getAlbumTracks(result.uri);
     const blacklistedTracks = albumTracks.filter(track => 
@@ -4679,11 +4728,14 @@ async function _searchplaylist(input, channel, userName) {
       return;
     }
 
+    // Sort by relevance and followers using shared function
+    const sortedPlaylists = _sortPlaylistsByRelevance(playlists, playlist);
+
     // Show top 5 results
-    const topFive = playlists.slice(0, 5);
-    let message = `Found ${playlists.length} playlists:\n`;
+    const topFive = sortedPlaylists.slice(0, 5);
+    let message = `Found ${sortedPlaylists.length} playlists:\n`;
     topFive.forEach((result, index) => {
-      message += `>${index}: *${result.name}* by _${result.owner}_ (${result.tracks} tracks)\n`;
+      message += `>${index + 1}. *${result.name}* by _${result.owner}_ (${result.tracks} tracks)\n`;
     });
 
     _slackMessage(message, channel);
@@ -4711,9 +4763,9 @@ async function _addplaylist(input, channel, userName) {
       logger.warn('Direct playlist lookup failed, falling back to search: ' + e1.message);
       const candidates = await spotify.searchPlaylistList(playlist, 5);
       if (candidates && candidates.length > 0) {
-        // Prefer exact case-insensitive name match; otherwise take first
-        const exact = candidates.find(p => p.name.toLowerCase() === playlist.toLowerCase());
-        result = exact || candidates[0];
+        // Sort by relevance and take first result
+        const sortedCandidates = _sortPlaylistsByRelevance(candidates, playlist);
+        result = sortedCandidates[0];
         logger.info(`Using playlist candidate: ${result.name} by ${result.owner}`);
       } else {
         throw new Error('Playlist not found');
@@ -4873,6 +4925,227 @@ async function _addplaylist(input, channel, userName) {
   }
 }
 
+/**
+ * Sort albums by relevance to search term
+ * Prioritizes exact matches of both artist and album name
+ * @param {Array} albums - Array of album objects from Spotify
+ * @param {string} searchTerm - The search term used
+ * @returns {Array} Sorted array of albums
+ */
+function _sortAlbumsByRelevance(albums, searchTerm) {
+  const termLower = searchTerm.toLowerCase();
+  
+  // Try to detect "artist - album", "album - artist", "album by artist", or "artist by album" format
+  let separatorIndex = -1;
+  let separatorLength = 0;
+  
+  // Check for " - " separator
+  if (termLower.includes(' - ')) {
+    separatorIndex = termLower.indexOf(' - ');
+    separatorLength = 3;
+  }
+  // Check for " by " separator
+  else if (termLower.includes(' by ')) {
+    separatorIndex = termLower.indexOf(' by ');
+    separatorLength = 4;
+  }
+  
+  let artistWords = [];
+  let albumWords = [];
+  
+  if (separatorIndex > 0) {
+    const part1 = termLower.substring(0, separatorIndex).trim();
+    const part2 = termLower.substring(separatorIndex + separatorLength).trim();
+    
+    // For "by" separator: "album by artist" is most common
+    // For "-" separator: "artist - album" is most common
+    if (termLower.includes(' by ')) {
+      albumWords = part1.split(/\s+/).filter(w => w.length > 1);
+      artistWords = part2.split(/\s+/).filter(w => w.length > 2);
+    } else {
+      artistWords = part1.split(/\s+/).filter(w => w.length > 2);
+      albumWords = part2.split(/\s+/).filter(w => w.length > 1);
+    }
+  } else {
+    albumWords = termLower.split(/\s+/).filter(w => w.length > 1);
+  }
+  
+  return albums.sort((a, b) => {
+    const aName = a.name.toLowerCase();
+    const aArtist = (a.artist || '').toLowerCase();
+    const bName = b.name.toLowerCase();
+    const bArtist = (b.artist || '').toLowerCase();
+    
+    let aScore = 0;
+    let bScore = 0;
+    
+    if (artistWords.length > 0 && albumWords.length > 0) {
+      const aArtistMatch = artistWords.every(word => aArtist.includes(word));
+      const bArtistMatch = artistWords.every(word => bArtist.includes(word));
+      const aAlbumMatch = albumWords.every(word => aName.includes(word));
+      const bAlbumMatch = albumWords.every(word => bName.includes(word));
+      
+      if (aArtistMatch && aAlbumMatch) aScore += 10000;
+      if (bArtistMatch && bAlbumMatch) bScore += 10000;
+      if (aAlbumMatch) aScore += 5000;
+      if (bAlbumMatch) bScore += 5000;
+      if (aArtistMatch) aScore += 2000;
+      if (bArtistMatch) bScore += 2000;
+    } else {
+      const aAlbumMatches = albumWords.filter(w => aName.includes(w)).length;
+      const bAlbumMatches = albumWords.filter(w => bName.includes(w)).length;
+      aScore += aAlbumMatches * 1000;
+      bScore += bAlbumMatches * 1000;
+      
+      const aArtistMatches = albumWords.filter(w => w.length > 3 && aArtist.includes(w)).length;
+      const bArtistMatches = albumWords.filter(w => w.length > 3 && bArtist.includes(w)).length;
+      aScore += aArtistMatches * 500;
+      bScore += bArtistMatches * 500;
+    }
+    
+    if (aScore === bScore) {
+      return (b.popularity || 0) - (a.popularity || 0);
+    }
+    
+    return bScore - aScore;
+  });
+}
+
+/**
+ * Sort playlists by relevance to search term
+ * Prioritizes exact matches and follower count
+ * @param {Array} playlists - Array of playlist objects from Spotify
+ * @param {string} searchTerm - The search term used
+ * @returns {Array} Sorted array of playlists
+ */
+function _sortPlaylistsByRelevance(playlists, searchTerm) {
+  const termLower = searchTerm.toLowerCase();
+  const searchWords = termLower.split(/\s+/).filter(w => w.length > 2);
+  
+  return playlists.sort((a, b) => {
+    const aName = a.name.toLowerCase();
+    const bName = b.name.toLowerCase();
+    
+    let aScore = 0;
+    let bScore = 0;
+    
+    // Exact match in playlist name
+    if (aName.includes(termLower)) aScore += 10000;
+    if (bName.includes(termLower)) bScore += 10000;
+    
+    // Word matches
+    const aMatches = searchWords.filter(w => aName.includes(w)).length;
+    const bMatches = searchWords.filter(w => bName.includes(w)).length;
+    aScore += aMatches * 1000;
+    bScore += bMatches * 1000;
+    
+    // Use followers as tie-breaker (popular playlists are usually better)
+    if (aScore === bScore) {
+      return (b.followers || 0) - (a.followers || 0);
+    }
+    
+    return bScore - aScore;
+  });
+}
+
+/**
+ * Sort tracks by relevance to search term
+ * Prioritizes exact matches of both artist and track name
+ * @param {Array} tracks - Array of track objects from Spotify
+ * @param {string} searchTerm - The search term used
+ * @returns {Array} Sorted array of tracks
+ */
+function _sortTracksByRelevance(tracks, searchTerm) {
+  const termLower = searchTerm.toLowerCase();
+  
+  // Try to detect "artist - track", "track - artist", "track by artist", or "artist by track" format
+  let separatorIndex = -1;
+  let separatorLength = 0;
+  
+  // Check for " - " separator
+  if (termLower.includes(' - ')) {
+    separatorIndex = termLower.indexOf(' - ');
+    separatorLength = 3;
+  }
+  // Check for " by " separator
+  else if (termLower.includes(' by ')) {
+    separatorIndex = termLower.indexOf(' by ');
+    separatorLength = 4;
+  }
+  
+  let artistWords = [];
+  let trackWords = [];
+  
+  if (separatorIndex > 0) {
+    // Split on separator to separate artist and track
+    const part1 = termLower.substring(0, separatorIndex).trim();
+    const part2 = termLower.substring(separatorIndex + separatorLength).trim();
+    
+    // For "by" separator: "track by artist" is most common
+    // For "-" separator: "artist - track" is most common
+    if (termLower.includes(' by ')) {
+      // "Best of You by Foo Fighters" -> track by artist
+      trackWords = part1.split(/\s+/).filter(w => w.length > 1);
+      artistWords = part2.split(/\s+/).filter(w => w.length > 2);
+    } else {
+      // "Foo Fighters - Best of You" -> artist - track
+      artistWords = part1.split(/\s+/).filter(w => w.length > 2);
+      trackWords = part2.split(/\s+/).filter(w => w.length > 1);
+    }
+  } else {
+    // No clear separator, split all words
+    trackWords = termLower.split(/\s+/).filter(w => w.length > 1);
+  }
+  
+  return tracks.sort((a, b) => {
+    const aName = a.name.toLowerCase();
+    const aArtist = (a.artists?.[0]?.name || a.artist || '').toLowerCase();
+    const bName = b.name.toLowerCase();
+    const bArtist = (b.artists?.[0]?.name || b.artist || '').toLowerCase();
+    
+    let aScore = 0;
+    let bScore = 0;
+    
+    // HIGHEST PRIORITY: Both artist AND track match
+    if (artistWords.length > 0 && trackWords.length > 0) {
+      const aArtistMatch = artistWords.every(word => aArtist.includes(word));
+      const bArtistMatch = artistWords.every(word => bArtist.includes(word));
+      const aTrackMatch = trackWords.every(word => aName.includes(word));
+      const bTrackMatch = trackWords.every(word => bName.includes(word));
+      
+      if (aArtistMatch && aTrackMatch) aScore += 10000;
+      if (bArtistMatch && bTrackMatch) bScore += 10000;
+      
+      // High priority: Track name matches even if artist doesn't
+      if (aTrackMatch) aScore += 5000;
+      if (bTrackMatch) bScore += 5000;
+      
+      // Medium priority: Artist matches
+      if (aArtistMatch) aScore += 2000;
+      if (bArtistMatch) bScore += 2000;
+    } else {
+      // No " - " separator: check if words match track name or artist
+      const aTrackMatches = trackWords.filter(w => aName.includes(w)).length;
+      const bTrackMatches = trackWords.filter(w => bName.includes(w)).length;
+      aScore += aTrackMatches * 1000;
+      bScore += bTrackMatches * 1000;
+      
+      // Check artist matches (lower priority)
+      const aArtistMatches = trackWords.filter(w => w.length > 3 && aArtist.includes(w)).length;
+      const bArtistMatches = trackWords.filter(w => w.length > 3 && bArtist.includes(w)).length;
+      aScore += aArtistMatches * 500;
+      bScore += bArtistMatches * 500;
+    }
+    
+    // Use popularity as tie-breaker
+    if (aScore === bScore) {
+      return (b.popularity || 0) - (a.popularity || 0);
+    }
+    
+    return bScore - aScore;
+  });
+}
+
 async function _search(input, channel, userName) {
   _logUserAction(userName, 'search');
   // Search for a track on Spotify
@@ -4892,8 +5165,11 @@ async function _search(input, channel, userName) {
       return;
     }
 
-    let message = `🎵 Found *${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}*:\n`;
-    tracks.forEach((track, index) => {
+    // Sort tracks by relevance using shared function
+    const sortedTracks = _sortTracksByRelevance(tracks, term);
+
+    let message = `🎵 Found *${sortedTracks.length} ${sortedTracks.length === 1 ? 'track' : 'tracks'}*:\n`;
+    sortedTracks.forEach((track, index) => {
       message += `>${index + 1}. *${track.name}* by _${track.artists[0].name}_\n`;
     });
     _slackMessage(message, channel);
@@ -4920,9 +5196,12 @@ async function _searchalbum(input, channel) {
       return;
     }
 
-    let message = `Found ${albums.length} albums:\n`;
-    albums.forEach((album) => {
-      message += `> *${album.name}* by _${album.artist}_\n`;
+    // Sort albums by relevance using shared function
+    const sortedAlbums = _sortAlbumsByRelevance(albums, album);
+
+    let message = `Found ${sortedAlbums.length} albums:\n`;
+    sortedAlbums.forEach((albumResult) => {
+      message += `> *${albumResult.name}* by _${albumResult.artist}_\n`;
     });
     _slackMessage(message, channel);
   } catch (err) {
@@ -5573,6 +5852,48 @@ async function _sendDirectMessage(userName, text) {
   } catch (err) {
     logger.error(`[DM] Failed to send DM to ${userName}: ${err.message}`);
     return false;
+  }
+}
+
+async function _aicode(input, channel, userName) {
+  _logUserAction(userName, 'aicode');
+  
+  if (!input || input.length < 2) {
+    _slackMessage('Usage: `aicode <task description>`\nExample: `aicode fix the help DM error handling`', channel);
+    return;
+  }
+  
+  const task = input.slice(1).join(' ');
+  
+  try {
+    // Trigger GitHub repository_dispatch
+    const response = await fetch(`https://api.github.com/repos/htilly/SlackONOS/dispatches`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `token ${config.get('githubToken')}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        event_type: 'aicode',
+        client_payload: {
+          task: task,
+          requester: userName,
+          channel: channel,
+          timestamp: Date.now()
+        }
+      })
+    });
+    
+    if (response.ok) {
+      _slackMessage(`🤖 AI agent triggered!\n*Task:* ${task}\n_Working on it..._`, channel);
+      logger.info(`[AICODE] Triggered for task: ${task} by ${userName}`);
+    } else {
+      throw new Error(`GitHub API error: ${response.status}`);
+    }
+  } catch (err) {
+    logger.error(`[AICODE] Failed to trigger: ${err.message}`);
+    _slackMessage(`❌ Failed to trigger agent: ${err.message}`, channel);
   }
 }
 
