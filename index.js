@@ -5376,7 +5376,7 @@ function _status(channel, cb) {
     });
 }
 
-function _help(input, channel, userName) {
+async function _help(input, channel, userName) {
   try {
     // Determine admin status platform-aware
     const isAdminUser = currentPlatform === 'discord' ? currentIsAdmin : (channel === global.adminChannel);
@@ -5417,8 +5417,20 @@ function _help(input, channel, userName) {
         adminUrl = `http://localhost:${webPort}/admin`;
       }
 
-      // Send regular help in channel
-      const regularMessage = (aiHelpSection + regularHelp + '\n\n_✉️ Admin commands sent via DM!_')
+      // Send admin help via DM first - extract username without <>@
+      const cleanUserName = userName ? userName.replace(/[<@>]/g, '') : 'unknown';
+      const adminMessage = ('━━━━━━━━━━━━━━━━━━━━━\n**🎛️ ADMIN COMMANDS** (DJ/Admin role)\n━━━━━━━━━━━━━━━━━━━━━\n\n' + adminHelp)
+        .replace(/{{configValues}}/g, configList)
+        .replace(/{{adminUrl}}/g, adminUrl);
+      
+      const dmSuccess = await _sendDirectMessage(cleanUserName, adminMessage);
+      
+      // Send regular help in channel with appropriate status message
+      const dmStatusMessage = dmSuccess 
+        ? '\n\n_✉️ Admin commands sent via DM!_'
+        : '\n\n_⚠️ Could not send admin commands via DM. Make sure DMs are enabled!_';
+      
+      const regularMessage = (aiHelpSection + regularHelp + dmStatusMessage)
         .replace(/{{gongLimit}}/g, gongLimit)
         .replace(/{{voteImmuneLimit}}/g, voteImmuneLimit)
         .replace(/{{voteLimit}}/g, voteLimit)
@@ -5427,14 +5439,6 @@ function _help(input, channel, userName) {
         .replace(/{{searchLimit}}/g, searchLimit);
       
       _slackMessage(regularMessage, channel);
-
-      // Send admin help via DM - extract username without <>@
-      const cleanUserName = userName ? userName.replace(/[<@>]/g, '') : 'unknown';
-      const adminMessage = ('━━━━━━━━━━━━━━━━━━━━━\n**🎛️ ADMIN COMMANDS** (DJ/Admin role)\n━━━━━━━━━━━━━━━━━━━━━\n\n' + adminHelp)
-        .replace(/{{configValues}}/g, configList)
-        .replace(/{{adminUrl}}/g, adminUrl);
-      
-      _sendDirectMessage(cleanUserName, adminMessage);
       
     } else {
       // Slack or non-admin: show appropriate single help file
@@ -5488,7 +5492,7 @@ function _help(input, channel, userName) {
 async function _sendDirectMessage(userName, text) {
   if (currentPlatform !== 'discord') {
     logger.warn('[DM] Direct messages only supported on Discord');
-    return;
+    return false;
   }
   
   try {
@@ -5497,14 +5501,14 @@ async function _sendDirectMessage(userName, text) {
     
     if (!discordClient) {
       logger.warn('[DM] Discord client not available');
-      return;
+      return false;
     }
     
     // Find user by username in cache
     const user = discordClient.users.cache.find(u => u.username === userName);
     if (!user) {
       logger.warn(`[DM] Could not find Discord user: ${userName}`);
-      return;
+      return false;
     }
     
     // Convert Slack markdown to Discord markdown
@@ -5516,6 +5520,7 @@ async function _sendDirectMessage(userName, text) {
     if (discordText.length <= maxLength) {
       await user.send(discordText);
       logger.info(`[DM] Sent DM to ${userName} (${user.id})`);
+      return true;
     } else {
       // Split on newlines to keep formatting intact
       const lines = discordText.split('\n');
@@ -5534,6 +5539,23 @@ async function _sendDirectMessage(userName, text) {
             // Small delay between messages
             await new Promise(resolve => setTimeout(resolve, 500));
           }
+          
+          // Handle oversized single lines by splitting them
+          if (line.length > maxLength) {
+            // Split the line into smaller chunks
+            let remainingLine = line;
+            while (remainingLine.length > 0) {
+              const chunk = remainingLine.substring(0, maxLength);
+              await user.send(chunk);
+              chunkCount++;
+              remainingLine = remainingLine.substring(maxLength);
+              if (remainingLine.length > 0) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+              }
+            }
+            // Skip adding to currentChunk since we already sent it
+            continue;
+          }
         }
         
         currentChunk += line + '\n';
@@ -5546,9 +5568,11 @@ async function _sendDirectMessage(userName, text) {
       }
 
       logger.info(`[DM] Sent ${chunkCount} DM chunks to ${userName} (${user.id})`);
+      return true;
     }
   } catch (err) {
     logger.error(`[DM] Failed to send DM to ${userName}: ${err.message}`);
+    return false;
   }
 }
 
