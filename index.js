@@ -2377,10 +2377,19 @@ function getConfigForAdmin() {
   const openaiApiKey = config.get('openaiApiKey');
   const telemetryInstanceId = config.get('telemetryInstanceId');
   const adminPasswordHash = config.get('adminPasswordHash');
+  const discordToken = config.get('discordToken');
   
   return {
+    // Discord Settings
+    discordToken: discordToken ? maskSensitive(discordToken) : '',
+    discordChannels: config.get('discordChannels') || [],
+    discordAdminRoles: config.get('discordAdminRoles') || [],
+    
+    // Slack Settings
     adminChannel: config.get('adminChannel') || 'music-admin',
     standardChannel: config.get('standardChannel') || 'music',
+    
+    // General Settings
     maxVolume: config.get('maxVolume') || 75,
     market: config.get('market') || 'US',
     gongLimit: config.get('gongLimit') || 3,
