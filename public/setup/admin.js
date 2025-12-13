@@ -224,7 +224,7 @@ async function loadConfig() {
     configItems.innerHTML = '';
     const editableConfig = [
       // Discord Settings (Priority)
-      { key: 'discordToken', label: '🎮 Discord Bot Token', type: 'text', description: 'Discord bot token from Developer Portal' },
+      { key: 'discordToken', label: '🎮 Discord Bot Token', type: 'password', description: 'Discord bot token from Developer Portal (starts with Mj... or MT...)' },
       { key: 'discordChannels', label: '🎮 Discord Channels', type: 'text', description: 'Comma-separated channel IDs or names (e.g., "music, 1234567890")' },
       { key: 'discordAdminRoles', label: '🎮 Discord Admin Roles', type: 'text', description: 'Comma-separated role names or IDs for admin access (e.g., "Admin, DJ")' },
       
@@ -289,12 +289,12 @@ function createConfigItem(item, value) {
     }
     inputHTML += '</select>';
   } else {
-    const inputType = item.type === 'number' ? 'number' : 'text';
+    const inputType = item.type === 'number' ? 'number' : (item.type === 'password' ? 'password' : 'text');
     const attrs = [];
     if (item.min !== undefined) attrs.push(`min="${item.min}"`);
     if (item.max !== undefined) attrs.push(`max="${item.max}"`);
     const finalDisplayValue = displayValue !== null && displayValue !== undefined ? displayValue : '';
-    const isSensitive = item.key.includes('ApiKey') || item.key.includes('Token') || item.key.includes('Secret');
+    const isSensitive = item.type === 'password' || item.key.includes('ApiKey') || item.key.includes('Token') || item.key.includes('Secret');
     const finalInputType = isSensitive ? 'password' : inputType;
     if (isSensitive && !finalDisplayValue) {
       attrs.push(`placeholder="Enter ${item.label.toLowerCase()}"`);

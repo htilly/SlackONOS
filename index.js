@@ -4164,6 +4164,23 @@ async function _stats(input, channel, userName) {
 }
 
 // Other functions
+/**
+ * Generate Discord bot invite URL with proper permissions
+ * @param {string} clientId - Discord application client ID
+ * @returns {string} Formatted invite URL
+ */
+function generateDiscordInviteUrl(clientId) {
+  // Permissions calculated: 274878024768
+  // - View Channels (1024)
+  // - Send Messages (2048)
+  // - Add Reactions (64)
+  // - Read Message History (65536)
+  // - Use External Emojis (262144)
+  const permissions = '274878024768';
+  const scopes = 'bot%20applications.commands';
+  return `https://discord.com/oauth2/authorize?client_id=${clientId}&permissions=${permissions}&scope=${scopes}`;
+}
+
 async function _debug(channel, userName) {
   await _logUserAction(userName, 'debug');
 
@@ -4217,6 +4234,39 @@ async function _debug(channel, userName) {
           `> Last Success: \`${ai.lastSuccessTS || 'n/a'}\`\n` +
           `> Last Error: \`${ai.lastErrorTS || 'n/a'}\`\n` +
           (ai.lastErrorMessage ? `> Last Error Msg: \`${ai.lastErrorMessage}\`\n` : '')
+        );
+      })() +
+      `\n` +
+      `*🎮 Discord:*\n` +
+      (() => {
+        const token = config.get('discordToken');
+        const channels = config.get('discordChannels');
+        const adminRoles = config.get('discordAdminRoles');
+        
+        if (!token) {
+          return `> Enabled: \`false\`\n`;
+        }
+
+        // Try to get client ID from Discord module
+        let clientId = 'unknown';
+        try {
+          const discordModule = require('./discord');
+          const discordClient = discordModule.getDiscordClient();
+          if (discordClient && discordClient.user) {
+            clientId = discordClient.user.id;
+          }
+        } catch (e) {
+          // Discord module not loaded
+        }
+
+        const inviteUrl = clientId !== 'unknown' ? generateDiscordInviteUrl(clientId) : 'N/A (bot not connected)';
+
+        return (
+          `> Enabled: \`true\`\n` +
+          `> Bot User ID: \`${clientId}\`\n` +
+          `> Channels: \`${Array.isArray(channels) && channels.length > 0 ? channels.join(', ') : 'all'}\`\n` +
+          `> Admin Roles: \`${Array.isArray(adminRoles) && adminRoles.length > 0 ? adminRoles.join(', ') : 'none'}\`\n` +
+          `> Invite URL: \`${inviteUrl}\`\n`
         );
       })() +
       `\n` +

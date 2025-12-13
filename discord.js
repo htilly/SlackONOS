@@ -60,12 +60,32 @@ async function initializeDiscord(config, messageHandler, injectedLogger) {
 
     try {
         // Create Discord client with required intents
+        // 
+        // Gateway Intents Documentation for Discord App Directory:
+        // 
+        // STANDARD INTENTS (no approval needed):
+        // - GatewayIntentBits.Guilds: Required for basic bot functionality (guilds, channels, roles)
+        // - GatewayIntentBits.GuildMessages: Required to receive message create/update/delete events
+        // - GatewayIntentBits.GuildMessageReactions: Required for emoji voting (🎵 vote, 🔔 gong)
+        // 
+        // PRIVILEGED INTENTS (requires Discord approval):
+        // - GatewayIntentBits.MessageContent: Required to read message content (commands, AI parsing)
+        //   ⚠️ MUST be enabled in Discord Developer Portal AND approved for App Directory
+        //   Go to: https://discord.com/developers/applications → Your App → Bot → Privileged Gateway Intents
+        //   Enable "Message Content Intent" before submitting to App Directory
+        // 
+        // BOT PERMISSIONS (set in invite URL, calculated as 274878024768):
+        // - View Channels (1024): See channels to respond in
+        // - Send Messages (2048): Send responses to users
+        // - Add Reactions (64): Add 🎵 and 🔔 reactions for voting
+        // - Read Message History (65536): Track votes on existing messages
+        // - Use External Emojis (262144): Use custom emojis in messages
         discordClient = new Client({
             intents: [
-                GatewayIntentBits.Guilds,
-                GatewayIntentBits.GuildMessages,
-                GatewayIntentBits.MessageContent,
-                GatewayIntentBits.GuildMessageReactions
+                GatewayIntentBits.Guilds,                  // Required: Basic guild info
+                GatewayIntentBits.GuildMessages,            // Required: Receive messages
+                GatewayIntentBits.MessageContent,           // Privileged: Read message text
+                GatewayIntentBits.GuildMessageReactions     // Required: Handle emoji reactions
             ]
         });
 
@@ -234,31 +254,75 @@ async function sendDiscordMessage(channelId, text, options = {}) {
             return null;
         }
         if (channel.isTextBased && channel.isTextBased()) {
-            const message = await channel.send(text);
-            if (discordLogger) discordLogger.debug(`[DISCORD] Sent message to channel ${channelId}`);
+            // Convert Slack markdown to Discord markdown
+            let discordText = text.replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, '[$2]($1)');
             
-            // Auto-add reactions if requested (for track additions)
-            if (options.addReactions && message) {
+            // Discord has a 2000 char limit, split into chunks if needed
+            const maxLength = 1900; // Leave some margin
+            let messages = [];
+            
+            if (discordText.length <= maxLength) {
+                // Single message
+                const message = await channel.send(discordText);
+                if (discordLogger) discordLogger.debug(`[DISCORD] Sent message to channel ${channelId}`);
+                messages.push(message);
+            } else {
+                // Split on newlines to keep formatting intact
+                const lines = discordText.split('\n');
+                let currentChunk = '';
+                let chunkCount = 0;
+
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    
+                    if ((currentChunk + line + '\n').length > maxLength) {
+                        // Send current chunk
+                        if (currentChunk.trim().length > 0) {
+                            const message = await channel.send(currentChunk);
+                            messages.push(message);
+                            chunkCount++;
+                            currentChunk = '';
+                            // Small delay between messages
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                        }
+                    }
+                    
+                    currentChunk += line + '\n';
+                }
+
+                // Send remaining chunk
+                if (currentChunk.trim().length > 0) {
+                    const message = await channel.send(currentChunk);
+                    messages.push(message);
+                    chunkCount++;
+                }
+
+                if (discordLogger) discordLogger.info(`[DISCORD] Sent ${chunkCount} message chunks to channel ${channelId}`);
+            }
+            
+            // Auto-add reactions to first message if requested (for track additions)
+            const firstMessage = messages[0];
+            if (options.addReactions && firstMessage) {
                 try {
-                    await message.react('🎵');
+                    await firstMessage.react('🎵');
                     // Note: 🔔 gong reaction removed - gong only works via command on currently playing track
-                    if (discordLogger) discordLogger.debug(`[DISCORD] Added reactions to message ${message.id}`);
+                    if (discordLogger) discordLogger.debug(`[DISCORD] Added reactions to message ${firstMessage.id}`);
                 } catch (err) {
                     if (discordLogger) discordLogger.warn(`[DISCORD] Failed to add reactions: ${err.message}`);
                 }
             }
             
-            // Track message for reactions if trackName provided
-            if (options.trackName && message) {
-                trackMessages.set(message.id, {
+            // Track first message for reactions if trackName provided
+            if (options.trackName && firstMessage) {
+                trackMessages.set(firstMessage.id, {
                     trackName: options.trackName,
                     channelId: channelId,
                     timestamp: Date.now()
                 });
-                if (discordLogger) discordLogger.debug(`[DISCORD] Tracking message ${message.id} for track: ${options.trackName}`);
+                if (discordLogger) discordLogger.debug(`[DISCORD] Tracking message ${firstMessage.id} for track: ${options.trackName}`);
             }
             
-            return message;
+            return firstMessage; // Return first message for compatibility
         } else {
             if (discordLogger) discordLogger.warn(`[DISCORD] Channel ${channelId} is not text-based`);
             return null;
