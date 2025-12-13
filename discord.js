@@ -285,6 +285,24 @@ async function sendDiscordMessage(channelId, text, options = {}) {
                             // Small delay between messages
                             await new Promise(resolve => setTimeout(resolve, 500));
                         }
+                        
+                        // Handle oversized single lines by splitting them
+                        if (line.length > maxLength) {
+                            // Split the line into smaller chunks
+                            let remainingLine = line;
+                            while (remainingLine.length > 0) {
+                                const chunk = remainingLine.substring(0, maxLength);
+                                const message = await channel.send(chunk);
+                                messages.push(message);
+                                chunkCount++;
+                                remainingLine = remainingLine.substring(maxLength);
+                                if (remainingLine.length > 0) {
+                                    await new Promise(resolve => setTimeout(resolve, 500));
+                                }
+                            }
+                            // Skip adding to currentChunk since we already sent it
+                            continue;
+                        }
                     }
                     
                     currentChunk += line + '\n';
