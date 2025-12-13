@@ -2899,6 +2899,7 @@ const commandRegistry = new Map([
   ['stats', { fn: _stats, admin: true }],
   ['configdump', { fn: _configdump, admin: true, aliases: ['cfgdump', 'confdump'] }],
   ['aiunparsed', { fn: _aiUnparsed, admin: true, aliases: ['aiun', 'aiunknown'] }],
+  ['aicode', { fn: _aicode, admin: true }],
   ['test', { fn: (args, ch, u) => _addToSpotifyPlaylist(args, ch), admin: true }]
 ]);
 
@@ -5851,6 +5852,48 @@ async function _sendDirectMessage(userName, text) {
   } catch (err) {
     logger.error(`[DM] Failed to send DM to ${userName}: ${err.message}`);
     return false;
+  }
+}
+
+async function _aicode(input, channel, userName) {
+  _logUserAction(userName, 'aicode');
+  
+  if (!input || input.length < 2) {
+    _slackMessage('Usage: `aicode <task description>`\nExample: `aicode fix the help DM error handling`', channel);
+    return;
+  }
+  
+  const task = input.slice(1).join(' ');
+  
+  try {
+    // Trigger GitHub repository_dispatch
+    const response = await fetch(`https://api.github.com/repos/htilly/SlackONOS/dispatches`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.get('githubToken')}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        event_type: 'aicode',
+        client_payload: {
+          task: task,
+          requester: userName,
+          channel: channel,
+          timestamp: Date.now()
+        }
+      })
+    });
+    
+    if (response.ok) {
+      _slackMessage(`🤖 AI agent triggered!\n*Task:* ${task}\n_Working on it..._`, channel);
+      logger.info(`[AICODE] Triggered for task: ${task} by ${userName}`);
+    } else {
+      throw new Error(`GitHub API error: ${response.status}`);
+    }
+  } catch (err) {
+    logger.error(`[AICODE] Failed to trigger: ${err.message}`);
+    _slackMessage(`❌ Failed to trigger agent: ${err.message}`, channel);
   }
 }
 
