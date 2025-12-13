@@ -223,8 +223,16 @@ async function loadConfig() {
     const configItems = document.getElementById('config-items');
     configItems.innerHTML = '';
     const editableConfig = [
-      { key: 'adminChannel', label: 'Admin Channel', type: 'text', description: 'Slack channel ID or name for admin commands' },
-      { key: 'standardChannel', label: 'Standard Channel', type: 'text', description: 'Slack channel ID or name for regular users' },
+      // Discord Settings (Priority)
+      { key: 'discordToken', label: '🎮 Discord Bot Token', type: 'password', description: 'Discord bot token from Developer Portal (starts with Mj... or MT...)' },
+      { key: 'discordChannels', label: '🎮 Discord Channels', type: 'text', description: 'Comma-separated channel IDs or names (e.g., "music, 1234567890")' },
+      { key: 'discordAdminRoles', label: '🎮 Discord Admin Roles', type: 'text', description: 'Comma-separated role names or IDs for admin access (e.g., "Admin, DJ")' },
+      
+      // Slack Settings
+      { key: 'adminChannel', label: '💬 Slack Admin Channel', type: 'text', description: 'Slack channel ID or name for admin commands' },
+      { key: 'standardChannel', label: '💬 Slack Standard Channel', type: 'text', description: 'Slack channel ID or name for regular users' },
+      
+      // General Settings
       { key: 'maxVolume', label: 'Max Volume', type: 'number', min: 1, max: 100, description: 'Maximum volume level (1-100)' },
       { key: 'market', label: 'Market', type: 'select', options: ['US', 'EU', 'SE', 'NO', 'DK', 'FI'], description: 'Spotify market region' },
       { key: 'gongLimit', label: 'Gong Limit', type: 'number', min: 1, description: 'Number of votes needed to skip current track' },
@@ -242,8 +250,7 @@ async function loadConfig() {
       { key: 'openaiApiKey', label: 'OpenAI API Key', type: 'text', description: 'OpenAI API key for natural language parsing (starts with sk-)' },
       { key: 'aiModel', label: 'AI Model', type: 'select', options: ['gpt-4o', 'gpt-4o-mini', 'gpt-4', 'gpt-3.5-turbo'], description: 'OpenAI model for natural language parsing' },
       { key: 'soundcraftEnabled', label: 'Soundcraft Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable Soundcraft mixer integration' },
-      { key: 'crossfadeEnabled', label: 'Crossfade Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable smooth transitions between tracks (requires queue playback)' },
-      { key: 'crossfadeDurationSeconds', label: 'Crossfade Duration (seconds)', type: 'number', min: 0, max: 30, description: 'How many seconds to fade around track transitions (best-effort). 0 disables fading.' }
+      { key: 'crossfadeEnabled', label: 'Crossfade Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable smooth transitions between tracks (requires queue playback)' }
     ];
     editableConfig.forEach(item => {
       const configItem = createConfigItem(item, config[item.key]);
@@ -260,6 +267,13 @@ function createConfigItem(item, value) {
   const div = document.createElement('div');
   div.className = 'config-item';
   div.dataset.key = item.key;
+  
+  // Convert arrays to comma-separated strings for display
+  let displayValue = value;
+  if (Array.isArray(value)) {
+    displayValue = value.join(', ');
+  }
+  
   let inputHTML = '';
   if (item.type === 'select') {
     inputHTML = `<select id="config-${item.key}">`;
@@ -274,17 +288,17 @@ function createConfigItem(item, value) {
     }
     inputHTML += '</select>';
   } else {
-    const inputType = item.type === 'number' ? 'number' : 'text';
+    const inputType = item.type === 'number' ? 'number' : (item.type === 'password' ? 'password' : 'text');
     const attrs = [];
     if (item.min !== undefined) attrs.push(`min="${item.min}"`);
     if (item.max !== undefined) attrs.push(`max="${item.max}"`);
-    const displayValue = value !== null && value !== undefined ? value : '';
-    const isSensitive = item.key.includes('ApiKey') || item.key.includes('Token') || item.key.includes('Secret');
+    const finalDisplayValue = displayValue !== null && displayValue !== undefined ? displayValue : '';
+    const isSensitive = item.type === 'password' || item.key.includes('ApiKey') || item.key.includes('Token') || item.key.includes('Secret');
     const finalInputType = isSensitive ? 'password' : inputType;
-    if (isSensitive && !displayValue) {
+    if (isSensitive && !finalDisplayValue) {
       attrs.push(`placeholder="Enter ${item.label.toLowerCase()}"`);
     }
-    inputHTML = `<input type="${finalInputType}" id="config-${item.key}" value="${escapeHtml(displayValue)}" ${attrs.join(' ')}>`;
+    inputHTML = `<input type="${finalInputType}" id="config-${item.key}" value="${escapeHtml(finalDisplayValue)}" ${attrs.join(' ')}>`;
   }
   const description = item.description ? `<div style="font-size: 0.85rem; color: rgba(255,255,255,0.6); margin-top: 0.25rem;">${item.description}</div>` : '';
   div.innerHTML = `
@@ -314,6 +328,9 @@ async function saveConfig(key) {
     } else {
       value = select.value;
     }
+  } else if (key === 'discordChannels' || key === 'discordAdminRoles') {
+    // Convert comma-separated string to array
+    value = value.split(',').map(s => s.trim()).filter(s => s.length > 0);
   }
   btn.disabled = true;
   btn.textContent = 'Saving...';

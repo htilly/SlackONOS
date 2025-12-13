@@ -1,6 +1,6 @@
 # Terms of Service
 
-**Last Updated:** [Date]
+**Last Updated:** December 13, 2025
 
 ## Acceptance of Terms
 
@@ -10,10 +10,12 @@ By installing, configuring, or using SlackONOS ("the Software", "the Bot", "we",
 
 SlackONOS is a self-hosted music bot that integrates with Slack, Discord, Sonos speakers, and Spotify to provide democratic music queue management. The Software allows users to:
 
-- Control Sonos speakers via Slack/Discord
-- Queue music from Spotify
-- Vote on music selections
-- Manage playback queues
+- Control Sonos speakers via Slack and/or Discord
+- Queue music from Spotify using search or natural language
+- Vote democratically on music selections using reactions (Discord) or commands (Slack)
+- Manage playback queues with community input
+- Use AI-powered natural language commands (optional)
+- Configure via web interface or command-line
 
 ## License
 
@@ -41,9 +43,13 @@ You agree to:
    - Discord (https://discord.com/terms)
    - Spotify (https://www.spotify.com/legal/end-user-agreement)
    - Sonos (https://www.sonos.com/en-us/legal/terms-of-use)
-3. **Secure Credentials:** Keep your API tokens, credentials, and configuration secure
+3. **Secure Credentials:** Keep your API tokens, bot tokens, credentials, and configuration secure
 4. **Proper Use:** Use the Software only for lawful purposes
 5. **Respect Copyright:** Respect copyright and intellectual property rights when using music services
+6. **Discord-Specific:** If using on Discord:
+   - Comply with Discord Developer Terms (https://discord.com/developers/docs/policies-and-agreements/developer-terms-of-service)
+   - Do not abuse Discord Gateway API or exceed rate limits
+   - Respect Discord's Community Guidelines when interacting with users
 
 ## Prohibited Uses
 
@@ -99,7 +105,15 @@ We reserve the right to terminate or suspend access to the Software (if applicab
 
 ## Governing Law
 
-These Terms shall be governed by and construed in accordance with the laws of [Jurisdiction], without regard to its conflict of law provisions.
+These Terms shall be governed by and construed in accordance with the laws of Sweden, without regard to its conflict of law provisions.
+
+## Discord App Directory
+
+If you installed SlackONOS from the Discord App Directory:
+- These Terms apply in addition to Discord's Developer Terms of Service
+- The bot operates on your self-hosted server, not on Discord's infrastructure
+- You are responsible for hosting, maintaining, and securing the bot
+- Discord may remove the bot from the App Directory if it violates Discord's policies
 
 ## Severability
 
@@ -112,8 +126,10 @@ These Terms constitute the entire agreement between you and the Software authors
 ## Contact
 
 For questions about these Terms:
-- Open an issue on GitHub: [Repository URL]
-- Review documentation: See README.md and other docs in repository
+- Open an issue on GitHub: https://github.com/htilly/SlackONOS/issues
+- Review documentation: See README.md and docs/ folder in repository
+- Discord Setup Guide: https://github.com/htilly/SlackONOS/blob/master/docs/discord/SETUP.md
+- Discord Support Server: [Join support server for community help]
 
 ## Acknowledgment
 

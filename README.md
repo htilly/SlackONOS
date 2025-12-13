@@ -155,11 +155,33 @@ After starting the container, access the setup wizard at:
 - HTTP: `http://localhost:8181/setup` (redirects to HTTPS if SSL is enabled)
 - HTTPS: `https://localhost:8443/setup` (if SSL certificates are configured)
 
-📖 **[Complete Discord Setup Guide](docs/DISCORD.md)** - Step-by-step Discord bot configuration
+📖 **[Complete Discord Setup Guide](docs/discord/SETUP.md)** - Step-by-step Discord bot configuration
 
 📖 **[Complete Slack Setup Guide](docs/SLACK.md)** - Socket Mode Slack bot setup (tokens, scopes, events)
 
 🎛️ **[Soundcraft Ui24R Integration](docs/SOUNDCRAFT.md)** - Control mixer volume directly from Slack/Discord
+
+### 🎮 Discord Invite Link
+
+**Add SlackONOS to your Discord server:**
+
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
+2. Select your application
+3. Get your Client ID from the "OAuth2" section
+4. Use this invite link (replace `YOUR_CLIENT_ID`):
+
+```
+https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=274878024768&scope=bot%20applications.commands
+```
+
+**Required Permissions:**
+- Read Messages/View Channels
+- Send Messages  
+- Add Reactions
+- Read Message History
+- Use External Emojis
+
+**💡 Tip:** After setup, use the `debug` command to get your bot's pre-configured invite link!
 
 ---
 
