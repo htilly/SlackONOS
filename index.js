@@ -2228,8 +2228,16 @@ async function getAdminStatus() {
       const discordClient = DiscordSystem.getDiscordClient();
       if (discordClient) {
         status.discord.connected = discordClient.isReady() || false;
+        
+        const channels = config.get('discordChannels') || [];
+        const adminRoles = config.get('discordAdminRoles') || [];
+        const botUserId = discordClient.user?.id || 'Unknown';
+        
         status.discord.details = {
-          guilds: discordClient.guilds?.cache?.size || 0
+          botUserId: botUserId,
+          guilds: discordClient.guilds?.cache?.size || 0,
+          channels: Array.isArray(channels) ? channels.join(', ') : (channels || 'All channels'),
+          adminRoles: Array.isArray(adminRoles) ? adminRoles.join(', ') : (adminRoles || 'None configured')
         };
       }
     } catch (err) {
@@ -2387,10 +2395,19 @@ function getConfigForAdmin() {
   const openaiApiKey = config.get('openaiApiKey');
   const telemetryInstanceId = config.get('telemetryInstanceId');
   const adminPasswordHash = config.get('adminPasswordHash');
+  const discordToken = config.get('discordToken');
   
   return {
+    // Discord Settings
+    discordToken: discordToken ? maskSensitive(discordToken) : '',
+    discordChannels: config.get('discordChannels') || [],
+    discordAdminRoles: config.get('discordAdminRoles') || [],
+    
+    // Slack Settings
     adminChannel: config.get('adminChannel') || 'music-admin',
     standardChannel: config.get('standardChannel') || 'music',
+    
+    // General Settings
     maxVolume: config.get('maxVolume') || 75,
     market: config.get('market') || 'US',
     gongLimit: config.get('gongLimit') || 3,
@@ -2853,7 +2870,7 @@ const commandRegistry = new Map([
   ['flushvote', { fn: (args, ch, u) => voting.flushvote(ch, u), admin: false }],
   ['size', { fn: (args, ch, u) => _countQueue(ch), admin: false, aliases: ['count', 'count(list)'] }],
   ['status', { fn: (args, ch, u) => _status(ch), admin: false }],
-  ['help', { fn: (args, ch, u) => _help(args, ch), admin: false }],
+  ['help', { fn: (args, ch, u) => _help(args, ch, u), admin: false }],
   ['bestof', { fn: _bestof, admin: false }],
   ['append', { fn: _append, admin: false }],
 
@@ -4182,6 +4199,23 @@ async function _stats(input, channel, userName) {
 }
 
 // Other functions
+/**
+ * Generate Discord bot invite URL with proper permissions
+ * @param {string} clientId - Discord application client ID
+ * @returns {string} Formatted invite URL
+ */
+function generateDiscordInviteUrl(clientId) {
+  // Permissions calculated: 274878024768
+  // - View Channels (1024)
+  // - Send Messages (2048)
+  // - Add Reactions (64)
+  // - Read Message History (65536)
+  // - Use External Emojis (262144)
+  const permissions = '274878024768';
+  const scopes = 'bot%20applications.commands';
+  return `https://discord.com/oauth2/authorize?client_id=${clientId}&permissions=${permissions}&scope=${scopes}`;
+}
+
 async function _debug(channel, userName) {
   await _logUserAction(userName, 'debug');
 
@@ -4235,6 +4269,39 @@ async function _debug(channel, userName) {
           `> Last Success: \`${ai.lastSuccessTS || 'n/a'}\`\n` +
           `> Last Error: \`${ai.lastErrorTS || 'n/a'}\`\n` +
           (ai.lastErrorMessage ? `> Last Error Msg: \`${ai.lastErrorMessage}\`\n` : '')
+        );
+      })() +
+      `\n` +
+      `*🎮 Discord:*\n` +
+      (() => {
+        const token = config.get('discordToken');
+        const channels = config.get('discordChannels');
+        const adminRoles = config.get('discordAdminRoles');
+        
+        if (!token) {
+          return `> Enabled: \`false\`\n`;
+        }
+
+        // Try to get client ID from Discord module
+        let clientId = 'unknown';
+        try {
+          const discordModule = require('./discord');
+          const discordClient = discordModule.getDiscordClient();
+          if (discordClient && discordClient.user) {
+            clientId = discordClient.user.id;
+          }
+        } catch (e) {
+          // Discord module not loaded
+        }
+
+        const inviteUrl = clientId !== 'unknown' ? generateDiscordInviteUrl(clientId) : 'N/A (bot not connected)';
+
+        return (
+          `> Enabled: \`true\`\n` +
+          `> Bot User ID: \`${clientId}\`\n` +
+          `> Channels: \`${Array.isArray(channels) && channels.length > 0 ? channels.join(', ') : 'all'}\`\n` +
+          `> Admin Roles: \`${Array.isArray(adminRoles) && adminRoles.length > 0 ? adminRoles.join(', ') : 'none'}\`\n` +
+          `> Invite URL: \`${inviteUrl}\`\n`
         );
       })() +
       `\n` +
@@ -5587,49 +5654,30 @@ function _status(channel, cb) {
     });
 }
 
-function _help(input, channel) {
+async function _help(input, channel, userName) {
   try {
     // Determine admin status platform-aware
     const isAdminUser = currentPlatform === 'discord' ? currentIsAdmin : (channel === global.adminChannel);
 
-    let messages = [];
-
     // AI help section (only shown if OpenAI is enabled)
     let aiHelpSection = '';
     if (AIHandler.isAIEnabled()) {
-      aiHelpSection = `*🤖 AI Natural Language (just @mention me!)*
-> Talk to me naturally! Examples:
-> • \`@SlackONOS play some christmas music\` → Adds holiday tracks
-> • \`@SlackONOS add a few 80s hits\` → Queues 80s classics
-> • \`@SlackONOS what's playing?\` → Shows current track
-> • \`@SlackONOS skip this\` → Votes to gong
-> 
-> _Quantity words: "a couple" (2), "a few" (3-4), "some" (5), "many" (8)_
-> _Themes: christmas, party, chill, workout, summer, 80s, 90s, rock, pop, disco, hip-hop, latin, swedish..._
+      aiHelpSection = `*🤖 AI Natural Language*
+> Talk to me naturally! _"play christmas music"_, _"skip this"_, etc.
+> Quantity: couple (2), few (3-4), some (5), many (8)
 
 ━━━━━━━━━━━━━━━━━━━━━
 
 `;
     }
 
-    // For Discord admins, show both regular + admin help (split into multiple messages due to 2000 char limit)
+    // For Discord admins, send regular help in channel and admin help via DM
     if (currentPlatform === 'discord' && isAdminUser) {
       const regularHelp = fs.readFileSync('templates/help/helpText.txt', 'utf8');
       const adminHelp = fs.readFileSync('templates/help/helpTextAdmin.txt', 'utf8');
 
-      messages.push(aiHelpSection + regularHelp);
-      messages.push('━━━━━━━━━━━━━━━━━━━━━\n**🎛️ ADMIN COMMANDS** (DJ/Admin role)\n━━━━━━━━━━━━━━━━━━━━━\n\n' + adminHelp);
-    } else {
-      // Slack or non-admin: show appropriate single help file
-      const helpFile = isAdminUser ? 'templates/help/helpTextAdmin.txt' : 'templates/help/helpText.txt';
-      messages.push(aiHelpSection + fs.readFileSync(helpFile, 'utf8'));
-    }
-
-    // Generate config values list for admin help
-    let configList = '';
-    let adminUrl = '';
-    if (isAdminUser) {
-      configList = `
+      // Generate config values and admin URL for admin help
+      const configList = `
         • \`gongLimit\`: ${gongLimit}
         • \`voteLimit\`: ${voteLimit}
         • \`voteImmuneLimit\`: ${voteImmuneLimit}
@@ -5638,45 +5686,171 @@ function _help(input, channel) {
         • \`searchLimit\`: ${searchLimit}
         • \`voteTimeLimitMinutes\`: ${voteTimeLimitMinutes}`;
       
-      // Generate admin panel URL
       const httpsPort = config.get('httpsPort') || 8443;
       const useHttps = config.get('useHttps') !== false && (config.get('sslAutoGenerate') !== false || (config.get('sslCertPath') && config.get('sslKeyPath')));
+      let adminUrl = '';
       if (ipAddress && ipAddress !== '' && ipAddress !== 'IP_HOST') {
-        if (useHttps) {
-          adminUrl = `https://${ipAddress}:${httpsPort}/admin`;
-        } else {
-          adminUrl = `http://${ipAddress}:${webPort}/admin`;
-        }
+        adminUrl = useHttps ? `https://${ipAddress}:${httpsPort}/admin` : `http://${ipAddress}:${webPort}/admin`;
       } else {
-        // Fallback if IP not configured
         adminUrl = `http://localhost:${webPort}/admin`;
       }
-    }
 
-    // Replace template variables in all messages
-    messages = messages.map(msg => msg
-      .replace(/{{gongLimit}}/g, gongLimit)
-      .replace(/{{voteImmuneLimit}}/g, voteImmuneLimit)
-      .replace(/{{voteLimit}}/g, voteLimit)
-      .replace(/{{flushVoteLimit}}/g, flushVoteLimit)
-      .replace(/{{voteTimeLimitMinutes}}/g, voteTimeLimitMinutes)
-      .replace(/{{searchLimit}}/g, searchLimit)
-      .replace(/{{configValues}}/g, configList)
-      .replace(/{{adminUrl}}/g, adminUrl));
-
-    // Send messages (Discord: multiple if needed; Slack: single combined)
-    if (currentPlatform === 'discord') {
-      // Send each message separately for Discord to avoid 2000 char limit
-      for (const msg of messages) {
-        _slackMessage(msg, channel);
-      }
+      // Send admin help via DM first - extract username without <>@
+      const cleanUserName = userName ? userName.replace(/[<@>]/g, '') : 'unknown';
+      const adminMessage = ('━━━━━━━━━━━━━━━━━━━━━\n**🎛️ ADMIN COMMANDS** (DJ/Admin role)\n━━━━━━━━━━━━━━━━━━━━━\n\n' + adminHelp)
+        .replace(/{{configValues}}/g, configList)
+        .replace(/{{adminUrl}}/g, adminUrl);
+      
+      const dmSuccess = await _sendDirectMessage(cleanUserName, adminMessage);
+      
+      // Send regular help in channel with appropriate status message
+      const dmStatusMessage = dmSuccess 
+        ? '\n\n_✉️ Admin commands sent via DM!_'
+        : '\n\n_⚠️ Could not send admin commands via DM. Make sure DMs are enabled!_';
+      
+      const regularMessage = (aiHelpSection + regularHelp + dmStatusMessage)
+        .replace(/{{gongLimit}}/g, gongLimit)
+        .replace(/{{voteImmuneLimit}}/g, voteImmuneLimit)
+        .replace(/{{voteLimit}}/g, voteLimit)
+        .replace(/{{flushVoteLimit}}/g, flushVoteLimit)
+        .replace(/{{voteTimeLimitMinutes}}/g, voteTimeLimitMinutes)
+        .replace(/{{searchLimit}}/g, searchLimit);
+      
+      _slackMessage(regularMessage, channel);
+      
     } else {
-      // Slack can handle longer messages - disable link previews
-      _slackMessage(messages.join('\n\n'), channel, { unfurl_links: false, unfurl_media: false });
+      // Slack or non-admin: show appropriate single help file
+      const helpFile = isAdminUser ? 'templates/help/helpTextAdmin.txt' : 'templates/help/helpText.txt';
+      const helpText = fs.readFileSync(helpFile, 'utf8');
+      
+      let configList = '';
+      let adminUrl = '';
+      if (isAdminUser) {
+        configList = `
+        • \`gongLimit\`: ${gongLimit}
+        • \`voteLimit\`: ${voteLimit}
+        • \`voteImmuneLimit\`: ${voteImmuneLimit}
+        • \`flushVoteLimit\`: ${flushVoteLimit}
+        • \`maxVolume\`: ${maxVolume}
+        • \`searchLimit\`: ${searchLimit}
+        • \`voteTimeLimitMinutes\`: ${voteTimeLimitMinutes}`;
+        
+        const httpsPort = config.get('httpsPort') || 8443;
+        const useHttps = config.get('useHttps') !== false && (config.get('sslAutoGenerate') !== false || (config.get('sslCertPath') && config.get('sslKeyPath')));
+        if (ipAddress && ipAddress !== '' && ipAddress !== 'IP_HOST') {
+          adminUrl = useHttps ? `https://${ipAddress}:${httpsPort}/admin` : `http://${ipAddress}:${webPort}/admin`;
+        } else {
+          adminUrl = `http://localhost:${webPort}/admin`;
+        }
+      }
+
+      const finalMessage = (aiHelpSection + helpText)
+        .replace(/{{gongLimit}}/g, gongLimit)
+        .replace(/{{voteImmuneLimit}}/g, voteImmuneLimit)
+        .replace(/{{voteLimit}}/g, voteLimit)
+        .replace(/{{flushVoteLimit}}/g, flushVoteLimit)
+        .replace(/{{voteTimeLimitMinutes}}/g, voteTimeLimitMinutes)
+        .replace(/{{searchLimit}}/g, searchLimit)
+        .replace(/{{configValues}}/g, configList)
+        .replace(/{{adminUrl}}/g, adminUrl);
+
+      _slackMessage(finalMessage, channel, { unfurl_links: false, unfurl_media: false });
     }
   } catch (err) {
     logger.error('Error reading help file: ' + err.message);
     _slackMessage('🚨 Error loading help text. Please contact an admin! 📞', channel);
+  }
+}
+
+/**
+ * Send Direct Message to Discord user
+ * @param {string} userName - Discord username to send DM to
+ * @param {string} text - Message text to send
+ */
+async function _sendDirectMessage(userName, text) {
+  if (currentPlatform !== 'discord') {
+    logger.warn('[DM] Direct messages only supported on Discord');
+    return false;
+  }
+  
+  try {
+    const discordModule = require('./discord');
+    const discordClient = discordModule.getDiscordClient();
+    
+    if (!discordClient) {
+      logger.warn('[DM] Discord client not available');
+      return false;
+    }
+    
+    // Find user by username in cache
+    const user = discordClient.users.cache.find(u => u.username === userName);
+    if (!user) {
+      logger.warn(`[DM] Could not find Discord user: ${userName}`);
+      return false;
+    }
+    
+    // Convert Slack markdown to Discord markdown
+    // Slack: <URL|text> -> Discord: [text](URL)
+    let discordText = text.replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, '[$2]($1)');
+    
+    // Discord has a 2000 char limit, split into chunks if needed
+    const maxLength = 1900; // Leave some margin
+    if (discordText.length <= maxLength) {
+      await user.send(discordText);
+      logger.info(`[DM] Sent DM to ${userName} (${user.id})`);
+      return true;
+    } else {
+      // Split on newlines to keep formatting intact
+      const lines = discordText.split('\n');
+      let currentChunk = '';
+      let chunkCount = 0;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        
+        if ((currentChunk + line + '\n').length > maxLength) {
+          // Send current chunk
+          if (currentChunk.trim().length > 0) {
+            await user.send(currentChunk);
+            chunkCount++;
+            currentChunk = '';
+            // Small delay between messages
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          
+          // Handle oversized single lines by splitting them
+          if (line.length > maxLength) {
+            // Split the line into smaller chunks
+            let remainingLine = line;
+            while (remainingLine.length > 0) {
+              const chunk = remainingLine.substring(0, maxLength);
+              await user.send(chunk);
+              chunkCount++;
+              remainingLine = remainingLine.substring(maxLength);
+              if (remainingLine.length > 0) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+              }
+            }
+            // Skip adding to currentChunk since we already sent it
+            continue;
+          }
+        }
+        
+        currentChunk += line + '\n';
+      }
+
+      // Send remaining chunk
+      if (currentChunk.trim().length > 0) {
+        await user.send(currentChunk);
+        chunkCount++;
+      }
+
+      logger.info(`[DM] Sent ${chunkCount} DM chunks to ${userName} (${user.id})`);
+      return true;
+    }
+  } catch (err) {
+    logger.error(`[DM] Failed to send DM to ${userName}: ${err.message}`);
+    return false;
   }
 }
 
