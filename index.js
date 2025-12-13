@@ -2223,8 +2223,16 @@ async function getAdminStatus() {
       const discordClient = DiscordSystem.getDiscordClient();
       if (discordClient) {
         status.discord.connected = discordClient.isReady() || false;
+        
+        const channels = config.get('discordChannels') || [];
+        const adminRoles = config.get('discordAdminRoles') || [];
+        const botUserId = discordClient.user?.id || 'Unknown';
+        
         status.discord.details = {
-          guilds: discordClient.guilds?.cache?.size || 0
+          botUserId: botUserId,
+          guilds: discordClient.guilds?.cache?.size || 0,
+          channels: Array.isArray(channels) ? channels.join(', ') : (channels || 'All channels'),
+          adminRoles: Array.isArray(adminRoles) ? adminRoles.join(', ') : (adminRoles || 'None configured')
         };
       }
     } catch (err) {
