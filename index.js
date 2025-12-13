@@ -5440,8 +5440,46 @@ async function _sendDirectMessage(userName, text) {
       return;
     }
     
-    await user.send(text);
-    logger.info(`[DM] Sent DM to ${userName} (${user.id})`);
+    // Convert Slack markdown to Discord markdown
+    // Slack: <URL|text> -> Discord: [text](URL)
+    let discordText = text.replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, '[$2]($1)');
+    
+    // Discord has a 2000 char limit, split into chunks if needed
+    const maxLength = 1900; // Leave some margin
+    if (discordText.length <= maxLength) {
+      await user.send(discordText);
+      logger.info(`[DM] Sent DM to ${userName} (${user.id})`);
+    } else {
+      // Split on newlines to keep formatting intact
+      const lines = discordText.split('\n');
+      let currentChunk = '';
+      let chunkCount = 0;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        
+        if ((currentChunk + line + '\n').length > maxLength) {
+          // Send current chunk
+          if (currentChunk.trim().length > 0) {
+            await user.send(currentChunk);
+            chunkCount++;
+            currentChunk = '';
+            // Small delay between messages
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+        
+        currentChunk += line + '\n';
+      }
+
+      // Send remaining chunk
+      if (currentChunk.trim().length > 0) {
+        await user.send(currentChunk);
+        chunkCount++;
+      }
+
+      logger.info(`[DM] Sent ${chunkCount} DM chunks to ${userName} (${user.id})`);
+    }
   } catch (err) {
     logger.error(`[DM] Failed to send DM to ${userName}: ${err.message}`);
   }
