@@ -5870,7 +5870,7 @@ async function _aicode(input, channel, userName) {
     const response = await fetch(`https://api.github.com/repos/htilly/SlackONOS/dispatches`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${config.get('githubToken')}`,
+        'Authorization': `token ${config.get('githubToken')}`,
         'Accept': 'application/vnd.github+json',
         'Content-Type': 'application/json'
       },
