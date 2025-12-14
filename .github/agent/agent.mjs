@@ -176,6 +176,52 @@ function validateDiff(diff) {
     }
   }
   
+  // Check for incomplete file sections (critical validation)
+  const fileSections = diff.split(/^--- a\//gm);
+  for (let i = 1; i < fileSections.length; i++) {
+    const section = fileSections[i];
+    const lines = section.split('\n');
+    
+    // First line should be the file path, second should be +++ b/path
+    if (lines.length < 2) {
+      errors.push(`Incomplete file section starting at line ${diff.substring(0, diff.indexOf(section)).split('\n').length + 1}: missing +++ b/ line`);
+      continue;
+    }
+    
+    const oldPath = lines[0].trim();
+    const newPathLine = lines[1];
+    
+    if (!newPathLine.startsWith('+++ b/')) {
+      errors.push(`Incomplete file section for ${oldPath}: missing or malformed +++ b/ line`);
+      continue;
+    }
+    
+    const newPath = newPathLine.substring(6).trim();
+    
+    // Check if the section has at least one hunk
+    const hasHunk = section.includes('@@');
+    if (!hasHunk && !section.includes('new file') && !section.includes('deleted file')) {
+      errors.push(`File section for ${oldPath} has no hunks (might be incomplete)`);
+    }
+    
+    // Check if section ends properly (not mid-line)
+    const lastLine = lines[lines.length - 1];
+    if (lastLine && (lastLine.startsWith('+') || lastLine.startsWith('-') || lastLine.startsWith('\\'))) {
+      // Section might be cut off
+      const nextSectionStart = diff.indexOf('--- a/', diff.indexOf(section) + section.length);
+      if (nextSectionStart === -1 && !lastLine.match(/^[\s+-\\]/)) {
+        // Last line doesn't look like a proper diff line ending
+        errors.push(`File section for ${oldPath} appears to be cut off (incomplete diff)`);
+      }
+    }
+  }
+  
+  // Check for incomplete +++ b/ lines (common issue)
+  const incompletePlusPlus = diff.match(/\+\+\+ b\/[^\n]*$/m);
+  if (incompletePlusPlus) {
+    errors.push(`Incomplete +++ b/ line detected at end of diff (file name missing)`);
+  }
+  
   return {
     isValid: errors.length === 0,
     errors,
@@ -903,22 +949,25 @@ CRITICAL: Generate ONLY the file changes in this EXACT format (no "diff --git" h
  existing line
 
 Rules for the diff format:
-1. Start each file with "--- a/filepath" and "+++ b/filepath"
+1. Start each file with "--- a/filepath" and "+++ b/filepath" (BOTH lines must be complete with full file path)
 2. NO "diff --git" line, NO "index" line with hashes
 3. Include enough context lines (unchanged lines) around changes
 4. Use @@ -startLine,numLines +startLine,numLines @@ for hunks
 5. Prefix added lines with "+", removed lines with "-", context lines with " " (space)
 6. Include at least 3 lines of context before and after changes
 7. Ensure line numbers match the actual file contents exactly
+8. CRITICAL: The diff MUST be complete - every file section must have BOTH "--- a/path" AND "+++ b/path" lines with complete file paths
+9. CRITICAL: Do NOT truncate the diff - if you reach token limits, prioritize completing fewer files rather than truncating
+10. Each file section must end properly - do not cut off mid-line or mid-hunk
 
-Output ONLY the diff content, no explanations, no markdown code blocks.`;
+Output ONLY the complete diff content, no explanations, no markdown code blocks. Ensure every file section is fully complete.`;
 
 // Call AI provider with unified interface
 async function callAI(promptText) {
   if (provider === "claude") {
     const response = await aiClient.messages.create({
       model: aiModel,
-      max_tokens: 8192,
+      max_tokens: 16384, // Increased for larger diffs
       temperature: 0.2,
       messages: [{ role: "user", content: promptText }],
     });
@@ -957,20 +1006,57 @@ try {
 // Extract diff from potential markdown code blocks
 let diff = output.trim();
 if (output.includes("```")) {
-  // Extract content between code fences
-  const match = output.match(/```(?:diff)?\n([\s\S]*?)```/);
-  if (match) {
-    diff = match[1].trim();
+  // Try to extract content between code fences
+  // Handle both single and multiple code blocks
+  const matches = output.matchAll(/```(?:diff)?\n([\s\S]*?)```/g);
+  const extractedDiffs = [];
+  for (const match of matches) {
+    extractedDiffs.push(match[1].trim());
+  }
+  // Use the longest extracted diff (likely the actual diff)
+  if (extractedDiffs.length > 0) {
+    diff = extractedDiffs.reduce((a, b) => a.length > b.length ? a : b);
+  }
+  
+  // If no code blocks found but output contains diff markers, use the whole output
+  if (!diff.includes("--- a/") && output.includes("--- a/")) {
+    // Extract everything after the first "--- a/" line
+    const diffStart = output.indexOf("--- a/");
+    diff = output.substring(diffStart).trim();
+    // Remove any trailing markdown or explanations
+    const diffEnd = diff.indexOf("\n\n```") !== -1 ? diff.indexOf("\n\n```") : 
+                    diff.indexOf("\n\n##") !== -1 ? diff.indexOf("\n\n##") :
+                    diff.indexOf("\n\n**") !== -1 ? diff.indexOf("\n\n**") :
+                    diff.length;
+    diff = diff.substring(0, diffEnd).trim();
   }
 }
 
 // Enhanced diff validation
 console.log("[AGENT] Validating diff format...");
 const validationResult = validateDiff(diff);
+
+// Check if diff appears to be truncated
+const diffLength = diff.length;
+const lastLines = diff.split('\n').slice(-5).join('\n');
+if (validationResult.errors.length > 0 || diff.match(/\+\+\+ b\/[^\n]*$/m)) {
+  console.warn(`[AGENT] WARNING: Diff validation found issues or appears incomplete`);
+  console.warn(`[AGENT] Diff length: ${diffLength} characters`);
+  console.warn(`[AGENT] Last 5 lines:\n${lastLines}`);
+  
+  // Try to detect if this is a token limit issue
+  if (diffLength > 7000 && diff.match(/\+\+\+ b\/[^\n]*$/m)) {
+    const errorMsg = `Diff appears to be truncated (likely hit token limit). The AI model may have generated an incomplete diff.\n\nErrors:\n${validationResult.errors.join('\n')}\n\nDiff preview (last 500 chars):\n\`\`\`\n${diff.substring(Math.max(0, diffLength - 500))}\n\`\`\`\n\nSuggestion: Try breaking the task into smaller parts or increase max_tokens.`;
+    const errorDetails = formatErrorDetails(new Error(errorMsg), { diff: diff.substring(Math.max(0, diffLength - 1000)), files: validationResult.stats.filesChanged });
+    await handleError(new Error(errorMsg), "Incomplete Diff (Token Limit?)", { diff: diff.substring(Math.max(0, diffLength - 1000)), errorDetails });
+    // handleError calls process.exit(1), so we never reach here
+  }
+}
+
 if (!validationResult.isValid) {
-  const errorMsg = `Invalid diff format:\n${validationResult.errors.join('\n')}\n\nDiff preview:\n\`\`\`\n${diff.substring(0, 500)}\n\`\`\``;
-  const errorDetails = formatErrorDetails(new Error(errorMsg), { diff, files: validationResult.stats.filesChanged });
-  await handleError(new Error(errorMsg), "Validation Error", { diff, errorDetails });
+  const errorMsg = `Invalid diff format:\n${validationResult.errors.join('\n')}\n\nDiff preview (first 1000 chars):\n\`\`\`\n${diff.substring(0, 1000)}\n\`\`\`\n\nDiff preview (last 500 chars):\n\`\`\`\n${diff.substring(Math.max(0, diffLength - 500))}\n\`\`\``;
+  const errorDetails = formatErrorDetails(new Error(errorMsg), { diff: diff.substring(0, 1000), files: validationResult.stats.filesChanged });
+  await handleError(new Error(errorMsg), "Validation Error", { diff: diff.substring(0, 1000), errorDetails });
   // handleError calls process.exit(1), so we never reach here
 }
 console.log(`[AGENT] Diff format valid: ${validationResult.stats.filesChanged} files, ${validationResult.stats.hunks} hunks`);
