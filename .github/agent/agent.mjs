@@ -170,78 +170,61 @@ try {
   console.log("[AGENT] No .cursorrules file found");
 }
 
-// Smart file selection: Include only the most relevant files based on task
-// This keeps us under the 200K token limit while providing accurate context
-let relevantFiles = "";
-const taskLower = task.toLowerCase();
+// Include all code files while excluding docs, images, and large files
+// This provides complete context while staying under 200K token limit
+let codebaseContent = "";
 const fileList = files.split("\n").filter(f => f.trim());
 
-// File patterns to check based on task keywords
-const filePatterns = [
-  { keywords: ["help", "admin", "command"], files: ["templates/help/helpTextAdmin.txt", "templates/help/helpText.txt"] },
-  { keywords: ["config", "setting"], files: ["config/config.json", "src/config-handler.js"] },
-  { keywords: ["slack", "message", "notification"], files: ["src/slack-handler.js", "src/notification-handler.js"] },
-  { keywords: ["discord"], files: ["src/discord-handler.js"] },
-  { keywords: ["sonos", "speaker", "playback", "volume"], files: ["src/sonos-handler.js"] },
-  { keywords: ["web", "admin panel", "webui", "route", "endpoint"], files: ["src/webserver.js", "public/admin.html"] },
-  { keywords: ["queue", "track"], files: ["src/queue-handler.js"] },
-  { keywords: ["vote", "voting"], files: ["src/voting-handler.js"] },
-  { keywords: ["ai", "openai", "gemini"], files: ["src/ai-handler.js"] },
-  { keywords: ["test"], files: ["test/unit/"] },
+// Include code files, exclude non-code
+const includedExtensions = ['.js', '.mjs', '.json', '.txt', '.html', '.css', '.yml', '.yaml'];
+const excludedPaths = [
+  'node_modules/',
+  'package-lock.json',
+  '.git/',
+  'coverage/',
+  'dist/',
+  'build/',
+  'docs/',           // Exclude documentation
+  'README.md',       // Exclude large README
+  'CHANGELOG.md',    // Exclude changelog
+  '.github/workflows/', // Exclude workflow files (too verbose)
+  'test/',           // Exclude tests
 ];
 
-console.log("[AGENT] Identifying relevant files based on task...");
+console.log("[AGENT] Loading codebase files...");
 let filesIncluded = 0;
+let totalSize = 0;
 
-// First, include files that match task keywords
-for (const pattern of filePatterns) {
-  if (pattern.keywords.some(keyword => taskLower.includes(keyword))) {
-    for (const filePath of pattern.files) {
-      try {
-        // Handle directory patterns
-        if (filePath.endsWith('/')) {
-          const dirFiles = fileList.filter(f => f.startsWith(filePath));
-          for (const dirFile of dirFiles.slice(0, 5)) { // Limit to 5 files per directory
-            const content = fs.readFileSync(dirFile, "utf8");
-            relevantFiles += `\n\n=== ${dirFile} ===\n${content}`;
-            filesIncluded++;
-            console.log(`[AGENT] Including ${dirFile}`);
-          }
-        } else {
-          const content = fs.readFileSync(filePath, "utf8");
-          relevantFiles += `\n\n=== ${filePath} ===\n${content}`;
-          filesIncluded++;
-          console.log(`[AGENT] Including ${filePath}`);
-        }
-      } catch (e) {
-        // File doesn't exist, skip it
-      }
+for (const filePath of fileList) {
+  // Skip excluded paths
+  if (excludedPaths.some(excluded => filePath.includes(excluded))) {
+    continue;
+  }
+
+  // Skip if not code extension
+  if (!includedExtensions.some(ext => filePath.endsWith(ext))) {
+    continue;
+  }
+
+  try {
+    const stats = fs.statSync(filePath);
+
+    // Skip very large files (>50KB)
+    if (stats.size > 50000) {
+      console.log(`[AGENT] Skipping large file: ${filePath} (${stats.size} bytes)`);
+      continue;
     }
+
+    const content = fs.readFileSync(filePath, "utf8");
+    codebaseContent += `\n\n=== ${filePath} ===\n${content}`;
+    filesIncluded++;
+    totalSize += stats.size;
+  } catch (e) {
+    // Skip files we can't read
   }
 }
 
-// If no specific files matched, include a summary of available files
-if (filesIncluded === 0) {
-  console.log("[AGENT] No keyword match - including key architecture files");
-  const keyFiles = [
-    "src/webserver.js",
-    "src/slack-handler.js",
-    "src/discord-handler.js",
-    "templates/help/helpTextAdmin.txt"
-  ];
-
-  for (const filePath of keyFiles) {
-    try {
-      const content = fs.readFileSync(filePath, "utf8");
-      relevantFiles += `\n\n=== ${filePath} ===\n${content}`;
-      filesIncluded++;
-    } catch (e) {
-      // Skip if doesn't exist
-    }
-  }
-}
-
-console.log(`[AGENT] Included ${filesIncluded} relevant files for AI context`);
+console.log(`[AGENT] Included ${filesIncluded} code files (${Math.round(totalSize / 1024)} KB)`);
 
 // Build specialized prompt for SlackONOS
 const prompt = `You are an autonomous coding agent for SlackONOS, a democratic music bot for Discord and Slack that controls Sonos speakers.
@@ -264,11 +247,8 @@ ${cursorRules}
 Recent Commits:
 ${recentCommits}
 
-Repository Files (for reference):
-${files}
-
-RELEVANT FILE CONTENTS (use these exact contents for accurate diffs):
-${relevantFiles}
+COMPLETE CODEBASE (use these exact contents for accurate diffs):
+${codebaseContent}
 
 TASK FROM ADMIN (${requester}):
 ${task}
