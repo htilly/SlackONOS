@@ -209,8 +209,8 @@ for (const filePath of fileList) {
   try {
     const stats = fs.statSync(filePath);
 
-    // Skip very large files (>50KB)
-    if (stats.size > 50000) {
+    // Skip very large files (>80KB), except index.js which is critical
+    if (stats.size > 80000 && filePath !== 'index.js') {
       console.log(`[AGENT] Skipping large file: ${filePath} (${stats.size} bytes)`);
       continue;
     }
