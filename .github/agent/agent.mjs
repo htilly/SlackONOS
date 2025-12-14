@@ -21,7 +21,7 @@ if (provider === "claude") {
     process.exit(1);
   }
   aiClient = new Anthropic({ apiKey });
-  aiModel = process.env.CLAUDE_MODEL || "claude-3-5-sonnet-20241022";
+  aiModel = process.env.CLAUDE_MODEL || "claude-3-5-sonnet-latest";
   console.log(`[AGENT] Using Claude (Anthropic) with model: ${aiModel}`);
 } else if (provider === "openai") {
   // OpenAI (original)
