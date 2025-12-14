@@ -36,7 +36,7 @@ describe('AI Code Agent Integration', function() {
       expect(content).to.include('types: [aicode]');
       
       // Check it runs the agent (supports multiple providers now)
-      expect(content).to.include('node --input-type=module .github/agent/agent.js');
+      expect(content).to.include('node .github/agent/agent.mjs');
       
       // Check it runs tests
       expect(content).to.include('npm test');
@@ -47,8 +47,8 @@ describe('AI Code Agent Integration', function() {
   });
 
   describe('Agent Script', function() {
-    it('should have agent.js script', function() {
-      const agentPath = path.join(process.cwd(), '.github', 'agent', 'agent.js');
+    it('should have agent.mjs script', function() {
+      const agentPath = path.join(process.cwd(), '.github', 'agent', 'agent.mjs');
       expect(fs.existsSync(agentPath)).to.be.true;
       
       const content = fs.readFileSync(agentPath, 'utf8');

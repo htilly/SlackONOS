@@ -16,7 +16,7 @@ All components of the AI Code Agent have been successfully implemented and teste
 - Sends Slack notifications on success/failure
 
 ### 2. AI Agent Script
-**File:** `.github/agent/agent.js`
+**File:** `.github/agent/agent.mjs`
 - ES module using OpenAI GPT-4 API
 - Reads `.cursorrules` for project context
 - Generates unified git diffs
@@ -66,7 +66,7 @@ All components of the AI Code Agent have been successfully implemented and teste
     GitHub Actions Workflow
       ✔ should have aicode-agent.yml workflow file
     Agent Script
-      ✔ should have agent.js script
+      ✔ should have agent.mjs script
     Configuration
       ✔ should have githubToken and slackWebhookUrl in config example
     Documentation
@@ -155,7 +155,7 @@ GitHub API (repository_dispatch)
     ↓
 GitHub Actions (aicode-agent.yml)
     ↓
-AI Agent (agent.js) → OpenAI GPT-4
+AI Agent (agent.mjs) → Claude/OpenAI/Gemini
     ↓
 Apply Patch → Run Tests
     ↓

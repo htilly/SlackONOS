@@ -52,7 +52,7 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           TASK: ${{ github.event.client_payload.task }}
           REQUESTER: ${{ github.event.client_payload.requester }}
-        run: node --input-type=module .github/agent/agent.js
+        run: node .github/agent/agent.mjs
         continue-on-error: true
 
       - name: Notify Slack on agent failure
