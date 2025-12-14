@@ -1,0 +1,97 @@
+name: AICODE Preprocess
+
+on:
+  repository_dispatch:
+    types: [aicode]
+
+jobs:
+  preprocess:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install agent dependencies
+        working-directory: .github/agent
+        run: npm install
+
+      - name: Preprocess task to user story
+        id: preprocess
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PREPROCESSING_MODEL: ${{ secrets.PREPROCESSING_MODEL || 'gpt-4o-mini' }}
+          TASK: ${{ github.event.client_payload.task }}
+        run: |
+          OUTPUT=$(node .github/agent/preprocess-task.mjs 2>&1)
+          echo "$OUTPUT"
+          
+          # Extract enhanced task from output
+          if echo "$OUTPUT" | grep -q "ENHANCED_TASK_START"; then
+            ENHANCED_TASK=$(echo "$OUTPUT" | sed -n '/ENHANCED_TASK_START/,/ENHANCED_TASK_END/p' | sed '1d;$d' | sed ':a;N;$!ba;s/\n/ /g')
+            echo "enhanced_task<<EOF" >> $GITHUB_OUTPUT
+            echo "$ENHANCED_TASK" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            # Fallback to original task
+            echo "enhanced_task=${{ github.event.client_payload.task }}" >> $GITHUB_OUTPUT
+          fi
+          
+          # Extract JSON if available
+          JSON_LINE=$(echo "$OUTPUT" | grep "ENHANCED_TASK_JSON:" || true)
+          if [ -n "$JSON_LINE" ]; then
+            JSON_DATA=$(echo "$JSON_LINE" | sed 's/ENHANCED_TASK_JSON://')
+            echo "task_json=$JSON_DATA" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger main agent workflow
+        if: always()
+        run: |
+          ENHANCED_TASK="${{ steps.preprocess.outputs.enhanced_task }}"
+          ORIGINAL_TASK="${{ github.event.client_payload.task }}"
+          
+          # Escape JSON special characters in task strings
+          ENHANCED_TASK_ESCAPED=$(echo "$ENHANCED_TASK" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+          ORIGINAL_TASK_ESCAPED=$(echo "$ORIGINAL_TASK" | sed 's/"/\\"/g')
+          
+          curl -X POST "https://api.github.com/repos/${{ github.repository }}/dispatches" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"event_type\": \"aicode-enhanced\",
+              \"client_payload\": {
+                \"task\": \"$ENHANCED_TASK_ESCAPED\",
+                \"original_task\": \"$ORIGINAL_TASK_ESCAPED\",
+                \"requester\": \"${{ github.event.client_payload.requester }}\",
+                \"channel\": \"${{ github.event.client_payload.channel }}\",
+                \"timestamp\": \"${{ github.event.client_payload.timestamp }}\",
+                \"preprocessing_run_id\": \"${{ github.run_id }}\"
+              }
+            }"
+
+      - name: Notify Slack on preprocessing completion
+        if: always()
+        run: |
+          if [ "${{ steps.preprocess.outcome }}" == "success" ]; then
+            curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"text\":\"📝 Task preprocessed and enhanced. Triggering code generation...\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"📝 *Task Preprocessing Complete*\\n\\n*Original:* ${{ github.event.client_payload.task }}\\n\\n*Enhanced:* ${{ steps.preprocess.outputs.enhanced_task }}\"}}]}"
+          else
+            curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"text\":\"⚠️ Preprocessing failed, using original task\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"⚠️ *Preprocessing Warning*\\n\\nPreprocessing failed, but code generation will continue with original task.\"}}]}"
+          fi
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
