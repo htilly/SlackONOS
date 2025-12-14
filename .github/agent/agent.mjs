@@ -42,6 +42,17 @@ if (provider === "claude") {
   }
   aiClient = new Anthropic({ apiKey });
   aiModel = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
+  
+  // Validate model name format (warn if incorrect)
+  if (aiModel.includes("claude-4-5") || aiModel.includes("claude-3-5")) {
+    // Check for common incorrect formats
+    if (aiModel.match(/claude-[0-9]-[0-9]-sonnet/)) {
+      console.warn(`[AGENT] WARNING: Model name "${aiModel}" appears to be in incorrect format.`);
+      console.warn(`[AGENT] Correct format: claude-sonnet-4-5 (not claude-4-5-sonnet)`);
+      console.warn(`[AGENT] See: https://platform.claude.com/docs/en/about-claude/models/overview`);
+    }
+  }
+  
   console.log(`[AGENT] Using Claude (Anthropic) with model: ${aiModel}`);
 } else if (provider === "openai") {
   // OpenAI (original)
