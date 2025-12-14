@@ -72,17 +72,269 @@ if (provider === "claude") {
 }
 
 function sh(cmd) {
-  return execSync(cmd, { encoding: "utf8", stdio: "pipe" });
+  try {
+    return execSync(cmd, { encoding: "utf8", stdio: "pipe" });
+  } catch (err) {
+    // Capture stderr and stdout for better error messages
+    const stderr = err.stderr ? err.stderr.toString() : '';
+    const stdout = err.stdout ? err.stdout.toString() : '';
+    const errorOutput = stderr || stdout || err.message;
+    
+    // Create enhanced error with actual command output
+    const enhancedError = new Error(`Command failed: ${cmd}\n${errorOutput}`);
+    enhancedError.stderr = stderr;
+    enhancedError.stdout = stdout;
+    enhancedError.status = err.status;
+    enhancedError.code = err.code;
+    throw enhancedError;
+  }
 }
 
-// Send error notification to Slack
-async function notifySlackError(errorMessage, errorType = "Unknown error") {
+/**
+ * Validate diff format and syntax
+ * @param {string} diff - The diff content to validate
+ * @returns {Object} Validation result with isValid and errors array
+ */
+function validateDiff(diff) {
+  const errors = [];
+  
+  // Check for basic diff format markers
+  if (!diff.includes("--- a/") || !diff.includes("+++ b/")) {
+    errors.push("Missing required diff markers (--- a/ or +++ b/)");
+    return { isValid: false, errors };
+  }
+  
+  // Parse hunks and validate format
+  const hunkPattern = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm;
+  const hunks = diff.match(hunkPattern);
+  
+  if (!hunks || hunks.length === 0) {
+    errors.push("No valid hunk headers found (expected @@ -start,num +start,num @@ format)");
+  }
+  
+  // Check for potential conflicts (same line modified differently)
+  const fileChanges = new Map();
+  const lines = diff.split('\n');
+  let currentFile = null;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    // Track which file we're in
+    if (line.startsWith('--- a/')) {
+      currentFile = line.substring(6).trim();
+      if (!fileChanges.has(currentFile)) {
+        fileChanges.set(currentFile, { additions: [], deletions: [] });
+      }
+    }
+    
+    // Track line numbers being changed
+    if (line.startsWith('@@')) {
+      const match = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+      if (match && currentFile) {
+        const oldStart = parseInt(match[1]);
+        const oldCount = parseInt(match[2] || '1');
+        const newStart = parseInt(match[3]);
+        const newCount = parseInt(match[4] || '1');
+        
+        // Validate line numbers are positive
+        if (oldStart <= 0 || newStart <= 0) {
+          errors.push(`Invalid line numbers in hunk at line ${i + 1}: ${line}`);
+        }
+      }
+    }
+    
+    // Check for whitespace-only changes
+    if ((line.startsWith('+') || line.startsWith('-')) && line.length > 1) {
+      const content = line.substring(1);
+      if (content.trim().length === 0 && content.length > 0) {
+        // This is a whitespace-only change, which is acceptable but log it
+        console.log(`[VALIDATION] Whitespace-only change detected at line ${i + 1}`);
+      }
+    }
+  }
+  
+  // Validate that files exist in repo (basic check)
+  for (const [filePath] of fileChanges) {
+    if (filePath.startsWith('a/') || filePath.startsWith('b/')) {
+      const cleanPath = filePath.replace(/^[ab]\//, '');
+      if (!fs.existsSync(cleanPath)) {
+        // File doesn't exist - might be a new file, which is OK
+        console.log(`[VALIDATION] File ${cleanPath} doesn't exist (might be new file)`);
+      }
+    }
+  }
+  
+  return {
+    isValid: errors.length === 0,
+    errors,
+    stats: {
+      filesChanged: fileChanges.size,
+      hunks: hunks ? hunks.length : 0
+    }
+  };
+}
+
+/**
+ * Detect code quality issues in generated diff
+ * @param {string} diff - The diff content to check
+ * @returns {Array} Array of detected issues
+ */
+function detectCodeQualityIssues(diff) {
+  const issues = [];
+  const lines = diff.split('\n');
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    // Only check added lines (lines starting with +)
+    if (!line.startsWith('+')) continue;
+    
+    const content = line.substring(1);
+    
+    // Check for console.log (should use logger)
+    if (content.includes('console.log') && !content.includes('//') && !content.includes('*')) {
+      issues.push({
+        type: 'code_quality',
+        severity: 'warning',
+        line: i + 1,
+        message: 'console.log detected - should use logger instead',
+        code: content.trim().substring(0, 50)
+      });
+    }
+    
+    // Check for ES6 imports in main code (should use CommonJS)
+    if (content.match(/^import\s+.*from\s+['"]/) && !line.includes('.mjs')) {
+      // Allow in .mjs files, but not in .js files
+      const fileMatch = diff.substring(0, diff.indexOf(line)).match(/^\+\+\+ b\/(.+)$/m);
+      if (fileMatch && fileMatch[1] && fileMatch[1].endsWith('.js') && !fileMatch[1].endsWith('.mjs')) {
+        issues.push({
+          type: 'code_quality',
+          severity: 'error',
+          line: i + 1,
+          message: 'ES6 import detected in .js file - should use CommonJS require()',
+          code: content.trim().substring(0, 50)
+        });
+      }
+    }
+    
+    // Check for eval() or Function() constructor (security risk)
+    if (content.match(/\beval\s*\(/) || content.match(/\bFunction\s*\(/)) {
+      issues.push({
+        type: 'security',
+        severity: 'error',
+        line: i + 1,
+        message: 'eval() or Function() constructor detected - security risk',
+        code: content.trim().substring(0, 50)
+      });
+    }
+    
+    // Check for hardcoded secrets/tokens (basic pattern matching)
+    const secretPatterns = [
+      /['"](?:sk-|ghp_|xoxb-|AIza|AKIA)[a-zA-Z0-9_-]{20,}/,
+      /password\s*[:=]\s*['"][^'"]{8,}['"]/i,
+      /api[_-]?key\s*[:=]\s*['"][^'"]{10,}['"]/i,
+      /token\s*[:=]\s*['"][^'"]{20,}['"]/i
+    ];
+    
+    for (const pattern of secretPatterns) {
+      if (pattern.test(content)) {
+        issues.push({
+          type: 'security',
+          severity: 'error',
+          line: i + 1,
+          message: 'Potential hardcoded secret/token detected',
+          code: content.trim().substring(0, 50).replace(/['"].{20,}/g, '[REDACTED]')
+        });
+        break; // Only report once per line
+      }
+    }
+  }
+  
+  return issues;
+}
+
+/**
+ * Enhanced security pattern checking
+ * @param {string} diff - The diff content to check
+ * @returns {Array} Array of security violations
+ */
+function checkSecurityPatterns(diff) {
+  const violations = [];
+  
+  // Extended forbidden patterns with regex
+  const securityPatterns = [
+    {
+      pattern: /webauthn-handler\.js/,
+      message: 'Cannot modify webauthn-handler.js (security-critical)'
+    },
+    {
+      pattern: /auth-handler\.js/,
+      message: 'Cannot modify auth-handler.js (security-critical)'
+    },
+    {
+      pattern: /config\/config\.json$/,
+      message: 'Cannot modify config/config.json (contains secrets)'
+    },
+    {
+      pattern: /config\/userActions\.json/,
+      message: 'Cannot modify config/userActions.json (protected config)'
+    },
+    {
+      pattern: /config\/webauthn-credentials\.json/,
+      message: 'Cannot modify config/webauthn-credentials.json (security-critical)'
+    },
+    {
+      pattern: /\.env/,
+      message: 'Cannot modify .env files (may contain secrets)'
+    },
+    {
+      pattern: /process\.env\.(?:GITHUB_TOKEN|ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|SLACK.*TOKEN|DISCORD.*TOKEN)/,
+      message: 'Cannot directly access sensitive environment variables'
+    }
+  ];
+  
+  for (const { pattern, message } of securityPatterns) {
+    if (pattern.test(diff)) {
+      violations.push({
+        type: 'security',
+        severity: 'error',
+        message,
+        pattern: pattern.toString()
+      });
+    }
+  }
+  
+  return violations;
+}
+
+// Send error notification to Slack with enhanced details
+async function notifySlackError(errorMessage, errorType = "Unknown error", errorDetails = null) {
   if (!webhookUrl) {
     console.log("[AGENT] No SLACK_WEBHOOK_URL configured, skipping notification");
     return;
   }
 
-  const errorEmoji = errorType.includes("quota") ? "💳" : "❌";
+  const errorEmoji = errorType.includes("quota") ? "💳" : errorType.includes("security") ? "🔒" : "❌";
+  
+  // Build detailed error message
+  let detailedMessage = `${errorEmoji} *AICODE Agent Failed*\n\n*Task:* ${task}\n*Requested by:* ${requester}\n*Error Type:* ${errorType}\n\n${errorMessage}`;
+  
+  if (errorDetails) {
+    if (errorDetails.category) {
+      detailedMessage += `\n\n*Category:* ${errorDetails.category}`;
+    }
+    if (errorDetails.suggestions && errorDetails.suggestions.length > 0) {
+      detailedMessage += `\n\n*Suggestions:*\n${errorDetails.suggestions.map(s => `• ${s}`).join('\n')}`;
+    }
+    if (errorDetails.filesChanged) {
+      detailedMessage += `\n\n*Files changed:* ${errorDetails.filesChanged}`;
+    }
+    if (errorDetails.diffPreview) {
+      detailedMessage += `\n\n*Diff preview:*\n\`\`\`\n${errorDetails.diffPreview}\n\`\`\``;
+    }
+  }
+  
   const message = {
     text: `${errorEmoji} AICODE Agent Failed`,
     blocks: [
@@ -90,7 +342,7 @@ async function notifySlackError(errorMessage, errorType = "Unknown error") {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `${errorEmoji} *AICODE Agent Failed*\n\n*Task:* ${task}\n*Requested by:* ${requester}\n*Error:* ${errorType}\n\n${errorMessage}`
+          text: detailedMessage
         }
       },
       {
@@ -120,8 +372,16 @@ async function notifySlackError(errorMessage, errorType = "Unknown error") {
 }
 
 // Handle errors and exit gracefully
-async function handleError(error, errorType = "Unknown error") {
+async function handleError(error, errorType = "Unknown error", context = {}) {
   let errorMessage = error.message || String(error);
+  
+  // Format error details
+  const errorDetails = formatErrorDetails(error, context);
+  
+  // Override error type if we have more specific information
+  if (errorDetails.type !== 'unknown') {
+    errorType = `${errorType}: ${errorDetails.type}`;
+  }
   
   // Format quota errors more clearly
   if (error.code === "insufficient_quota" || error.type === "insufficient_quota") {
@@ -133,9 +393,13 @@ async function handleError(error, errorType = "Unknown error") {
     } else {
       errorMessage = "You exceeded your API quota. Please check your plan and billing details.";
     }
+    errorDetails.category = 'api';
+    errorDetails.type = 'quota_exceeded';
   } else if (error.status === 429 || error.statusCode === 429) {
     errorType = `${provider.toUpperCase()} API Rate Limit`;
     errorMessage = "API rate limit exceeded. Please try again later.";
+    errorDetails.category = 'api';
+    errorDetails.type = 'rate_limit';
   } else if (error.status === 401 || error.statusCode === 401) {
     errorType = `${provider.toUpperCase()} API Authentication Failed`;
     if (provider === "claude") {
@@ -145,18 +409,271 @@ async function handleError(error, errorType = "Unknown error") {
     } else {
       errorMessage = "Invalid API key. Please check your GitHub secrets.";
     }
+    errorDetails.category = 'api';
+    errorDetails.type = 'authentication';
   }
 
   console.error(`[AGENT] ${errorType}: ${errorMessage}`);
+  if (error.stack && process.env.DEBUG) {
+    console.error(`[AGENT] Stack trace: ${error.stack}`);
+  }
   
-  // Send notification to Slack
-  await notifySlackError(errorMessage, errorType);
+  // Send notification to Slack with detailed error information
+  await notifySlackError(errorMessage, errorType, errorDetails);
   
   process.exit(1);
 }
 
 console.log(`[AGENT] Starting AI code agent for task: ${task}`);
 console.log(`[AGENT] Requested by: ${requester}`);
+
+// Verify we're on the develop branch
+try {
+  const currentBranch = sh("git branch --show-current 2>&1").trim();
+  console.log(`[AGENT] Current branch: ${currentBranch}`);
+  if (currentBranch !== 'develop') {
+    console.warn(`[AGENT] WARNING: Not on develop branch (current: ${currentBranch}). Workflow should checkout develop.`);
+  }
+} catch (e) {
+  console.warn(`[AGENT] Could not determine current branch: ${e.message}`);
+}
+
+/**
+ * Select relevant files based on task description
+ * @param {string} task - The task description
+ * @param {Array} fileList - List of all files in repo
+ * @returns {Array} Prioritized list of relevant files
+ */
+function selectRelevantFiles(task, fileList) {
+  const taskLower = task.toLowerCase();
+  const relevantFiles = new Set();
+  
+  // Keyword to file mapping
+  const keywordMap = {
+    'spotify': ['spotify-async.js', 'lib/spotify-validator.js', 'music-helper.js'],
+    'discord': ['discord.js'],
+    'slack': ['slack.js'],
+    'sonos': ['index.js'], // Sonos logic is in index.js
+    'vote': ['voting.js', 'index.js'],
+    'gong': ['voting.js', 'index.js'],
+    'admin': ['public/setup/admin.js', 'public/setup/admin.html', 'lib/auth-handler.js'],
+    'auth': ['lib/auth-handler.js', 'lib/webauthn-handler.js'],
+    'ai': ['ai-handler.js'],
+    'soundcraft': ['soundcraft-handler.js'],
+    'help': ['templates/help/', 'index.js'],
+    'web': ['public/setup/', 'public/'],
+    'config': ['index.js'], // Config handling is in index.js
+    'queue': ['music-helper.js', 'index.js'],
+    'search': ['spotify-async.js', 'music-helper.js', 'index.js']
+  };
+  
+  // Find relevant files based on keywords
+  for (const [keyword, files] of Object.entries(keywordMap)) {
+    if (taskLower.includes(keyword)) {
+      for (const file of files) {
+        // Check if file exists in fileList
+        const matchingFiles = fileList.filter(f => 
+          f.includes(file) || f.endsWith(file)
+        );
+        matchingFiles.forEach(f => relevantFiles.add(f));
+      }
+    }
+  }
+  
+  // Also check for direct file mentions
+  for (const file of fileList) {
+    const fileName = file.split('/').pop();
+    if (taskLower.includes(fileName.toLowerCase().replace(/\.(js|mjs|json)$/, ''))) {
+      relevantFiles.add(file);
+    }
+  }
+  
+  return Array.from(relevantFiles);
+}
+
+/**
+ * Fetch relevant GitHub context (PRs, issues, commits)
+ * @param {string} task - The task description
+ * @returns {Object} GitHub context with PRs, issues, and recent commits
+ */
+async function fetchGitHubContext(task) {
+  const context = {
+    prs: [],
+    issues: [],
+    recentCommits: [],
+    error: null
+  };
+  
+  // Only fetch if GITHUB_TOKEN is available (it should be in GitHub Actions)
+  const githubToken = process.env.GITHUB_TOKEN;
+  if (!githubToken) {
+    console.log("[AGENT] GITHUB_TOKEN not available, skipping GitHub context fetch");
+    return context;
+  }
+  
+  const repo = process.env.GITHUB_REPOSITORY || 'htilly/SlackONOS';
+  const apiBase = `https://api.github.com/repos/${repo}`;
+  
+  try {
+    // Fetch open PRs (limit to 5 most recent)
+    const prResponse = await fetch(`${apiBase}/pulls?state=open&per_page=5&sort=updated`, {
+      headers: {
+        'Authorization': `token ${githubToken}`,
+        'Accept': 'application/vnd.github+json'
+      }
+    });
+    
+    if (prResponse.ok) {
+      const prs = await prResponse.json();
+      context.prs = prs.map(pr => ({
+        number: pr.number,
+        title: pr.title,
+        body: pr.body?.substring(0, 200),
+        url: pr.html_url
+      }));
+      console.log(`[AGENT] Found ${prs.length} open PRs`);
+    }
+    
+    // Fetch recent commits in relevant files (if we can determine them)
+    const commitsResponse = await fetch(`${apiBase}/commits?per_page=10`, {
+      headers: {
+        'Authorization': `token ${githubToken}`,
+        'Accept': 'application/vnd.github+json'
+      }
+    });
+    
+    if (commitsResponse.ok) {
+      const commits = await commitsResponse.json();
+      context.recentCommits = commits.map(commit => ({
+        sha: commit.sha.substring(0, 7),
+        message: commit.commit.message.split('\n')[0],
+        author: commit.commit.author.name,
+        date: commit.commit.author.date,
+        url: commit.html_url
+      }));
+      console.log(`[AGENT] Found ${commits.length} recent commits`);
+    }
+    
+  } catch (error) {
+    console.log(`[AGENT] Error fetching GitHub context: ${error.message}`);
+    context.error = error.message;
+  }
+  
+  return context;
+}
+
+/**
+ * Retry function with exponential backoff
+ * @param {Function} fn - Async function to retry
+ * @param {number} maxRetries - Maximum number of retries
+ * @param {number} initialDelay - Initial delay in milliseconds
+ * @returns {Promise} Result of the function
+ */
+async function retryWithBackoff(fn, maxRetries = 3, initialDelay = 1000) {
+  let lastError;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      
+      // Check if error is retryable (transient errors)
+      const isRetryable = 
+        error.status === 429 || // Rate limit
+        error.status === 500 || // Internal server error
+        error.status === 502 || // Bad gateway
+        error.status === 503 || // Service unavailable
+        error.statusCode === 429 ||
+        error.statusCode === 500 ||
+        error.statusCode === 502 ||
+        error.statusCode === 503 ||
+        error.code === 'ECONNRESET' ||
+        error.code === 'ETIMEDOUT';
+      
+      if (!isRetryable || attempt === maxRetries - 1) {
+        throw error;
+      }
+      
+      const delay = initialDelay * Math.pow(2, attempt);
+      console.log(`[AGENT] Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms delay`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError;
+}
+
+/**
+ * Format detailed error information
+ * @param {Error} error - The error object
+ * @param {Object} context - Additional context (diff, files, etc.)
+ * @returns {Object} Formatted error details
+ */
+function formatErrorDetails(error, context = {}) {
+  const details = {
+    type: 'unknown',
+    message: error.message || String(error),
+    stack: error.stack,
+    category: 'unknown',
+    suggestions: []
+  };
+  
+  // Categorize error
+  if (error.message?.includes('diff') || error.message?.includes('patch')) {
+    details.category = 'validation';
+    details.type = 'diff_validation';
+    details.suggestions = [
+      'Check that the diff format is correct (unified diff format)',
+      'Verify that line numbers match the actual file contents',
+      'Ensure context lines are included around changes'
+    ];
+  } else if (error.message?.includes('apply') || error.message?.includes('git apply')) {
+    details.category = 'patch';
+    details.type = 'patch_application';
+    details.suggestions = [
+      'The generated diff may not match the current file state',
+      'Try re-running the agent - files may have changed',
+      'Check if there are merge conflicts or uncommitted changes'
+    ];
+  } else if (error.status === 429 || error.statusCode === 429) {
+    details.category = 'api';
+    details.type = 'rate_limit';
+    details.suggestions = [
+      'Wait a few minutes and try again',
+      'Check your API quota/billing',
+      'Consider using a different AI provider'
+    ];
+  } else if (error.status === 401 || error.statusCode === 401) {
+    details.category = 'api';
+    details.type = 'authentication';
+    details.suggestions = [
+      'Verify your API key is correct',
+      'Check that the API key has not expired',
+      'Ensure the API key has the required permissions'
+    ];
+  } else if (error.message?.includes('test') || error.message?.includes('npm test')) {
+    details.category = 'test';
+    details.type = 'test_failure';
+    details.suggestions = [
+      'Review the generated code changes',
+      'Check test output for specific failures',
+      'The changes may need manual adjustment'
+    ];
+  }
+  
+  // Add context-specific information
+  if (context.diff) {
+    details.diffPreview = context.diff.substring(0, 500);
+    details.filesChanged = (context.diff.match(/^\+\+\+ b\//gm) || []).length;
+  }
+  
+  if (context.files) {
+    details.files = context.files;
+  }
+  
+  return details;
+}
 
 // Get repo context
 const files = sh("git ls-files");
@@ -209,6 +726,15 @@ const excludedPaths = [
   'build.txt',
 ];
 
+// Fetch GitHub context for better prompt
+console.log("[AGENT] Fetching GitHub context...");
+const githubContext = await fetchGitHubContext(task);
+
+// Intelligent file selection based on task
+console.log("[AGENT] Selecting relevant files based on task...");
+const relevantFiles = selectRelevantFiles(task, fileList);
+console.log(`[AGENT] Identified ${relevantFiles.length} relevant files based on task keywords`);
+
 console.log("[AGENT] Loading codebase files...");
 let filesIncluded = 0;
 let totalSize = 0;
@@ -231,7 +757,37 @@ for (const filePath of priorityFiles) {
   }
 }
 
-// Second pass: Include other code files (skip if exceeds limit)
+// Second pass: Include task-relevant files (prioritize these)
+for (const filePath of relevantFiles) {
+  if (includedFiles.has(filePath)) continue;
+  if (!fileList.includes(filePath)) continue;
+  
+  // Skip excluded paths
+  if (excludedPaths.some(excluded => filePath.includes(excluded))) {
+    continue;
+  }
+
+  try {
+    const stats = fs.statSync(filePath);
+    
+    // Skip very large files
+    if (stats.size > 80000) {
+      console.log(`[AGENT] Skipping large relevant file: ${filePath} (${stats.size} bytes)`);
+      continue;
+    }
+
+    const content = fs.readFileSync(filePath, "utf8");
+    codebaseContent += `\n\n=== ${filePath} ===\n${content}`;
+    filesIncluded++;
+    totalSize += stats.size;
+    includedFiles.add(filePath);
+    console.log(`[AGENT] Task-relevant: ${filePath} (${Math.round(stats.size / 1024)} KB)`);
+  } catch (e) {
+    // Skip if can't read
+  }
+}
+
+// Third pass: Include other code files (skip if exceeds limit)
 for (const filePath of fileList) {
   if (includedFiles.has(filePath)) continue;
 
@@ -271,7 +827,25 @@ for (const filePath of fileList) {
 
 console.log(`[AGENT] Included ${filesIncluded} code files (${Math.round(totalSize / 1024)} KB total)`);
 
-// Build specialized prompt for SlackONOS
+// Build specialized prompt for SlackONOS with enhanced context
+let githubContextText = '';
+if (githubContext.prs.length > 0) {
+  githubContextText += `\n\nOPEN PULL REQUESTS (for context):\n`;
+  githubContext.prs.forEach(pr => {
+    githubContextText += `- PR #${pr.number}: ${pr.title}\n`;
+    if (pr.body) {
+      githubContextText += `  ${pr.body.substring(0, 150)}...\n`;
+    }
+  });
+}
+
+if (githubContext.recentCommits.length > 0) {
+  githubContextText += `\n\nRECENT COMMITS:\n`;
+  githubContext.recentCommits.slice(0, 5).forEach(commit => {
+    githubContextText += `- ${commit.sha}: ${commit.message} (${commit.author})\n`;
+  });
+}
+
 const prompt = `You are an autonomous coding agent for SlackONOS, a democratic music bot for Discord and Slack that controls Sonos speakers.
 
 CRITICAL SAFETY RULES:
@@ -282,6 +856,8 @@ CRITICAL SAFETY RULES:
 - Small, focused changes only (max 300 lines changed)
 - Follow existing code style (CommonJS, async/await, logger for logging)
 - NEVER use console.log in production code, use logger instead
+- NEVER use ES6 imports in .js files (use CommonJS require/module.exports)
+- NEVER hardcode secrets, tokens, or API keys
 - Test your changes mentally before outputting the diff
 
 CODEBASE CONTEXT:
@@ -290,13 +866,20 @@ Project Rules and Conventions:
 ${cursorRules}
 
 Recent Commits:
-${recentCommits}
+${recentCommits}${githubContextText}
 
 COMPLETE CODEBASE (use these exact contents for accurate diffs):
 ${codebaseContent}
 
 TASK FROM ADMIN (${requester}):
 ${task}
+
+CHAIN OF THOUGHT:
+1. Analyze the task and identify which files need to be modified
+2. Review the existing code structure and patterns
+3. Plan the changes to follow existing code style
+4. Generate a minimal, focused diff with proper context
+5. Verify the diff format is correct before outputting
 
 CRITICAL: Generate ONLY the file changes in this EXACT format (no "diff --git" headers, no index lines, no hashes):
 
@@ -315,6 +898,7 @@ Rules for the diff format:
 4. Use @@ -startLine,numLines +startLine,numLines @@ for hunks
 5. Prefix added lines with "+", removed lines with "-", context lines with " " (space)
 6. Include at least 3 lines of context before and after changes
+7. Ensure line numbers match the actual file contents exactly
 
 Output ONLY the diff content, no explanations, no markdown code blocks.`;
 
@@ -345,11 +929,17 @@ async function callAI(promptText) {
 }
 
 console.log(`[AGENT] Calling ${provider.toUpperCase()} API...`);
+const apiStartTime = Date.now();
 let output;
 try {
-  output = await callAI(prompt);
+  output = await retryWithBackoff(async () => {
+    return await callAI(prompt);
+  }, 3, 1000);
+  const apiDuration = Date.now() - apiStartTime;
+  console.log(`[AGENT] API call completed in ${apiDuration}ms`);
 } catch (error) {
-  await handleError(error, `${provider.toUpperCase()} API Error`);
+  const errorDetails = formatErrorDetails(error, {});
+  await handleError(error, `${provider.toUpperCase()} API Error`, { errorDetails });
   // handleError calls process.exit(1), so we never reach here
 }
 
@@ -363,30 +953,52 @@ if (output.includes("```")) {
   }
 }
 
-// Validate diff format - accept either unified diff format
-const hasValidDiffFormat = diff.includes("--- a/") && diff.includes("+++ b/");
-if (!hasValidDiffFormat) {
-  const errorMsg = `Model did not return a valid diff format. Expected "--- a/" and "+++ b/" lines. Output was:\n\`\`\`\n${output.substring(0, 500)}\n\`\`\``;
-  await handleError(new Error(errorMsg), "Invalid Diff Format");
+// Enhanced diff validation
+console.log("[AGENT] Validating diff format...");
+const validationResult = validateDiff(diff);
+if (!validationResult.isValid) {
+  const errorMsg = `Invalid diff format:\n${validationResult.errors.join('\n')}\n\nDiff preview:\n\`\`\`\n${diff.substring(0, 500)}\n\`\`\``;
+  const errorDetails = formatErrorDetails(new Error(errorMsg), { diff, files: validationResult.stats.filesChanged });
+  await handleError(new Error(errorMsg), "Validation Error", { diff, errorDetails });
+  // handleError calls process.exit(1), so we never reach here
+}
+console.log(`[AGENT] Diff format valid: ${validationResult.stats.filesChanged} files, ${validationResult.stats.hunks} hunks`);
+
+// Enhanced security pattern checking
+console.log("[AGENT] Checking security patterns...");
+const securityViolations = checkSecurityPatterns(diff);
+if (securityViolations.length > 0) {
+  const violations = securityViolations.map(v => v.message).join('\n');
+  await handleError(
+    new Error(`Security violation detected:\n${violations}`),
+    "Security Violation",
+    { diff: diff.substring(0, 500), violations }
+  );
   // handleError calls process.exit(1), so we never reach here
 }
 
-// Safety check: Ensure we're not touching forbidden files
-const forbiddenPatterns = [
-  /webauthn-handler\.js/,
-  /auth-handler\.js/,
-  /config\/config\.json$/,
-  /config\/userActions\.json/,
-  /config\/webauthn-credentials\.json/
-];
-
-for (const pattern of forbiddenPatterns) {
-  if (pattern.test(diff)) {
+// Code quality checks
+console.log("[AGENT] Checking code quality...");
+const qualityIssues = detectCodeQualityIssues(diff);
+if (qualityIssues.length > 0) {
+  const errors = qualityIssues.filter(i => i.severity === 'error');
+  const warnings = qualityIssues.filter(i => i.severity === 'warning');
+  
+  if (errors.length > 0) {
+    const errorList = errors.map(e => `Line ${e.line}: ${e.message}`).join('\n');
     await handleError(
-      new Error(`Attempted to modify forbidden file matching ${pattern}`),
-      "Safety Violation"
+      new Error(`Code quality errors detected:\n${errorList}`),
+      "Code Quality Error",
+      { diff: diff.substring(0, 500), issues: errors }
     );
     // handleError calls process.exit(1), so we never reach here
+  }
+  
+  if (warnings.length > 0) {
+    console.log(`[AGENT] Code quality warnings (${warnings.length}):`);
+    warnings.forEach(w => {
+      console.log(`  - Line ${w.line}: ${w.message}`);
+    });
   }
 }
 
@@ -395,12 +1007,13 @@ const linesChanged = (diff.match(/^[+-][^+-]/gm) || []).length;
 if (linesChanged > 300) {
   await handleError(
     new Error(`Too many lines changed (${linesChanged} > 300). Maximum allowed is 300 lines.`),
-    "Safety Violation"
+    "Safety Violation",
+    { linesChanged, diff: diff.substring(0, 500) }
   );
   // handleError calls process.exit(1), so we never reach here
 }
 
-console.log(`[AGENT] Generated diff with ${linesChanged} lines changed`);
+console.log(`[AGENT] Generated diff with ${linesChanged} lines changed (${validationResult.stats.filesChanged} files)`);
 
 // Apply patch with multiple strategies
 fs.writeFileSync("/tmp/aicode.patch", diff);
@@ -415,7 +1028,8 @@ try {
   console.log("[AGENT] Patch applied successfully with 'git apply'");
   patchApplied = true;
 } catch (err) {
-  console.log(`[AGENT] Standard git apply failed: ${err.message}`);
+  const errorDetails = err.stderr || err.stdout || err.message;
+  console.log(`[AGENT] Standard git apply failed:\n${errorDetails}`);
   lastError = err;
 }
 
@@ -427,7 +1041,8 @@ if (!patchApplied) {
     console.log("[AGENT] Patch applied successfully with '--unidiff-zero'");
     patchApplied = true;
   } catch (err) {
-    console.log(`[AGENT] git apply --unidiff-zero failed: ${err.message}`);
+    const errorDetails = err.stderr || err.stdout || err.message;
+    console.log(`[AGENT] git apply --unidiff-zero failed:\n${errorDetails}`);
     lastError = err;
   }
 }
@@ -440,7 +1055,8 @@ if (!patchApplied) {
     console.log("[AGENT] Patch applied successfully with '--ignore-whitespace'");
     patchApplied = true;
   } catch (err) {
-    console.log(`[AGENT] git apply --ignore-whitespace failed: ${err.message}`);
+    const errorDetails = err.stderr || err.stdout || err.message;
+    console.log(`[AGENT] git apply --ignore-whitespace failed:\n${errorDetails}`);
     lastError = err;
   }
 }
@@ -453,14 +1069,62 @@ if (!patchApplied) {
     console.log("[AGENT] Patch applied successfully with 'patch' command");
     patchApplied = true;
   } catch (err) {
-    console.log(`[AGENT] patch command failed: ${err.message}`);
+    const errorDetails = err.stderr || err.stdout || err.message;
+    console.log(`[AGENT] patch command failed:\n${errorDetails}`);
     lastError = err;
   }
 }
 
 if (!patchApplied) {
-  const errorMsg = `Failed to apply patch after trying multiple strategies.\n\nLast error: ${lastError.message}\n\nDiff preview:\n\`\`\`\n${diff.substring(0, 1000)}\n\`\`\``;
-  await handleError(new Error(errorMsg), "Patch Application Failed");
+  // Get git status and branch info for debugging
+  let gitStatus = '';
+  let currentBranch = '';
+  try {
+    gitStatus = sh("git status --short 2>&1");
+    currentBranch = sh("git branch --show-current 2>&1").trim();
+  } catch (e) {
+    gitStatus = 'Could not get git status';
+    currentBranch = 'unknown';
+  }
+  
+  // Get actual error output from the last failed command
+  const actualError = lastError.stderr || lastError.stdout || lastError.message;
+  
+  // Read patch file for debugging
+  let patchContent = '';
+  try {
+    patchContent = fs.readFileSync("/tmp/aicode.patch", "utf8");
+  } catch (e) {
+    patchContent = 'Could not read patch file';
+  }
+  
+  const errorDetails = formatErrorDetails(lastError, { 
+    diff: diff.substring(0, 1000),
+    files: validationResult.stats.filesChanged
+  });
+  
+  const errorMsg = `Failed to apply patch after trying multiple strategies.
+
+Current branch: ${currentBranch}
+Last error output:
+${actualError}
+
+Error category: ${errorDetails.category}
+Suggestions:
+${errorDetails.suggestions.map(s => `- ${s}`).join('\n')}
+
+Git status:
+${gitStatus}
+
+Patch file preview (first 2000 chars):
+\`\`\`
+${patchContent.substring(0, 2000)}
+\`\`\``;
+  await handleError(new Error(errorMsg), `Patch Application Failed: ${errorDetails.type}`, { 
+    diff: patchContent.substring(0, 1000), 
+    errorDetails,
+    actualError: actualError.substring(0, 500)
+  });
   // handleError calls process.exit(1), so we never reach here
 }
 
