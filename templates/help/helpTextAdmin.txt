@@ -26,6 +26,7 @@
 > `telemetry` - Show telemetry status and privacy information.
 > `stats` - Show usage statistics for all users.
 > `stats [user]` - Show usage statistics for a specific user.
+> `aicode <task description>` - Request AI agent to make code changes via GitHub Actions.
 
 *🤖 AI Settings:*
 > `setconfig aiPrompt <text>` - Set the DJ-style summary prompt used by AI.

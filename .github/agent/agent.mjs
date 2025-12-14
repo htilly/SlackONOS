@@ -1,6 +1,26 @@
 import { execSync } from "child_process";
 import fs from "fs";
 
+/**
+ * AICODE Agent - Autonomous code modification agent for SlackONOS
+ *
+ * This agent uses AI (Claude, OpenAI, or Gemini) to generate code changes
+ * based on natural language task descriptions from Slack admins.
+ *
+ * Key Features:
+ * - Multi-provider AI support (Claude Sonnet 4.5 default)
+ * - Safety checks (forbidden files, line limits, security patterns)
+ * - Robust patch application with multiple fallback strategies
+ * - Slack notifications for success/failure
+ * - Automatic PR creation when tests pass
+ *
+ * Patch Application Strategies (tried in order):
+ * 1. Standard git apply
+ * 2. git apply --unidiff-zero (for exact line matching)
+ * 3. git apply --ignore-whitespace (for whitespace variations)
+ * 4. patch -p1 command (traditional Unix patch)
+ */
+
 // Support multiple AI providers
 const provider = process.env.AI_PROVIDER || "claude"; // claude, openai, or gemini
 const task = process.env.TASK || "Improve code quality";
@@ -21,7 +41,7 @@ if (provider === "claude") {
     process.exit(1);
   }
   aiClient = new Anthropic({ apiKey });
-  aiModel = process.env.CLAUDE_MODEL || "claude-3-5-sonnet-latest";
+  aiModel = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
   console.log(`[AGENT] Using Claude (Anthropic) with model: ${aiModel}`);
 } else if (provider === "openai") {
   // OpenAI (original)
@@ -154,7 +174,7 @@ try {
 const prompt = `You are an autonomous coding agent for SlackONOS, a democratic music bot for Discord and Slack that controls Sonos speakers.
 
 CRITICAL SAFETY RULES:
-- Output ONLY a valid unified git diff (starting with "diff --git")
+- Output ONLY a valid unified git diff format
 - DO NOT modify authentication files (webauthn-handler.js, auth-handler.js)
 - DO NOT modify config handling (config/*)
 - DO NOT modify security-critical code
@@ -177,9 +197,25 @@ ${recentCommits}
 TASK FROM ADMIN (${requester}):
 ${task}
 
-Generate a safe, focused code change as a unified git diff. The diff will be applied with "git apply" so ensure it's properly formatted.
+CRITICAL: Generate ONLY the file changes in this EXACT format (no "diff --git" headers, no index lines, no hashes):
 
-Remember: Output ONLY the git diff, no explanations, no markdown code blocks, just the raw diff.`;
+--- a/path/to/file.js
++++ b/path/to/file.js
+@@ -10,6 +10,7 @@
+ existing line
+ another existing line
++new line to add
+ existing line
+
+Rules for the diff format:
+1. Start each file with "--- a/filepath" and "+++ b/filepath"
+2. NO "diff --git" line, NO "index" line with hashes
+3. Include enough context lines (unchanged lines) around changes
+4. Use @@ -startLine,numLines +startLine,numLines @@ for hunks
+5. Prefix added lines with "+", removed lines with "-", context lines with " " (space)
+6. Include at least 3 lines of context before and after changes
+
+Output ONLY the diff content, no explanations, no markdown code blocks.`;
 
 // Call AI provider with unified interface
 async function callAI(promptText) {
@@ -217,18 +253,19 @@ try {
 }
 
 // Extract diff from potential markdown code blocks
-let diff = output;
+let diff = output.trim();
 if (output.includes("```")) {
   // Extract content between code fences
   const match = output.match(/```(?:diff)?\n([\s\S]*?)```/);
   if (match) {
-    diff = match[1];
+    diff = match[1].trim();
   }
 }
 
-// Validate diff format
-if (!diff.includes("diff --git")) {
-  const errorMsg = `Model did not return a valid diff. Output was:\n\`\`\`\n${output.substring(0, 500)}\n\`\`\``;
+// Validate diff format - accept either unified diff format
+const hasValidDiffFormat = diff.includes("--- a/") && diff.includes("+++ b/");
+if (!hasValidDiffFormat) {
+  const errorMsg = `Model did not return a valid diff format. Expected "--- a/" and "+++ b/" lines. Output was:\n\`\`\`\n${output.substring(0, 500)}\n\`\`\``;
   await handleError(new Error(errorMsg), "Invalid Diff Format");
   // handleError calls process.exit(1), so we never reach here
 }
@@ -264,14 +301,64 @@ if (linesChanged > 300) {
 
 console.log(`[AGENT] Generated diff with ${linesChanged} lines changed`);
 
-// Apply patch
+// Apply patch with multiple strategies
 fs.writeFileSync("/tmp/aicode.patch", diff);
+
+let patchApplied = false;
+let lastError = null;
+
+// Strategy 1: Try with standard git apply
 try {
-  sh("git apply --check /tmp/aicode.patch");
-  sh("git apply /tmp/aicode.patch");
-  console.log("[AGENT] Patch applied successfully");
+  sh("git apply --check /tmp/aicode.patch 2>&1");
+  sh("git apply /tmp/aicode.patch 2>&1");
+  console.log("[AGENT] Patch applied successfully with 'git apply'");
+  patchApplied = true;
 } catch (err) {
-  const errorMsg = `Failed to apply patch: ${err.message}\n\nDiff preview:\n\`\`\`\n${diff.substring(0, 500)}\n\`\`\``;
+  console.log(`[AGENT] Standard git apply failed: ${err.message}`);
+  lastError = err;
+}
+
+// Strategy 2: Try with --unidiff-zero for exact line matching
+if (!patchApplied) {
+  try {
+    sh("git apply --unidiff-zero --check /tmp/aicode.patch 2>&1");
+    sh("git apply --unidiff-zero /tmp/aicode.patch 2>&1");
+    console.log("[AGENT] Patch applied successfully with '--unidiff-zero'");
+    patchApplied = true;
+  } catch (err) {
+    console.log(`[AGENT] git apply --unidiff-zero failed: ${err.message}`);
+    lastError = err;
+  }
+}
+
+// Strategy 3: Try with more lenient whitespace handling
+if (!patchApplied) {
+  try {
+    sh("git apply --ignore-whitespace --check /tmp/aicode.patch 2>&1");
+    sh("git apply --ignore-whitespace /tmp/aicode.patch 2>&1");
+    console.log("[AGENT] Patch applied successfully with '--ignore-whitespace'");
+    patchApplied = true;
+  } catch (err) {
+    console.log(`[AGENT] git apply --ignore-whitespace failed: ${err.message}`);
+    lastError = err;
+  }
+}
+
+// Strategy 4: Try patch command as fallback
+if (!patchApplied) {
+  try {
+    sh("patch -p1 --dry-run < /tmp/aicode.patch 2>&1");
+    sh("patch -p1 < /tmp/aicode.patch 2>&1");
+    console.log("[AGENT] Patch applied successfully with 'patch' command");
+    patchApplied = true;
+  } catch (err) {
+    console.log(`[AGENT] patch command failed: ${err.message}`);
+    lastError = err;
+  }
+}
+
+if (!patchApplied) {
+  const errorMsg = `Failed to apply patch after trying multiple strategies.\n\nLast error: ${lastError.message}\n\nDiff preview:\n\`\`\`\n${diff.substring(0, 1000)}\n\`\`\``;
   await handleError(new Error(errorMsg), "Patch Application Failed");
   // handleError calls process.exit(1), so we never reach here
 }
