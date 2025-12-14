@@ -59,7 +59,10 @@ jobs:
           JSON_LINE=$(echo "$OUTPUT" | grep "ENHANCED_TASK_JSON:" || true)
           if [ -n "$JSON_LINE" ]; then
             JSON_DATA=$(echo "$JSON_LINE" | sed 's/ENHANCED_TASK_JSON://')
-            echo "task_json=$JSON_DATA" >> $GITHUB_OUTPUT
+            # Use multiline format to avoid shell quoting issues with JSON
+            echo "task_json<<EOF" >> $GITHUB_OUTPUT
+            echo "$JSON_DATA" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
 
             # Extract Confluence URL
             CONFLUENCE_URL=$(echo "$JSON_DATA" | jq -r '.confluenceUrl // "N/A"')
@@ -72,17 +75,35 @@ jobs:
         if: always()
         run: |
           # Read enhanced task from JSON output to avoid shell quoting issues
-          TASK_JSON="${{ steps.preprocess.outputs.task_json }}"
+          # Use jq to safely parse the JSON string from GitHub Actions output
+          TASK_JSON_RAW="${{ steps.preprocess.outputs.task_json }}"
           
-          if [ -n "$TASK_JSON" ] && [ "$TASK_JSON" != "null" ]; then
-            # Extract values from JSON using jq (handles all escaping automatically)
-            ENHANCED_TASK=$(echo "$TASK_JSON" | jq -r '.enhanced // empty')
-            ORIGINAL_TASK=$(echo "$TASK_JSON" | jq -r '.original // empty')
-            CONFLUENCE_URL=$(echo "$TASK_JSON" | jq -r '.confluenceUrl // "N/A"')
+          if [ -n "$TASK_JSON_RAW" ] && [ "$TASK_JSON_RAW" != "null" ] && [ "$TASK_JSON_RAW" != "" ]; then
+            # Try to parse as JSON - if it's already a JSON string, parse it first
+            if echo "$TASK_JSON_RAW" | jq -e . >/dev/null 2>&1; then
+              # It's valid JSON, extract values
+              ENHANCED_TASK=$(echo "$TASK_JSON_RAW" | jq -r '.enhanced // empty')
+              ORIGINAL_TASK=$(echo "$TASK_JSON_RAW" | jq -r '.original // empty')
+              CONFLUENCE_URL=$(echo "$TASK_JSON_RAW" | jq -r '.confluenceUrl // "N/A"')
+            else
+              # Might be a JSON string that needs to be parsed (double-encoded)
+              # Try to unescape and parse
+              TASK_JSON_PARSED=$(echo "$TASK_JSON_RAW" | jq -Rr '.')
+              if echo "$TASK_JSON_PARSED" | jq -e . >/dev/null 2>&1; then
+                ENHANCED_TASK=$(echo "$TASK_JSON_PARSED" | jq -r '.enhanced // empty')
+                ORIGINAL_TASK=$(echo "$TASK_JSON_PARSED" | jq -r '.original // empty')
+                CONFLUENCE_URL=$(echo "$TASK_JSON_PARSED" | jq -r '.confluenceUrl // "N/A"')
+              else
+                # Fallback to outputs if JSON parsing fails
+                ENHANCED_TASK="${{ steps.preprocess.outputs.enhanced_task }}"
+                ORIGINAL_TASK="${{ github.event.client_payload.task }}"
+                CONFLUENCE_URL="${{ steps.preprocess.outputs.confluence_url }}"
+              fi
+            fi
           else
             # Fallback to outputs if JSON not available
-          ENHANCED_TASK="${{ steps.preprocess.outputs.enhanced_task }}"
-          ORIGINAL_TASK="${{ github.event.client_payload.task }}"
+            ENHANCED_TASK="${{ steps.preprocess.outputs.enhanced_task }}"
+            ORIGINAL_TASK="${{ github.event.client_payload.task }}"
             CONFLUENCE_URL="${{ steps.preprocess.outputs.confluence_url }}"
           fi
           
@@ -125,13 +146,43 @@ jobs:
         if: always()
         run: |
           if [ "${{ steps.preprocess.outcome }}" == "success" ]; then
+            # Use jq to properly construct JSON payload with proper escaping
+            ORIGINAL_TASK="${{ github.event.client_payload.task }}"
+            ENHANCED_TASK="${{ steps.preprocess.outputs.enhanced_task }}"
+            
+            PAYLOAD=$(jq -n \
+              --arg text "📝 Task preprocessed and enhanced. Triggering code generation..." \
+              --arg original "$ORIGINAL_TASK" \
+              --arg enhanced "$ENHANCED_TASK" \
+              '{
+                text: $text,
+                blocks: [{
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ("📝 *Task Preprocessing Complete*\n\n*Original:* " + $original + "\n\n*Enhanced:* " + $enhanced)
+                  }
+                }]
+              }')
+            
             curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
               -H "Content-Type: application/json" \
-              -d "{\"text\":\"📝 Task preprocessed and enhanced. Triggering code generation...\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"📝 *Task Preprocessing Complete*\\n\\n*Original:* ${{ github.event.client_payload.task }}\\n\\n*Enhanced:* ${{ steps.preprocess.outputs.enhanced_task }}\"}}]}"
+              -d "$PAYLOAD"
           else
+            PAYLOAD=$(jq -n '{
+              text: "⚠️ Preprocessing failed, using original task",
+              blocks: [{
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: "⚠️ *Preprocessing Warning*\n\nPreprocessing failed, but code generation will continue with original task."
+                }
+              }]
+            }')
+            
             curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
               -H "Content-Type: application/json" \
-              -d "{\"text\":\"⚠️ Preprocessing failed, using original task\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"⚠️ *Preprocessing Warning*\\n\\nPreprocessing failed, but code generation will continue with original task.\"}}]}"
+              -d "$PAYLOAD"
           fi
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
