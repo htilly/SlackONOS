@@ -26,17 +26,27 @@ jobs:
         TIMESTAMP=$(jq -r '.timestamp // ""' /tmp/event_payload.json)
         PREPROCESSING_RUN_ID=$(jq -r '.preprocessing_run_id // ""' /tmp/event_payload.json)
         
-        # Generate a title from the enhanced task (first line or first 100 chars)
-        TITLE=$(echo "$ENHANCED_TASK" | head -n 1 | cut -c 1-100)
-        if [ -z "$TITLE" ]; then
-          TITLE=$(echo "$ORIGINAL_TASK" | head -n 1 | cut -c 1-100)
+        # Generate title as today's date + summary from the task
+        DATE_STR=$(date +%Y-%m-%d)
+        
+        # Extract summary from enhanced task (first line or first 100 chars)
+        # Try to get a meaningful summary from the enhanced task
+        SUMMARY=$(echo "$ENHANCED_TASK" | head -n 1 | sed 's/^As an administrator, I want to //' | sed 's/ so that.*$//' | cut -c 1-80)
+        
+        # If summary is empty or too short, try original task
+        if [ -z "$SUMMARY" ] || [ ${#SUMMARY} -lt 10 ]; then
+          SUMMARY=$(echo "$ORIGINAL_TASK" | cut -c 1-80)
         fi
         
-        # Add timestamp to make title unique
-        DATE_STR=$(date +%Y-%m-%d)
-        TITLE_WITH_DATE="${TITLE} - ${DATE_STR}"
+        # Clean up summary - remove extra whitespace and ensure it's not empty
+        SUMMARY=$(echo "$SUMMARY" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+        if [ -z "$SUMMARY" ]; then
+          SUMMARY="Task"
+        fi
         
-        echo "title=$TITLE_WITH_DATE" >> $GITHUB_OUTPUT
+        TITLE="${DATE_STR} ${SUMMARY}"
+        
+        echo "title=$TITLE" >> $GITHUB_OUTPUT
         echo "enhanced_task<<EOF" >> $GITHUB_OUTPUT
         echo "$ENHANCED_TASK" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
