@@ -27,21 +27,50 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install agent dependencies
+        working-directory: .github/agent
+        run: npm install
+
       - name: Run AI Agent
+        id: agent
         env:
+          # AI Provider selection (claude, openai, or gemini)
+          AI_PROVIDER: ${{ secrets.AI_PROVIDER || 'claude' }}
+          # Claude/Anthropic (default, FREE tier available)
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          CLAUDE_MODEL: ${{ secrets.CLAUDE_MODEL || 'claude-3-5-sonnet-20241022' }}
+          # OpenAI (fallback)
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-4o' }}
+          # Google Gemini (alternative, FREE tier available)
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-1.5-pro' }}
+          # Other
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
           TASK: ${{ github.event.client_payload.task }}
           REQUESTER: ${{ github.event.client_payload.requester }}
-        run: node .github/agent/agent.js
+        run: node --input-type=module .github/agent/agent.js
+        continue-on-error: true
+
+      - name: Notify Slack on agent failure
+        if: steps.agent.outcome != 'success'
+        run: |
+          curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\":\"❌ AICODE Agent failed before tests. <https://github.com/htilly/SlackONOS/actions/runs/${{ github.run_id }}|View logs>\"}"
 
       - name: Run tests
         id: tests
+        if: steps.agent.outcome == 'success'
         run: npm test
         continue-on-error: true
 
       - name: Create PR if tests pass
         id: cpr
-        if: steps.tests.outcome == 'success'
+        if: steps.agent.outcome == 'success' && steps.tests.outcome == 'success'
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -59,14 +88,14 @@ jobs:
             Review the changes carefully before merging.
 
       - name: Notify Slack on success
-        if: steps.tests.outcome == 'success'
+        if: steps.agent.outcome == 'success' && steps.tests.outcome == 'success'
         run: |
           curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
             -d "{\"text\":\"✅ AICODE PR created: <https://github.com/htilly/SlackONOS/pull/${{ steps.cpr.outputs.pull-request-number }}|#${{ steps.cpr.outputs.pull-request-number }}>\"}"
 
-      - name: Notify Slack on failure
-        if: steps.tests.outcome != 'success'
+      - name: Notify Slack on test failure
+        if: steps.agent.outcome == 'success' && steps.tests.outcome != 'success'
         run: |
           curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \

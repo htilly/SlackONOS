@@ -605,8 +605,20 @@ aicode <task description>
    ```
 
 **GitHub Secrets (Repository Settings):**
-1. `OPENAI_API_KEY` - OpenAI API key for GPT-4 (for code generation)
-2. `SLACK_WEBHOOK_URL` - Incoming webhook URL for Slack notifications
+
+**AI Provider (choose one):**
+- **Claude (Recommended - FREE tier!):** `ANTHROPIC_API_KEY` or `CLAUDE_API_KEY`
+  - Get key: https://console.anthropic.com/ ($5 free credit!)
+  - Set `AI_PROVIDER=claude` (optional, default)
+- **Google Gemini (FREE tier!):** `GEMINI_API_KEY` or `GOOGLE_API_KEY`
+  - Get key: https://aistudio.google.com/app/apikey
+  - Set `AI_PROVIDER=gemini`
+- **OpenAI (paid):** `OPENAI_API_KEY`
+  - Get key: https://platform.openai.com/api-keys
+  - Set `AI_PROVIDER=openai`
+
+**Required:**
+- `SLACK_WEBHOOK_URL` - Incoming webhook URL for Slack notifications
 
 **Setup Steps:**
 1. Go to GitHub Settings → Developer Settings → Personal Access Tokens
@@ -614,7 +626,10 @@ aicode <task description>
 3. Add token to your `config/config.json` as `githubToken`
 4. Create a Slack incoming webhook: https://api.slack.com/messaging/webhooks
 5. Add webhook URL to GitHub repository secrets as `SLACK_WEBHOOK_URL`
-6. Add OpenAI API key to GitHub repository secrets as `OPENAI_API_KEY`
+6. **Choose AI Provider:**
+   - **Claude (Recommended):** Get key from https://console.anthropic.com/ → Add as `ANTHROPIC_API_KEY` → (Optional) Set `AI_PROVIDER=claude`
+   - **Gemini:** Get key from https://aistudio.google.com/app/apikey → Add as `GEMINI_API_KEY` → Set `AI_PROVIDER=gemini`
+   - **OpenAI:** Get key from https://platform.openai.com/api-keys → Add as `OPENAI_API_KEY` → Set `AI_PROVIDER=openai`
 
 ### Safety Features
 
