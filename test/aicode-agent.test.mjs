@@ -31,6 +31,10 @@ describe('AI Code Agent Integration', function() {
       
       const content = fs.readFileSync(workflowPath, 'utf8');
       
+      // Verify it's actually a YAML file, not a JavaScript file
+      expect(content).to.not.include('#!/usr/bin/env node');
+      expect(content).to.not.include('import fs from');
+      
       // Check it's triggered by repository_dispatch
       expect(content).to.include('repository_dispatch:');
       expect(content).to.include('types: [aicode]');
