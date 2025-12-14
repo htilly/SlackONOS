@@ -171,9 +171,26 @@ try {
 }
 
 // Include all code files while excluding docs, images, and large files
-// This provides complete context while staying under 200K token limit
+// Prioritize frequently-changed files to stay under 200K token limit
 let codebaseContent = "";
 const fileList = files.split("\n").filter(f => f.trim());
+
+// Most frequently modified files (from git history analysis)
+// These are always included first
+const priorityFiles = [
+  'index.js',
+  'ai-handler.js',
+  'discord.js',
+  'spotify-async.js',
+  'soundcraft-handler.js',
+  'slack.js',
+  'lib/spotify-validator.js',
+  'lib/webauthn-handler.js',
+  'public/setup/admin.js',
+  'public/setup/admin.html',
+  'templates/help/helpTextAdmin.txt',
+  'templates/help/helpText.txt',
+];
 
 // Include code files, exclude non-code
 const includedExtensions = ['.js', '.mjs', '.json', '.txt', '.html', '.css', '.yml', '.yaml'];
@@ -184,18 +201,40 @@ const excludedPaths = [
   'coverage/',
   'dist/',
   'build/',
-  'docs/',           // Exclude documentation
-  'README.md',       // Exclude large README
-  'CHANGELOG.md',    // Exclude changelog
-  '.github/workflows/', // Exclude workflow files (too verbose)
-  'test/',           // Exclude tests
+  'docs/',
+  'README.md',
+  'CHANGELOG.md',
+  '.github/workflows/',
+  'test/',
+  'build.txt',
 ];
 
 console.log("[AGENT] Loading codebase files...");
 let filesIncluded = 0;
 let totalSize = 0;
+const includedFiles = new Set();
 
+// First pass: Include priority files
+for (const filePath of priorityFiles) {
+  if (!fileList.includes(filePath)) continue;
+
+  try {
+    const stats = fs.statSync(filePath);
+    const content = fs.readFileSync(filePath, "utf8");
+    codebaseContent += `\n\n=== ${filePath} ===\n${content}`;
+    filesIncluded++;
+    totalSize += stats.size;
+    includedFiles.add(filePath);
+    console.log(`[AGENT] Priority: ${filePath} (${Math.round(stats.size / 1024)} KB)`);
+  } catch (e) {
+    // Skip if can't read
+  }
+}
+
+// Second pass: Include other code files (skip if exceeds limit)
 for (const filePath of fileList) {
+  if (includedFiles.has(filePath)) continue;
+
   // Skip excluded paths
   if (excludedPaths.some(excluded => filePath.includes(excluded))) {
     continue;
@@ -209,10 +248,16 @@ for (const filePath of fileList) {
   try {
     const stats = fs.statSync(filePath);
 
-    // Skip very large files (>80KB), except index.js which is critical
-    if (stats.size > 80000 && filePath !== 'index.js') {
+    // Skip very large files
+    if (stats.size > 80000) {
       console.log(`[AGENT] Skipping large file: ${filePath} (${stats.size} bytes)`);
       continue;
+    }
+
+    // Stop if we're approaching token limit (~600KB ≈ 150K tokens)
+    if (totalSize > 600000) {
+      console.log(`[AGENT] Reached size limit, skipping remaining files`);
+      break;
     }
 
     const content = fs.readFileSync(filePath, "utf8");
@@ -224,7 +269,7 @@ for (const filePath of fileList) {
   }
 }
 
-console.log(`[AGENT] Included ${filesIncluded} code files (${Math.round(totalSize / 1024)} KB)`);
+console.log(`[AGENT] Included ${filesIncluded} code files (${Math.round(totalSize / 1024)} KB total)`);
 
 // Build specialized prompt for SlackONOS
 const prompt = `You are an autonomous coding agent for SlackONOS, a democratic music bot for Discord and Slack that controls Sonos speakers.
