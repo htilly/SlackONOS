@@ -213,7 +213,7 @@ try {
   output = await callAI(prompt);
 } catch (error) {
   await handleError(error, `${provider.toUpperCase()} API Error`);
-  return; // Exit already handled
+  // handleError calls process.exit(1), so we never reach here
 }
 
 // Extract diff from potential markdown code blocks
@@ -230,7 +230,7 @@ if (output.includes("```")) {
 if (!diff.includes("diff --git")) {
   const errorMsg = `Model did not return a valid diff. Output was:\n\`\`\`\n${output.substring(0, 500)}\n\`\`\``;
   await handleError(new Error(errorMsg), "Invalid Diff Format");
-  return;
+  // handleError calls process.exit(1), so we never reach here
 }
 
 // Safety check: Ensure we're not touching forbidden files
@@ -248,7 +248,7 @@ for (const pattern of forbiddenPatterns) {
       new Error(`Attempted to modify forbidden file matching ${pattern}`),
       "Safety Violation"
     );
-    return;
+    // handleError calls process.exit(1), so we never reach here
   }
 }
 
@@ -259,7 +259,7 @@ if (linesChanged > 300) {
     new Error(`Too many lines changed (${linesChanged} > 300). Maximum allowed is 300 lines.`),
     "Safety Violation"
   );
-  return;
+  // handleError calls process.exit(1), so we never reach here
 }
 
 console.log(`[AGENT] Generated diff with ${linesChanged} lines changed`);
@@ -273,7 +273,7 @@ try {
 } catch (err) {
   const errorMsg = `Failed to apply patch: ${err.message}\n\nDiff preview:\n\`\`\`\n${diff.substring(0, 500)}\n\`\`\``;
   await handleError(new Error(errorMsg), "Patch Application Failed");
-  return;
+  // handleError calls process.exit(1), so we never reach here
 }
 
 // Show diff for logs
