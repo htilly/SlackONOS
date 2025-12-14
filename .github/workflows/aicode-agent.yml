@@ -76,9 +76,12 @@ jobs:
       - name: Notify Slack on agent failure
         if: steps.agent.outcome != 'success'
         run: |
-          # Use jq to safely construct JSON payload
-          TASK="${{ github.event.client_payload.task || github.event.client_payload.original_task }}"
-          REQUESTER="${{ github.event.client_payload.requester }}"
+          # Write event payload to JSON file to avoid shell quoting issues
+          echo '${{ toJSON(github.event.client_payload) }}' > /tmp/event_payload.json
+          
+          # Extract values using jq (handles all escaping automatically)
+          TASK=$(jq -r '.task // .original_task // "Unknown task"' /tmp/event_payload.json)
+          REQUESTER=$(jq -r '.requester // "unknown"' /tmp/event_payload.json)
           RUN_ID="${{ github.run_id }}"
           
           PAYLOAD=$(jq -n \
@@ -199,10 +202,14 @@ jobs:
       - name: Notify Slack on success
         if: steps.agent.outcome == 'success' && steps.tests.outcome == 'success' && steps.secrets-check.outcome == 'success'
         run: |
+          # Write event payload to JSON file to avoid shell quoting issues
+          echo '${{ toJSON(github.event.client_payload) }}' > /tmp/event_payload.json
+          
+          # Extract values using jq (handles all escaping automatically)
           CHANGED_FILES="${{ steps.changed-files.outputs.files }}"
-          TASK="${{ github.event.client_payload.task || github.event.client_payload.original_task }}"
-          ORIGINAL_TASK="${{ github.event.client_payload.original_task || 'N/A' }}"
-          REQUESTER="${{ github.event.client_payload.requester }}"
+          TASK=$(jq -r '.task // .original_task // "Unknown task"' /tmp/event_payload.json)
+          ORIGINAL_TASK=$(jq -r '.original_task // .task // "N/A"' /tmp/event_payload.json)
+          REQUESTER=$(jq -r '.requester // "unknown"' /tmp/event_payload.json)
           PR_NUMBER="${{ steps.cpr.outputs.pull-request-number }}"
           RUN_ID="${{ github.run_id }}"
           
@@ -241,8 +248,12 @@ jobs:
       - name: Notify Slack on validation failure
         if: steps.agent.outcome == 'success' && steps.secrets-check.outcome != 'success'
         run: |
-          TASK="${{ github.event.client_payload.task || github.event.client_payload.original_task }}"
-          REQUESTER="${{ github.event.client_payload.requester }}"
+          # Write event payload to JSON file to avoid shell quoting issues
+          echo '${{ toJSON(github.event.client_payload) }}' > /tmp/event_payload.json
+          
+          # Extract values using jq (handles all escaping automatically)
+          TASK=$(jq -r '.task // .original_task // "Unknown task"' /tmp/event_payload.json)
+          REQUESTER=$(jq -r '.requester // "unknown"' /tmp/event_payload.json)
           RUN_ID="${{ github.run_id }}"
           
           PAYLOAD=$(jq -n \
@@ -277,8 +288,12 @@ jobs:
       - name: Notify Slack on test failure
         if: steps.agent.outcome == 'success' && steps.secrets-check.outcome == 'success' && steps.tests.outcome != 'success'
         run: |
-          TASK="${{ github.event.client_payload.task || github.event.client_payload.original_task }}"
-          REQUESTER="${{ github.event.client_payload.requester }}"
+          # Write event payload to JSON file to avoid shell quoting issues
+          echo '${{ toJSON(github.event.client_payload) }}' > /tmp/event_payload.json
+          
+          # Extract values using jq (handles all escaping automatically)
+          TASK=$(jq -r '.task // .original_task // "Unknown task"' /tmp/event_payload.json)
+          REQUESTER=$(jq -r '.requester // "unknown"' /tmp/event_payload.json)
           RUN_ID="${{ github.run_id }}"
           
           PAYLOAD=$(jq -n \

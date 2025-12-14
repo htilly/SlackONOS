@@ -1050,11 +1050,16 @@ if (validationResult.errors.length > 0 || diff.match(/\+\+\+ b\/[^\n]*$/m)) {
   console.warn(`[AGENT] Diff length: ${diffLength} characters`);
   console.warn(`[AGENT] Last 5 lines:\n${lastLines}`);
   
-  // Try to detect if this is a token limit issue
-  if (diffLength > 7000 && diff.match(/\+\+\+ b\/[^\n]*$/m)) {
-    const errorMsg = `Diff appears to be truncated (likely hit token limit). The AI model may have generated an incomplete diff.\n\nErrors:\n${validationResult.errors.join('\n')}\n\nDiff preview (last 500 chars):\n\`\`\`\n${diff.substring(Math.max(0, diffLength - 500))}\n\`\`\`\n\nSuggestion: Try breaking the task into smaller parts or increase max_tokens.`;
+  // Try to detect if this is a token limit or truncation issue
+  // Check for incomplete +++ b/ lines (truncated file paths)
+  const incompletePathMatch = diff.match(/\+\+\+ b\/[^\n]{1,10}$/m);
+  if (incompletePathMatch || (diffLength > 7000 && diff.match(/\+\+\+ b\/[^\n]*$/m))) {
+    const truncationReason = incompletePathMatch 
+      ? "Diff appears to be truncated mid-file-path (model stopped generating)"
+      : "Diff appears to be truncated (likely hit token limit)";
+    const errorMsg = `${truncationReason}. The AI model may have generated an incomplete diff.\n\nErrors:\n${validationResult.errors.join('\n')}\n\nDiff preview (last 500 chars):\n\`\`\`\n${diff.substring(Math.max(0, diffLength - 500))}\n\`\`\`\n\nPossible causes:\n- Model hit output token limit (check max_tokens setting)\n- Low API credits causing early termination\n- Input context too large, leaving insufficient room for output\n- Model stopped generating for other reasons\n\nSuggestions:\n- Check Anthropic account credits\n- Reduce input context size (fewer files)\n- Break task into smaller parts\n- Verify max_tokens is sufficient (currently 180K)`;
     const errorDetails = formatErrorDetails(new Error(errorMsg), { diff: diff.substring(Math.max(0, diffLength - 1000)), files: validationResult.stats.filesChanged });
-    await handleError(new Error(errorMsg), "Incomplete Diff (Token Limit?)", { diff: diff.substring(Math.max(0, diffLength - 1000)), errorDetails });
+    await handleError(new Error(errorMsg), "Incomplete Diff (Truncated)", { diff: diff.substring(Math.max(0, diffLength - 1000)), errorDetails });
     // handleError calls process.exit(1), so we never reach here
   }
 }
