@@ -80,19 +80,26 @@ jobs:
           title: "AICODE: ${{ github.event.client_payload.task }}"
           body: |
             Autonomous code changes requested by @${{ github.event.client_payload.requester }}
-            
+
             **Task:** ${{ github.event.client_payload.task }}
             **Tests:** ✅ Passed
             **Agent Run:** ${{ github.run_id }}
-            
-            Review the changes carefully before merging.
+
+            This PR will be automatically merged.
+
+      - name: Auto-merge PR
+        if: steps.agent.outcome == 'success' && steps.tests.outcome == 'success' && steps.cpr.outputs.pull-request-number != ''
+        run: |
+          gh pr merge ${{ steps.cpr.outputs.pull-request-number }} --squash --auto
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Notify Slack on success
         if: steps.agent.outcome == 'success' && steps.tests.outcome == 'success'
         run: |
           curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
-            -d "{\"text\":\"✅ AICODE PR created: <https://github.com/htilly/SlackONOS/pull/${{ steps.cpr.outputs.pull-request-number }}|#${{ steps.cpr.outputs.pull-request-number }}>\"}"
+            -d "{\"text\":\"✅ AICODE PR merged: <https://github.com/htilly/SlackONOS/pull/${{ steps.cpr.outputs.pull-request-number }}|#${{ steps.cpr.outputs.pull-request-number }}>\"}"
 
       - name: Notify Slack on test failure
         if: steps.agent.outcome == 'success' && steps.tests.outcome != 'success'
