@@ -35,6 +35,6 @@
 *🗣️ Fun & Extras:*
 > `tts [message]` (or `say`) - Make Sonos speak a message aloud.
 
-🌐 _All these settings can also be changed through the Web Admin Panel: {{adminUrl}}_
+🌐 _All these settings can also be changed through the Web Admin Panel._
 
 💡 _Suggestions or bugs? <https://github.com/htilly/SlackONOS|GitHub>_
