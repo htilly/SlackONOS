@@ -71,13 +71,26 @@ jobs:
       - name: Trigger main agent workflow
         if: always()
         run: |
+          # Read enhanced task from JSON output to avoid shell quoting issues
+          TASK_JSON="${{ steps.preprocess.outputs.task_json }}"
+          
+          if [ -n "$TASK_JSON" ] && [ "$TASK_JSON" != "null" ]; then
+            # Extract values from JSON using jq (handles all escaping automatically)
+            ENHANCED_TASK=$(echo "$TASK_JSON" | jq -r '.enhanced // empty')
+            ORIGINAL_TASK=$(echo "$TASK_JSON" | jq -r '.original // empty')
+            CONFLUENCE_URL=$(echo "$TASK_JSON" | jq -r '.confluenceUrl // "N/A"')
+          else
+            # Fallback to outputs if JSON not available
           ENHANCED_TASK="${{ steps.preprocess.outputs.enhanced_task }}"
           ORIGINAL_TASK="${{ github.event.client_payload.task }}"
+            CONFLUENCE_URL="${{ steps.preprocess.outputs.confluence_url }}"
+          fi
+          
+          # Use GitHub Actions context for other values (these are safe)
           REQUESTER="${{ github.event.client_payload.requester }}"
           CHANNEL="${{ github.event.client_payload.channel }}"
           TIMESTAMP="${{ github.event.client_payload.timestamp }}"
           RUN_ID="${{ github.run_id }}"
-          CONFLUENCE_URL="${{ steps.preprocess.outputs.confluence_url }}"
 
           # Use jq to properly construct JSON payload with proper escaping
           PAYLOAD=$(jq -n \
@@ -107,3 +120,18 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD"
+
+      - name: Notify Slack on preprocessing completion
+        if: always()
+        run: |
+          if [ "${{ steps.preprocess.outcome }}" == "success" ]; then
+            curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"text\":\"📝 Task preprocessed and enhanced. Triggering code generation...\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"📝 *Task Preprocessing Complete*\\n\\n*Original:* ${{ github.event.client_payload.task }}\\n\\n*Enhanced:* ${{ steps.preprocess.outputs.enhanced_task }}\"}}]}"
+          else
+            curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"text\":\"⚠️ Preprocessing failed, using original task\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"⚠️ *Preprocessing Warning*\\n\\nPreprocessing failed, but code generation will continue with original task.\"}}]}"
+          fi
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
