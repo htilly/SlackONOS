@@ -15,11 +15,16 @@ jobs:
     - name: Prepare requirement data
       id: requirement
       run: |
-        ENHANCED_TASK="${{ github.event.client_payload.task }}"
-        ORIGINAL_TASK="${{ github.event.client_payload.original_task }}"
-        REQUESTER="${{ github.event.client_payload.requester }}"
-        TIMESTAMP="${{ github.event.client_payload.timestamp }}"
-        PREPROCESSING_RUN_ID="${{ github.event.client_payload.preprocessing_run_id }}"
+        # Use jq to safely extract values from event payload to avoid shell quoting issues
+        # Write event payload to temp file first
+        echo '${{ toJSON(github.event.client_payload) }}' > /tmp/event_payload.json
+        
+        # Extract values using jq (handles all escaping automatically)
+        ENHANCED_TASK=$(jq -r '.task // .original_task // ""' /tmp/event_payload.json)
+        ORIGINAL_TASK=$(jq -r '.original_task // .task // ""' /tmp/event_payload.json)
+        REQUESTER=$(jq -r '.requester // ""' /tmp/event_payload.json)
+        TIMESTAMP=$(jq -r '.timestamp // ""' /tmp/event_payload.json)
+        PREPROCESSING_RUN_ID=$(jq -r '.preprocessing_run_id // ""' /tmp/event_payload.json)
         
         # Generate a title from the enhanced task (first line or first 100 chars)
         TITLE=$(echo "$ENHANCED_TASK" | head -n 1 | cut -c 1-100)
