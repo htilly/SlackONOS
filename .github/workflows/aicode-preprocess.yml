@@ -61,7 +61,6 @@ jobs:
           ENHANCED_TASK="${{ steps.preprocess.outputs.enhanced_task }}"
           ORIGINAL_TASK="${{ github.event.client_payload.task }}"
           
-          # Escape JSON special characters in task strings
           # Use jq to properly construct JSON payload with proper escaping
           PAYLOAD=$(jq -n \
             --arg event_type "aicode-enhanced" \
