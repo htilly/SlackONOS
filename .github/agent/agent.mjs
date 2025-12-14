@@ -981,6 +981,17 @@ async function callAI(promptText) {
       temperature: 0.2,
       messages: [{ role: "user", content: promptText }],
     });
+    
+    // Check if response was truncated
+    if (response.stop_reason === "max_tokens") {
+      console.warn(`[AGENT] WARNING: Response was truncated due to max_tokens limit`);
+      console.warn(`[AGENT] Response length: ${response.content[0].text.length} characters`);
+    } else if (response.stop_reason === "stop_sequence") {
+      console.log(`[AGENT] Response stopped at stop sequence`);
+    } else {
+      console.log(`[AGENT] Response completed normally (stop_reason: ${response.stop_reason})`);
+    }
+    
     return response.content[0].text;
   } else if (provider === "openai") {
     const response = await aiClient.chat.completions.create({
@@ -1054,17 +1065,59 @@ if (validationResult.errors.length > 0 || diff.match(/\+\+\+ b\/[^\n]*$/m)) {
   console.warn(`[AGENT] Diff length: ${diffLength} characters`);
   console.warn(`[AGENT] Last 5 lines:\n${lastLines}`);
   
-  // Try to detect if this is a token limit or truncation issue
-  // Check for incomplete +++ b/ lines (truncated file paths)
-  const incompletePathMatch = diff.match(/\+\+\+ b\/[^\n]{1,10}$/m);
-  if (incompletePathMatch || (diffLength > 7000 && diff.match(/\+\+\+ b\/[^\n]*$/m))) {
-    const truncationReason = incompletePathMatch 
-      ? "Diff appears to be truncated mid-file-path (model stopped generating)"
-      : "Diff appears to be truncated (likely hit token limit)";
-    const errorMsg = `${truncationReason}. The AI model may have generated an incomplete diff.\n\nErrors:\n${validationResult.errors.join('\n')}\n\nDiff preview (last 500 chars):\n\`\`\`\n${diff.substring(Math.max(0, diffLength - 500))}\n\`\`\`\n\nPossible causes:\n- Model hit output token limit (check max_tokens setting)\n- Low API credits causing early termination\n- Input context too large, leaving insufficient room for output\n- Model stopped generating for other reasons\n\nSuggestions:\n- Check Anthropic account credits\n- Reduce input context size (fewer files)\n- Break task into smaller parts\n- Verify max_tokens is sufficient (currently 180K)`;
-    const errorDetails = formatErrorDetails(new Error(errorMsg), { diff: diff.substring(Math.max(0, diffLength - 1000)), files: validationResult.stats.filesChanged });
-    await handleError(new Error(errorMsg), "Incomplete Diff (Truncated)", { diff: diff.substring(Math.max(0, diffLength - 1000)), errorDetails });
-    // handleError calls process.exit(1), so we never reach here
+  // Try to auto-fix incomplete or missing +++ b/ lines
+  const lines = diff.split('\n');
+  let needsFix = false;
+  
+  // Check for incomplete +++ b/ lines or missing +++ b/ lines after --- a/ lines
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith('--- a/')) {
+      const oldPath = lines[i].substring(6).trim();
+      const nextLine = i + 1 < lines.length ? lines[i + 1] : '';
+      
+      // Check if +++ b/ line is missing or incomplete
+      if (!nextLine.startsWith('+++ b/')) {
+        // Missing +++ b/ line - insert it
+        lines.splice(i + 1, 0, `+++ b/${oldPath}`);
+        needsFix = true;
+        console.log(`[AGENT] Auto-fixed missing +++ b/ line for: ${oldPath}`);
+        i++; // Skip the line we just added
+      } else if (nextLine.startsWith('+++ b/') && nextLine.length < 20) {
+        // Incomplete +++ b/ line - fix it
+        lines[i + 1] = `+++ b/${oldPath}`;
+        needsFix = true;
+        console.log(`[AGENT] Auto-fixed incomplete +++ b/ line: ${lines[i + 1]}`);
+      }
+    }
+  }
+  
+  // If we made fixes, update diff and re-validate
+  if (needsFix) {
+    diff = lines.join('\n');
+    const fixedValidation = validateDiff(diff);
+    if (fixedValidation.isValid) {
+      console.log(`[AGENT] Diff validation passed after auto-fix`);
+      // Update validation result
+      Object.assign(validationResult, fixedValidation);
+    } else {
+      console.warn(`[AGENT] Auto-fix did not resolve all validation errors`);
+      // Update validation result with new errors
+      validationResult.errors = fixedValidation.errors;
+    }
+  }
+  
+  // If still invalid after auto-fix attempt, report error
+  if (!validationResult.isValid) {
+    const incompletePathMatchAfterFix = diff.match(/\+\+\+ b\/[^\n]{1,10}$/m);
+    if (incompletePathMatchAfterFix || (diffLength > 7000 && diff.match(/\+\+\+ b\/[^\n]*$/m))) {
+      const truncationReason = incompletePathMatchAfterFix 
+        ? "Diff appears to be truncated mid-file-path (model stopped generating)"
+        : "Diff appears to be truncated (likely hit token limit)";
+      const errorMsg = `${truncationReason}. The AI model may have generated an incomplete diff.\n\nErrors:\n${validationResult.errors.join('\n')}\n\nDiff preview (last 500 chars):\n\`\`\`\n${diff.substring(Math.max(0, diffLength - 500))}\n\`\`\`\n\nPossible causes:\n- Model hit output token limit (check max_tokens setting)\n- Input context too large, leaving insufficient room for output\n- Model stopped generating for other reasons\n\nSuggestions:\n- Reduce input context size (fewer files) - already reduced to 400KB\n- Break task into smaller parts\n- Verify max_tokens is sufficient (currently 180K)`;
+      const errorDetails = formatErrorDetails(new Error(errorMsg), { diff: diff.substring(Math.max(0, diffLength - 1000)), files: validationResult.stats.filesChanged });
+      await handleError(new Error(errorMsg), "Incomplete Diff (Truncated)", { diff: diff.substring(Math.max(0, diffLength - 1000)), errorDetails });
+      // handleError calls process.exit(1), so we never reach here
+    }
   }
 }
 
