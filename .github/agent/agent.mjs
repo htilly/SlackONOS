@@ -170,6 +170,37 @@ try {
   console.log("[AGENT] No .cursorrules file found");
 }
 
+// Try to identify and read relevant files based on the task
+// This helps the AI generate accurate diffs with correct line numbers
+let relevantFiles = "";
+const taskLower = task.toLowerCase();
+
+// Common file patterns to check based on task keywords
+const filePatterns = [
+  { keywords: ["help", "admin", "command"], files: ["templates/help/helpTextAdmin.txt", "templates/help/helpText.txt"] },
+  { keywords: ["config", "setting"], files: ["config/config.json", "src/config-handler.js"] },
+  { keywords: ["slack", "message", "notification"], files: ["src/slack-handler.js", "src/notification-handler.js"] },
+  { keywords: ["discord"], files: ["src/discord-handler.js"] },
+  { keywords: ["sonos", "speaker", "playback"], files: ["src/sonos-handler.js"] },
+  { keywords: ["route", "endpoint", "web", "admin panel"], files: ["src/webserver.js", "public/admin.html"] },
+  { keywords: ["queue", "track"], files: ["src/queue-handler.js"] },
+  { keywords: ["vote", "voting"], files: ["src/voting-handler.js"] },
+];
+
+for (const pattern of filePatterns) {
+  if (pattern.keywords.some(keyword => taskLower.includes(keyword))) {
+    for (const filePath of pattern.files) {
+      try {
+        const content = fs.readFileSync(filePath, "utf8");
+        relevantFiles += `\n\n=== ${filePath} ===\n${content}`;
+        console.log(`[AGENT] Including content of ${filePath} for context`);
+      } catch (e) {
+        // File doesn't exist, skip it
+      }
+    }
+  }
+}
+
 // Build specialized prompt for SlackONOS
 const prompt = `You are an autonomous coding agent for SlackONOS, a democratic music bot for Discord and Slack that controls Sonos speakers.
 
@@ -193,6 +224,8 @@ ${files}
 
 Recent Commits:
 ${recentCommits}
+
+${relevantFiles ? `RELEVANT FILE CONTENTS (use these for accurate line numbers):\n${relevantFiles}` : ''}
 
 TASK FROM ADMIN (${requester}):
 ${task}
