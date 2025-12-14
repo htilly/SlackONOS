@@ -39,6 +39,7 @@ jobs:
           echo "Original task: ${{ github.event.client_payload.original_task || github.event.client_payload.task }}"
           echo "Enhanced task: ${{ github.event.client_payload.task }}"
           echo "Preprocessing run: ${{ github.event.client_payload.preprocessing_run_id || 'N/A' }}"
+          echo "Confluence page: ${{ github.event.client_payload.confluence_url || 'N/A' }}"
 
       - name: Run AI Agent
         id: agent
@@ -128,6 +129,7 @@ jobs:
 
             **Task:** ${{ github.event.client_payload.task || github.event.client_payload.original_task }}
             **Original Task:** ${{ github.event.client_payload.original_task || 'N/A' }}
+            **Requirements:** ${{ github.event.client_payload.confluence_url != 'N/A' && github.event.client_payload.confluence_url || 'Not documented' }}
             **Tests:** ✅ Passed
             **Validation:** ✅ Passed
             **Secrets Check:** ✅ Passed

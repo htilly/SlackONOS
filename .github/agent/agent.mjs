@@ -967,7 +967,7 @@ async function callAI(promptText) {
   if (provider === "claude") {
     const response = await aiClient.messages.create({
       model: aiModel,
-      max_tokens: 16384, // Increased for larger diffs
+      max_tokens: 32768, // Increased to 32K for larger diffs
       temperature: 0.2,
       messages: [{ role: "user", content: promptText }],
     });
