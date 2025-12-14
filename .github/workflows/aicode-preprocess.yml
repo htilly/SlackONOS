@@ -60,7 +60,11 @@ jobs:
         run: |
           ENHANCED_TASK="${{ steps.preprocess.outputs.enhanced_task }}"
           ORIGINAL_TASK="${{ github.event.client_payload.task }}"
-          
+          REQUESTER="${{ github.event.client_payload.requester }}"
+          CHANNEL="${{ github.event.client_payload.channel }}"
+          TIMESTAMP="${{ github.event.client_payload.timestamp }}"
+          RUN_ID="${{ github.run_id }}"
+
           # Use jq to properly construct JSON payload with proper escaping
           PAYLOAD=$(jq -n \
             --arg event_type "aicode-enhanced" \
@@ -81,41 +85,9 @@ jobs:
                 preprocessing_run_id: $preprocessing_run_id
               }
             }')
-          
-          curl -X POST "https://api.github.com/repos/${{ github.repository }}/dispatches" \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD" 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
-          ORIGINAL_TASK_ESCAPED=$(echo "$ORIGINAL_TASK" | sed 's/"/\\"/g')
-          
-          curl -X POST "https://api.github.com/repos/${{ github.repository }}/dispatches" \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"event_type\": \"aicode-enhanced\",
-              \"client_payload\": {
-                \"task\": \"$ENHANCED_TASK_ESCAPED\",
-                \"original_task\": \"$ORIGINAL_TASK_ESCAPED\",
-                \"requester\": \"${{ github.event.client_payload.requester }}\",
-                \"channel\": \"${{ github.event.client_payload.channel }}\",
-                \"timestamp\": \"${{ github.event.client_payload.timestamp }}\",
-                \"preprocessing_run_id\": \"${{ github.run_id }}\"
-              }
-            }"
 
-      - name: Notify Slack on preprocessing completion
-        if: always()
-        run: |
-          if [ "${{ steps.preprocess.outcome }}" == "success" ]; then
-            curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
-              -H "Content-Type: application/json" \
-              -d "{\"text\":\"📝 Task preprocessed and enhanced. Triggering code generation...\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"📝 *Task Preprocessing Complete*\\n\\n*Original:* ${{ github.event.client_payload.task }}\\n\\n*Enhanced:* ${{ steps.preprocess.outputs.enhanced_task }}\"}}]}"
-          else
-            curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
-              -H "Content-Type: application/json" \
-              -d "{\"text\":\"⚠️ Preprocessing failed, using original task\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"⚠️ *Preprocessing Warning*\\n\\nPreprocessing failed, but code generation will continue with original task.\"}}]}"
-          fi
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          curl -X POST "https://api.github.com/repos/${{ github.repository }}/dispatches" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD"
