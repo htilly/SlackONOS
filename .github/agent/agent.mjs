@@ -198,6 +198,12 @@ function validateDiff(diff) {
     
     const newPath = newPathLine.substring(6).trim();
     
+    // Check if the path is complete (not truncated)
+    if (!newPath || newPath.length < 3 || newPath.includes('\n') || newPath.match(/^[a-z]$/i)) {
+      errors.push(`Incomplete +++ b/ line detected: "${newPathLine}" - file name appears to be truncated or missing`);
+      continue;
+    }
+    
     // Check if the section has at least one hunk
     const hasHunk = section.includes('@@');
     if (!hasHunk && !section.includes('new file') && !section.includes('deleted file')) {

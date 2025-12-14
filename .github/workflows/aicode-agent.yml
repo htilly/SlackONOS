@@ -76,9 +76,39 @@ jobs:
       - name: Notify Slack on agent failure
         if: steps.agent.outcome != 'success'
         run: |
+          # Use jq to safely construct JSON payload
+          TASK="${{ github.event.client_payload.task || github.event.client_payload.original_task }}"
+          REQUESTER="${{ github.event.client_payload.requester }}"
+          RUN_ID="${{ github.run_id }}"
+          
+          PAYLOAD=$(jq -n \
+            --arg text "❌ AICODE Agent failed before tests" \
+            --arg task "$TASK" \
+            --arg requester "$REQUESTER" \
+            --arg run_url "https://github.com/htilly/SlackONOS/actions/runs/$RUN_ID" \
+            '{
+              text: $text,
+              blocks: [
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ("❌ *AICODE Agent Failed*\n\n*Task:* " + $task + "\n*Requested by:* " + $requester + "\n*Stage:* Agent execution\n\nCheck the logs for detailed error information.")
+                  }
+                },
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ("<" + $run_url + "|View GitHub Actions logs>")
+                  }
+                }
+              ]
+            }')
+          
           curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
-            -d "{\"text\":\"❌ AICODE Agent failed before tests\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"❌ *AICODE Agent Failed*\\n\\n*Task:* ${{ github.event.client_payload.task || github.event.client_payload.original_task }}\\n*Requested by:* ${{ github.event.client_payload.requester }}\\n*Stage:* Agent execution\\n\\nCheck the logs for detailed error information.\"}},{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"<https://github.com/htilly/SlackONOS/actions/runs/${{ github.run_id }}|View GitHub Actions logs>\"}}]}"
+            -d "$PAYLOAD"
 
       - name: Validate diff format
         id: validate
@@ -170,20 +200,112 @@ jobs:
         if: steps.agent.outcome == 'success' && steps.tests.outcome == 'success' && steps.secrets-check.outcome == 'success'
         run: |
           CHANGED_FILES="${{ steps.changed-files.outputs.files }}"
+          TASK="${{ github.event.client_payload.task || github.event.client_payload.original_task }}"
+          ORIGINAL_TASK="${{ github.event.client_payload.original_task || 'N/A' }}"
+          REQUESTER="${{ github.event.client_payload.requester }}"
+          PR_NUMBER="${{ steps.cpr.outputs.pull-request-number }}"
+          RUN_ID="${{ github.run_id }}"
+          
+          PAYLOAD=$(jq -n \
+            --arg text "✅ AICODE PR created: <https://github.com/htilly/SlackONOS/pull/$PR_NUMBER|#$PR_NUMBER>" \
+            --arg task "$TASK" \
+            --arg original_task "$ORIGINAL_TASK" \
+            --arg requester "$REQUESTER" \
+            --arg pr_number "$PR_NUMBER" \
+            --arg changed_files "$CHANGED_FILES" \
+            --arg run_id "$RUN_ID" \
+            '{
+              text: $text,
+              blocks: [
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ("✅ *AICODE Agent Success*\n\n*Task:* " + $task + "\n*Original:* " + $original_task + "\n*Requested by:* " + $requester + "\n*PR:* <https://github.com/htilly/SlackONOS/pull/" + $pr_number + "|#" + $pr_number + ">\n*Files changed:* " + $changed_files)
+                  }
+                },
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ("<https://github.com/htilly/SlackONOS/actions/runs/" + $run_id + "|View workflow run>")
+                  }
+                }
+              ]
+            }')
+          
           curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
-            -d "{\"text\":\"✅ AICODE PR created: <https://github.com/htilly/SlackONOS/pull/${{ steps.cpr.outputs.pull-request-number }}|#${{ steps.cpr.outputs.pull-request-number }}>\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"✅ *AICODE Agent Success*\\n\\n*Task:* ${{ github.event.client_payload.task || github.event.client_payload.original_task }}\\n*Original:* ${{ github.event.client_payload.original_task || 'N/A' }}\\n*Requested by:* ${{ github.event.client_payload.requester }}\\n*PR:* <https://github.com/htilly/SlackONOS/pull/${{ steps.cpr.outputs.pull-request-number }}|#${{ steps.cpr.outputs.pull-request-number }}>\\n*Files changed:* ${CHANGED_FILES}\"}},{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"<https://github.com/htilly/SlackONOS/actions/runs/${{ github.run_id }}|View workflow run>\"}}]}"
+            -d "$PAYLOAD"
 
       - name: Notify Slack on validation failure
         if: steps.agent.outcome == 'success' && steps.secrets-check.outcome != 'success'
         run: |
+          TASK="${{ github.event.client_payload.task || github.event.client_payload.original_task }}"
+          REQUESTER="${{ github.event.client_payload.requester }}"
+          RUN_ID="${{ github.run_id }}"
+          
+          PAYLOAD=$(jq -n \
+            --arg text "🔒 AICODE failed: Security validation failed" \
+            --arg task "$TASK" \
+            --arg requester "$REQUESTER" \
+            --arg run_id "$RUN_ID" \
+            '{
+              text: $text,
+              blocks: [
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ("🔒 *AICODE Security Validation Failed*\n\n*Task:* " + $task + "\n*Requested by:* " + $requester + "\n*Issue:* Potential secrets detected in generated code\n\nReview the changes manually before proceeding.")
+                  }
+                },
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ("<https://github.com/htilly/SlackONOS/actions/runs/" + $run_id + "|View GitHub Actions logs>")
+                  }
+                }
+              ]
+            }')
+          
           curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
-            -d "{\"text\":\"🔒 AICODE failed: Security validation failed\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"🔒 *AICODE Security Validation Failed*\\n\\n*Task:* ${{ github.event.client_payload.task || github.event.client_payload.original_task }}\\n*Requested by:* ${{ github.event.client_payload.requester }}\\n*Issue:* Potential secrets detected in generated code\\n\\nReview the changes manually before proceeding.\"}},{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"<https://github.com/htilly/SlackONOS/actions/runs/${{ github.run_id }}|View GitHub Actions logs>\"}}]}"
+            -d "$PAYLOAD"
 
       - name: Notify Slack on test failure
         if: steps.agent.outcome == 'success' && steps.secrets-check.outcome == 'success' && steps.tests.outcome != 'success'
         run: |
+          TASK="${{ github.event.client_payload.task || github.event.client_payload.original_task }}"
+          REQUESTER="${{ github.event.client_payload.requester }}"
+          RUN_ID="${{ github.run_id }}"
+          
+          PAYLOAD=$(jq -n \
+            --arg text "❌ AICODE failed: Tests didn't pass" \
+            --arg task "$TASK" \
+            --arg requester "$REQUESTER" \
+            --arg run_id "$RUN_ID" \
+            '{
+              text: $text,
+              blocks: [
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ("❌ *AICODE Test Failure*\n\n*Task:* " + $task + "\n*Requested by:* " + $requester + "\n*Issue:* Generated code failed tests\n\nReview the test output and adjust the changes.")
+                  }
+                },
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ("<https://github.com/htilly/SlackONOS/actions/runs/" + $run_id + "|View GitHub Actions logs>")
+                  }
+                }
+              ]
+            }')
+          
           curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
-            -d "{\"text\":\"❌ AICODE failed: Tests didn't pass\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"❌ *AICODE Test Failure*\\n\\n*Task:* ${{ github.event.client_payload.task || github.event.client_payload.original_task }}\\n*Requested by:* ${{ github.event.client_payload.requester }}\\n*Issue:* Generated code failed tests\\n\\nReview the test output and adjust the changes.\"}},{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"<https://github.com/htilly/SlackONOS/actions/runs/${{ github.run_id }}|View GitHub Actions logs>\"}}]}"
+            -d "$PAYLOAD"
