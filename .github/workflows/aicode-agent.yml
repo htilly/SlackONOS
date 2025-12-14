@@ -1,107 +1,180 @@
-name: AICODE Agent
+#!/usr/bin/env node
 
-on:
-  repository_dispatch:
-    types: [aicode]
+import fs from "fs";
+import { execSync } from "child_process";
+import process from "process";
 
-jobs:
-  agent:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
+/* =========================
+   Config & validation
+========================= */
 
-    steps:
-      - name: Checkout develop
-        uses: actions/checkout@v4
-        with:
-          ref: develop
-          fetch-depth: 0
+const {
+  AI_PROVIDER = "claude",
+  CLAUDE_API_KEY,
+  ANTHROPIC_API_KEY,
+  CLAUDE_MODEL = "claude-sonnet-4-5",
+  TASK,
+  REQUESTER,
+} = process.env;
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
+const apiKey = CLAUDE_API_KEY || ANTHROPIC_API_KEY;
 
-      - name: Install dependencies
-        run: npm ci
+if (!TASK) {
+  throw new Error("TASK env var is required");
+}
 
-      - name: Install agent dependencies
-        working-directory: .github/agent
-        run: npm install
+if (AI_PROVIDER !== "claude") {
+  throw new Error(`Only Claude supported right now, got: ${AI_PROVIDER}`);
+}
 
-      - name: Run AI Agent
-        id: agent
-        env:
-          # Provider selection
-          AI_PROVIDER: ${{ secrets.AI_PROVIDER || 'claude' }}
+if (!apiKey) {
+  throw new Error("Missing CLAUDE_API_KEY / ANTHROPIC_API_KEY");
+}
 
-          # === Claude / Anthropic ===
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
-          CLAUDE_MODEL: ${{ secrets.CLAUDE_MODEL || 'claude-sonnet-4-5' }}
+const allowedClaudeModels = [
+  "claude-sonnet-4-5",
+  "claude-3-5-sonnet-20240620",
+  "claude-3-sonnet-20240229",
+  "claude-3-opus-20240229",
+  "claude-3-haiku-20240307",
+];
 
-          # === OpenAI (fallback / alternative) ===
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-4o' }}
+if (!allowedClaudeModels.includes(CLAUDE_MODEL)) {
+  throw new Error(
+    `Invalid Claude model "${CLAUDE_MODEL}". Allowed:\n` +
+      allowedClaudeModels.join("\n")
+  );
+}
 
-          # === Gemini (optional) ===
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-1.5-pro' }}
+console.log(
+  `[AGENT] Using Claude (Anthropic) with model: ${CLAUDE_MODEL}`
+);
+console.log(`[AGENT] Starting AI code agent for task: ${TASK}`);
+console.log(`[AGENT] Requested by: ${REQUESTER}`);
 
-          # === Metadata ===
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          TASK: ${{ github.event.client_payload.task }}
-          REQUESTER: ${{ github.event.client_payload.requester }}
+/* =========================
+   Claude API call
+========================= */
 
-        run: node .github/agent/agent.mjs
-        continue-on-error: true
+async function callClaude(prompt) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: CLAUDE_MODEL,
+      max_tokens: 4096,
+      temperature: 0,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: prompt,
+            },
+          ],
+        },
+      ],
+    }),
+  });
 
-      - name: Notify Slack on agent failure
-        if: steps.agent.outcome != 'success'
-        run: |
-          curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"text\":\"❌ AICODE Agent failed before tests. <https://github.com/htilly/SlackONOS/actions/runs/${{ github.run_id }}|View logs>\"}"
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `CLAUDE API Error: ${res.status} ${text}`
+    );
+  }
 
-      - name: Run tests
-        id: tests
-        if: steps.agent.outcome == 'success'
-        run: npm test
-        continue-on-error: true
+  const json = await res.json();
+  return json.content
+    .map((c) => c.text)
+    .join("\n");
+}
 
-      - name: Create PR if tests pass
-        id: cpr
-        if: steps.agent.outcome == 'success' && steps.tests.outcome == 'success'
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "AI: ${{ github.event.client_payload.task }}"
-          branch: aicode-${{ github.run_number }}
-          base: develop
-          title: "AICODE: ${{ github.event.client_payload.task }}"
-          body: |
-            Autonomous code changes requested by @${{ github.event.client_payload.requester }}
+/* =========================
+   Diff extraction
+========================= */
 
-            **Task:** ${{ github.event.client_payload.task }}
-            **Tests:** ✅ Passed
-            **Agent Run:** ${{ github.run_id }}
+function extractPureDiff(text) {
+  const start = text.indexOf("diff --git");
+  if (start === -1) {
+    throw new Error("No git diff found in Claude output");
+  }
 
-            Review the changes carefully before merging.
+  let diff = text.slice(start).trim();
 
-      - name: Notify Slack on success
-        if: steps.agent.outcome == 'success' && steps.tests.outcome == 'success'
-        run: |
-          curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"text\":\"✅ AICODE PR created: <https://github.com/htilly/SlackONOS/pull/${{ steps.cpr.outputs.pull-request-number }}|#${{ steps.cpr.outputs.pull-request-number }}>\"}"
+  // Strip anything after diff that is not part of it
+  const lines = diff.split("\n");
+  const clean = [];
 
-      - name: Notify Slack on test failure
-        if: steps.agent.outcome == 'success' && steps.tests.outcome != 'success'
-        run: |
-          curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"text\":\"❌ AICODE failed: Tests didn't pass. <https://github.com/htilly/SlackONOS/actions/runs/${{ github.run_id }}|View logs>\"}"
+  for (const line of lines) {
+    if (
+      line.startsWith("diff --git") ||
+      line.startsWith("index ") ||
+      line.startsWith("--- ") ||
+      line.startsWith("+++ ") ||
+      line.startsWith("@@") ||
+      line.startsWith("+") ||
+      line.startsWith("-") ||
+      line.startsWith(" ")
+    ) {
+      clean.push(line);
+    } else {
+      break;
+    }
+  }
+
+  return clean.join("\n") + "\n";
+}
+
+/* =========================
+   Main
+========================= */
+
+(async () => {
+  console.log("[AGENT] Calling CLAUDE API...");
+
+  const prompt = `
+You are an autonomous coding agent.
+
+TASK:
+${TASK}
+
+RULES:
+- Return ONLY a valid unified git diff
+- Start with "diff --git"
+- No markdown
+- No explanations
+- No commentary
+- One patch only
+`;
+
+  const output = await callClaude(prompt);
+
+  const diff = extractPureDiff(output);
+
+  console.log(
+    `[AGENT] Generated diff with ${diff.split("\n").length} lines changed`
+  );
+
+  const patchPath = "/tmp/aicode.patch";
+  fs.writeFileSync(patchPath, diff, "utf8");
+
+  try {
+    execSync(`git apply --whitespace=fix ${patchPath}`, {
+      stdio: "inherit",
+    });
+  } catch (err) {
+    console.error("[AGENT] Patch Application Failed");
+    console.error("Diff preview:\n```");
+    console.error(diff);
+    console.error("```");
+    throw err;
+  }
+
+  console.log("[AGENT] Patch applied successfully");
+})();
