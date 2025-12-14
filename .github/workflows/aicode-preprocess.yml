@@ -62,7 +62,32 @@ jobs:
           ORIGINAL_TASK="${{ github.event.client_payload.task }}"
           
           # Escape JSON special characters in task strings
-          ENHANCED_TASK_ESCAPED=$(echo "$ENHANCED_TASK" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+          # Use jq to properly construct JSON payload with proper escaping
+          PAYLOAD=$(jq -n \
+            --arg event_type "aicode-enhanced" \
+            --arg task "$ENHANCED_TASK" \
+            --arg original_task "$ORIGINAL_TASK" \
+            --arg requester "$REQUESTER" \
+            --arg channel "$CHANNEL" \
+            --arg timestamp "$TIMESTAMP" \
+            --arg preprocessing_run_id "$RUN_ID" \
+            '{
+              event_type: $event_type,
+              client_payload: {
+                task: $task,
+                original_task: $original_task,
+                requester: $requester,
+                channel: $channel,
+                timestamp: $timestamp,
+                preprocessing_run_id: $preprocessing_run_id
+              }
+            }')
+          
+          curl -X POST "https://api.github.com/repos/${{ github.repository }}/dispatches" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
           ORIGINAL_TASK_ESCAPED=$(echo "$ORIGINAL_TASK" | sed 's/"/\\"/g')
           
           curl -X POST "https://api.github.com/repos/${{ github.repository }}/dispatches" \
