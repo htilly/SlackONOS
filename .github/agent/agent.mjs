@@ -28,6 +28,9 @@ const requester = process.env.REQUESTER || "unknown";
 const webhookUrl = process.env.SLACK_WEBHOOK_URL;
 const runId = process.env.GITHUB_RUN_ID;
 
+// Store API response metadata for diagnostics
+let apiResponseMetadata = null;
+
 // Initialize AI client based on provider
 let aiClient = null;
 let aiModel = null;
@@ -982,15 +985,39 @@ async function callAI(promptText) {
       messages: [{ role: "user", content: promptText }],
     });
     
+    // Log detailed response information
+    const stopReason = response.stop_reason;
+    const usage = response.usage || {};
+    const inputTokens = usage.input_tokens || 0;
+    const outputTokens = usage.output_tokens || 0;
+    const responseLength = response.content[0].text.length;
+    
+    console.log(`[AGENT] API Response Details:`);
+    console.log(`[AGENT]   Stop reason: ${stopReason}`);
+    console.log(`[AGENT]   Input tokens: ${inputTokens}`);
+    console.log(`[AGENT]   Output tokens: ${outputTokens}`);
+    console.log(`[AGENT]   Response length: ${responseLength} characters`);
+    console.log(`[AGENT]   Max tokens setting: 180000`);
+    
     // Check if response was truncated
-    if (response.stop_reason === "max_tokens") {
-      console.warn(`[AGENT] WARNING: Response was truncated due to max_tokens limit`);
-      console.warn(`[AGENT] Response length: ${response.content[0].text.length} characters`);
-    } else if (response.stop_reason === "stop_sequence") {
+    if (stopReason === "max_tokens") {
+      console.warn(`[AGENT] ⚠️  WARNING: Response was truncated due to max_tokens limit!`);
+      console.warn(`[AGENT]   Used ${outputTokens} output tokens out of 180000 allowed`);
+      console.warn(`[AGENT]   This suggests the model hit the output token limit`);
+    } else if (stopReason === "stop_sequence") {
       console.log(`[AGENT] Response stopped at stop sequence`);
+    } else if (stopReason === "end_turn") {
+      console.log(`[AGENT] Response completed normally (end_turn)`);
     } else {
-      console.log(`[AGENT] Response completed normally (stop_reason: ${response.stop_reason})`);
+      console.log(`[AGENT] Response completed (stop_reason: ${stopReason})`);
     }
+    
+    // Store response metadata for later use
+    apiResponseMetadata = {
+      stop_reason: stopReason,
+      usage: usage,
+      was_truncated: stopReason === "max_tokens"
+    };
     
     return response.content[0].text;
   } else if (provider === "openai") {
@@ -1110,10 +1137,22 @@ if (validationResult.errors.length > 0 || diff.match(/\+\+\+ b\/[^\n]*$/m)) {
   if (!validationResult.isValid) {
     const incompletePathMatchAfterFix = diff.match(/\+\+\+ b\/[^\n]{1,10}$/m);
     if (incompletePathMatchAfterFix || (diffLength > 7000 && diff.match(/\+\+\+ b\/[^\n]*$/m))) {
-      const truncationReason = incompletePathMatchAfterFix 
+      // Check if we have API response metadata
+      const wasTruncated = apiResponseMetadata?.was_truncated || false;
+      const outputTokens = apiResponseMetadata?.usage?.output_tokens || 0;
+      const stopReason = apiResponseMetadata?.stop_reason || 'unknown';
+      
+      let truncationReason = incompletePathMatchAfterFix 
         ? "Diff appears to be truncated mid-file-path (model stopped generating)"
-        : "Diff appears to be truncated (likely hit token limit)";
-      const errorMsg = `${truncationReason}. The AI model may have generated an incomplete diff.\n\nErrors:\n${validationResult.errors.join('\n')}\n\nDiff preview (last 500 chars):\n\`\`\`\n${diff.substring(Math.max(0, diffLength - 500))}\n\`\`\`\n\nPossible causes:\n- Model hit output token limit (check max_tokens setting)\n- Input context too large, leaving insufficient room for output\n- Model stopped generating for other reasons\n\nSuggestions:\n- Reduce input context size (fewer files) - already reduced to 400KB\n- Break task into smaller parts\n- Verify max_tokens is sufficient (currently 180K)`;
+        : "Diff appears to be truncated";
+      
+      if (wasTruncated) {
+        truncationReason = `Response was truncated by API (stop_reason: max_tokens, used ${outputTokens} output tokens)`;
+      } else if (stopReason !== 'end_turn') {
+        truncationReason = `Response stopped unexpectedly (stop_reason: ${stopReason})`;
+      }
+      
+      const errorMsg = `${truncationReason}. The AI model may have generated an incomplete diff.\n\nErrors:\n${validationResult.errors.join('\n')}\n\nAPI Response Info:\n- Stop reason: ${stopReason}\n- Output tokens used: ${outputTokens}\n- Was truncated: ${wasTruncated}\n\nDiff preview (last 500 chars):\n\`\`\`\n${diff.substring(Math.max(0, diffLength - 500))}\n\`\`\`\n\nPossible causes:\n- Model hit output token limit (check max_tokens setting)\n- Input context too large, leaving insufficient room for output\n- Model stopped generating for other reasons\n\nSuggestions:\n- Reduce input context size (fewer files) - already reduced to 400KB\n- Break task into smaller parts\n- Verify max_tokens is sufficient (currently 180K)`;
       const errorDetails = formatErrorDetails(new Error(errorMsg), { diff: diff.substring(Math.max(0, diffLength - 1000)), files: validationResult.stats.filesChanged });
       await handleError(new Error(errorMsg), "Incomplete Diff (Truncated)", { diff: diff.substring(Math.max(0, diffLength - 1000)), errorDetails });
       // handleError calls process.exit(1), so we never reach here
