@@ -89,7 +89,7 @@ aicode improve Spotify search relevance
 aicode add JSDoc comments to voting functions
 ```
 
-## Required Setup (Not Yet Configured)
+## Required Setup
 
 To use the AI Code Agent, the following secrets must be configured in GitHub:
 
@@ -98,13 +98,41 @@ To use the AI Code Agent, the following secrets must be configured in GitHub:
    - Scope: `repo`
    - Add to `config/config.json` as `githubToken`
 
-2. **OpenAI API Key** (GitHub Secret)
-   - Add to repository secrets as `OPENAI_API_KEY`
-   - Requires GPT-4 access
+2. **AI Provider API Key** (GitHub Secret)
+   
+   **Option A: Claude (Anthropic) - RECOMMENDED - FREE tier available! 💰**
+   - Get API key: https://console.anthropic.com/
+   - FREE tier: $5 credit to start, then pay-as-you-go
+   - Add to GitHub secrets as `ANTHROPIC_API_KEY` or `CLAUDE_API_KEY`
+   - Set `AI_PROVIDER=claude` (or leave default)
+   
+   **Option B: Google Gemini - FREE tier available! 💰**
+   - Get API key: https://aistudio.google.com/app/apikey
+   - FREE tier: 60 requests/minute, generous limits
+   - Add to GitHub secrets as `GEMINI_API_KEY` or `GOOGLE_API_KEY`
+   - Set `AI_PROVIDER=gemini` in GitHub secrets
+   
+   **Option C: OpenAI (original)**
+   - Get API key: https://platform.openai.com/api-keys
+   - Requires paid account (no free tier for GPT-4)
+   - Add to GitHub secrets as `OPENAI_API_KEY`
+   - Set `AI_PROVIDER=openai` in GitHub secrets
 
 3. **Slack Webhook URL** (GitHub Secret)
    - Create at: https://api.slack.com/messaging/webhooks
    - Add to repository secrets as `SLACK_WEBHOOK_URL`
+
+### Quick Setup with Claude (Recommended)
+
+1. Sign up at https://console.anthropic.com/ (get $5 free credit!)
+2. Create API key
+3. Add to GitHub Secrets:
+   - Name: `ANTHROPIC_API_KEY`
+   - Value: `sk-ant-...`
+4. (Optional) Set provider:
+   - Name: `AI_PROVIDER`
+   - Value: `claude`
+5. Done! No credit card needed for free tier! 🎉
 
 ## Safety Features
 
