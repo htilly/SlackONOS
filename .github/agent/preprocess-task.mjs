@@ -18,6 +18,7 @@ const confluenceUrl = process.env.CONFLUENCE_URL || "";
 const confluenceEmail = process.env.CONFLUENCE_EMAIL || "";
 const confluenceApiToken = process.env.CONFLUENCE_API_TOKEN || "";
 const confluenceSpaceKey = process.env.CONFLUENCE_SPACE_KEY || "AICODE";
+const confluenceParentPageId = process.env.CONFLUENCE_PARENT_PAGE_ID || "";
 
 if (!task) {
   console.error("[PREPROCESS] TASK environment variable not set");
@@ -78,6 +79,9 @@ async function createConfluencePage(title, content) {
 
   try {
     console.log(`[PREPROCESS] Creating Confluence page in space ${confluenceSpaceKey}...`);
+    if (confluenceParentPageId) {
+      console.log(`[PREPROCESS] Parent page ID: ${confluenceParentPageId}`);
+    }
 
     // Format content as Confluence storage format (XHTML-based)
     const storageContent = `
@@ -96,6 +100,24 @@ async function createConfluencePage(title, content) {
 
     const auth = Buffer.from(`${confluenceEmail}:${confluenceApiToken}`).toString('base64');
 
+    // Build the page object
+    const pageData = {
+      type: 'page',
+      title: title,
+      space: { key: confluenceSpaceKey },
+      body: {
+        storage: {
+          value: storageContent,
+          representation: 'storage'
+        }
+      }
+    };
+
+    // Add parent page if specified
+    if (confluenceParentPageId) {
+      pageData.ancestors = [{ id: confluenceParentPageId }];
+    }
+
     const response = await fetch(`${confluenceUrl}/rest/api/content`, {
       method: 'POST',
       headers: {
@@ -103,17 +125,7 @@ async function createConfluencePage(title, content) {
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: JSON.stringify({
-        type: 'page',
-        title: title,
-        space: { key: confluenceSpaceKey },
-        body: {
-          storage: {
-            value: storageContent,
-            representation: 'storage'
-          }
-        }
-      })
+      body: JSON.stringify(pageData)
     });
 
     if (!response.ok) {
