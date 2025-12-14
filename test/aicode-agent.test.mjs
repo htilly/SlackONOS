@@ -27,13 +27,18 @@ describe('AI Code Agent Integration', function() {
   describe('GitHub Actions Workflow', function() {
     it('should have aicode-agent.yml workflow file', function() {
       const workflowPath = path.join(process.cwd(), '.github', 'workflows', 'aicode-agent.yml');
-      expect(fs.existsSync(workflowPath)).to.be.true;
+      
+      // Verify file exists
+      if (!fs.existsSync(workflowPath)) {
+        throw new Error(`Workflow file not found at: ${workflowPath}\nCurrent directory: ${process.cwd()}\nFiles in .github/workflows: ${fs.readdirSync(path.join(process.cwd(), '.github', 'workflows')).join(', ')}`);
+      }
       
       const content = fs.readFileSync(workflowPath, 'utf8');
       
       // Verify it's actually a YAML file, not a JavaScript file
-      expect(content).to.not.include('#!/usr/bin/env node');
-      expect(content).to.not.include('import fs from');
+      if (content.includes('#!/usr/bin/env node') || content.includes('import fs from')) {
+        throw new Error(`Wrong file read! Expected YAML workflow file but got JavaScript.\nPath: ${workflowPath}\nFirst 200 chars: ${content.substring(0, 200)}`);
+      }
       
       // Check it's triggered by repository_dispatch
       expect(content).to.include('repository_dispatch:');
