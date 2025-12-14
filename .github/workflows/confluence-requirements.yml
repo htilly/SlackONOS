@@ -1,0 +1,193 @@
+name: Confluence Requirements
+
+on:
+  repository_dispatch:
+    types: [aicode-enhanced]
+
+jobs:
+  publish-requirement:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Prepare requirement data
+      id: requirement
+      run: |
+        ENHANCED_TASK="${{ github.event.client_payload.task }}"
+        ORIGINAL_TASK="${{ github.event.client_payload.original_task }}"
+        REQUESTER="${{ github.event.client_payload.requester }}"
+        TIMESTAMP="${{ github.event.client_payload.timestamp }}"
+        PREPROCESSING_RUN_ID="${{ github.event.client_payload.preprocessing_run_id }}"
+        
+        # Generate a title from the enhanced task (first line or first 100 chars)
+        TITLE=$(echo "$ENHANCED_TASK" | head -n 1 | cut -c 1-100)
+        if [ -z "$TITLE" ]; then
+          TITLE=$(echo "$ORIGINAL_TASK" | head -n 1 | cut -c 1-100)
+        fi
+        
+        # Add timestamp to make title unique
+        DATE_STR=$(date +%Y-%m-%d)
+        TITLE_WITH_DATE="${TITLE} - ${DATE_STR}"
+        
+        echo "title=$TITLE_WITH_DATE" >> $GITHUB_OUTPUT
+        echo "enhanced_task<<EOF" >> $GITHUB_OUTPUT
+        echo "$ENHANCED_TASK" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        echo "original_task<<EOF" >> $GITHUB_OUTPUT
+        echo "$ORIGINAL_TASK" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        echo "requester=$REQUESTER" >> $GITHUB_OUTPUT
+        echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+        echo "preprocessing_run_id=$PREPROCESSING_RUN_ID" >> $GITHUB_OUTPUT
+    
+    - name: Create Confluence page
+      shell: bash {0}
+      env:
+        CONFLUENCE_BASE_URL: https://htilly.atlassian.net/wiki
+        CONFLUENCE_SPACE_KEY: "~5570587e5fa4f786c64409a23448de7e84a65c"
+        CONFLUENCE_PARENT_PAGE_ID: "5177529"
+        CONFLUENCE_USER: ${{ secrets.CONFLUENCE_USER }}
+        CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+      run: |
+        set -o pipefail
+        
+        TITLE="${{ steps.requirement.outputs.title }}"
+        ENHANCED_TASK="${{ steps.requirement.outputs.enhanced_task }}"
+        ORIGINAL_TASK="${{ steps.requirement.outputs.original_task }}"
+        REQUESTER="${{ steps.requirement.outputs.requester }}"
+        TIMESTAMP="${{ steps.requirement.outputs.timestamp }}"
+        PREPROCESSING_RUN_ID="${{ steps.requirement.outputs.preprocessing_run_id }}"
+        
+        # Convert enhanced task (user story) to Confluence storage format
+        # Convert markdown-like formatting to HTML
+        CONFLUENCE_BODY=$(echo "$ENHANCED_TASK" | \
+          sed 's/^### \(.*\)/<h3>\1<\/h3>/g' | \
+          sed 's/^## \(.*\)/<h2>\1<\/h2>/g' | \
+          sed 's/^# \(.*\)/<h1>\1<\/h1>/g' | \
+          sed 's/^- \(.*\)/<li>\1<\/li>/g' | \
+          sed 's/\*\*\([^*]*\)\*\*/<strong>\1<\/strong>/g' | \
+          sed 's/\*\([^*]*\)\*/<em>\1<\/em>/g' | \
+          sed 's/`\([^`]*\)`/<code>\1<\/code>/g' | \
+          sed 's/^\([A-Za-z].*\)$/<p>\1<\/p>/g' | \
+          tr '\n' ' ' | \
+          sed 's/<li>/<ul><li>/1' | \
+          sed 's/<\/li> *$/<\/li><\/ul>/' | \
+          sed 's/<\/li> *<li>/<\/li><li>/g' | \
+          sed 's/<p><\/p>//g' | \
+          sed 's/<p>\(<[^>]*>\)/\1/g' | \
+          sed 's/\(<\/[^>]*>\)<\/p>/\1/g')
+        
+        # Format timestamp
+        if [ -n "$TIMESTAMP" ]; then
+          REQUEST_DATE=$(date -d "@$(($TIMESTAMP / 1000))" +%Y-%m-%d\ %H:%M:%S 2>/dev/null || date +%Y-%m-%d\ %H:%M:%S)
+        else
+          REQUEST_DATE=$(date +%Y-%m-%d\ %H:%M:%S)
+        fi
+        
+        # Build the page content
+        PAGE_CONTENT="<h2>Requirement Details</h2>
+        <table>
+          <tr><th>Requested By</th><td>${REQUESTER}</td></tr>
+          <tr><th>Request Date</th><td>${REQUEST_DATE}</td></tr>
+          <tr><th>Preprocessing Run</th><td><a href=\"https://github.com/htilly/SlackONOS/actions/runs/${PREPROCESSING_RUN_ID}\">${PREPROCESSING_RUN_ID}</a></td></tr>
+        </table>
+        
+        <h2>User Story (Enhanced)</h2>
+        ${CONFLUENCE_BODY}
+        
+        <h2>Original Request</h2>
+        <p><code>${ORIGINAL_TASK}</code></p>
+        
+        <hr/>
+        <p><em>This requirement was automatically generated from an AI coding request in <a href=\"https://github.com/htilly/SlackONOS\">SlackONOS</a>.</em></p>"
+        
+        # Check if secrets are configured
+        if [ -z "$CONFLUENCE_USER" ] || [ -z "$CONFLUENCE_API_TOKEN" ]; then
+          echo "⚠️ WARNING: Confluence secrets not configured, skipping page creation"
+          echo "Would create page: ${TITLE}"
+          exit 0
+        fi
+        
+        # Build JSON payload using jq
+        JSON_PAYLOAD=$(jq -n \
+          --arg type "page" \
+          --arg title "$TITLE" \
+          --arg parentId "${CONFLUENCE_PARENT_PAGE_ID}" \
+          --arg spaceKey "${CONFLUENCE_SPACE_KEY}" \
+          --arg bodyValue "$PAGE_CONTENT" \
+          '{
+            type: $type,
+            title: $title,
+            ancestors: [{id: $parentId}],
+            space: {key: $spaceKey},
+            body: {
+              storage: {
+                value: $bodyValue,
+                representation: "storage"
+              }
+            }
+          }')
+        
+        # Write payload to temp file to avoid shell escaping issues
+        echo "$JSON_PAYLOAD" > /tmp/confluence_payload.json
+        
+        # Pre-compute auth header
+        AUTH_HEADER=$(printf '%s:%s' "${CONFLUENCE_USER}" "${CONFLUENCE_API_TOKEN}" | base64 | tr -d '\n')
+        
+        # Create Confluence page
+        echo "📤 Creating Confluence requirement page: ${TITLE}..."
+        
+        # Write response to file to avoid any shell escaping issues
+        HTTP_CODE=$(curl -s -o /tmp/response.json -w "%{http_code}" -X POST \
+          -H "Authorization: Basic ${AUTH_HEADER}" \
+          -H "Content-Type: application/json" \
+          -H "Accept: application/json" \
+          "${CONFLUENCE_BASE_URL}/rest/api/content" \
+          --data-binary @/tmp/confluence_payload.json)
+        CURL_EXIT=$?
+        
+        if [ $CURL_EXIT -ne 0 ]; then
+          echo "❌ Request failed (curl exit: $CURL_EXIT)"
+          cat /tmp/response.json 2>/dev/null
+          exit 1
+        fi
+        
+        # Read response from file
+        HTTP_BODY=$(cat /tmp/response.json)
+        
+        if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+          PAGE_URL=$(echo "$HTTP_BODY" | jq -r '._links.base + ._links.webui // empty' 2>/dev/null)
+          echo "✅ Confluence requirement page created"
+          if [ -n "$PAGE_URL" ]; then
+            echo "🔗 Page URL: ${PAGE_URL}"
+            echo "page_url=${PAGE_URL}" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "❌ Failed (HTTP ${HTTP_CODE}):"
+          echo "$HTTP_BODY" | jq . 2>/dev/null || echo "$HTTP_BODY"
+          exit 1
+        fi
+    
+    - name: Notify Slack on completion
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          PAGE_URL="${{ steps.requirement.outputs.page_url }}"
+          if [ -n "$PAGE_URL" ]; then
+            curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"text\":\"📄 Requirement published to Confluence\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"📄 *Requirement Published*\\n\\n*Title:* ${{ steps.requirement.outputs.title }}\\n\\n*Page:* <${PAGE_URL}|View in Confluence>\"}}]}"
+          else
+            curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"text\":\"📄 Requirement published to Confluence (URL not available)\"}"
+          fi
+        else
+          curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\":\"⚠️ Failed to publish requirement to Confluence\"}"
+        fi
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
