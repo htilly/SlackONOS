@@ -34,24 +34,29 @@ jobs:
       - name: Run AI Agent
         id: agent
         env:
-          # AI Provider selection (claude, openai, or gemini)
+          # Provider selection
           AI_PROVIDER: ${{ secrets.AI_PROVIDER || 'claude' }}
-          # Claude/Anthropic (default, FREE tier available)
+
+          # === Claude / Anthropic ===
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
-          CLAUDE_MODEL: ${{ secrets.CLAUDE_MODEL || 'claude-3-5-sonnet-20241022' }}
-          # OpenAI (fallback)
+          CLAUDE_MODEL: ${{ secrets.CLAUDE_MODEL || 'claude-3-5-sonnet-latest' }}
+
+          # === OpenAI (fallback / alternative) ===
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-4o' }}
-          # Google Gemini (alternative, FREE tier available)
+
+          # === Gemini (optional) ===
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-1.5-pro' }}
-          # Other
+
+          # === Metadata ===
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           TASK: ${{ github.event.client_payload.task }}
           REQUESTER: ${{ github.event.client_payload.requester }}
+
         run: node .github/agent/agent.mjs
         continue-on-error: true
 
@@ -80,11 +85,11 @@ jobs:
           title: "AICODE: ${{ github.event.client_payload.task }}"
           body: |
             Autonomous code changes requested by @${{ github.event.client_payload.requester }}
-            
+
             **Task:** ${{ github.event.client_payload.task }}
             **Tests:** ✅ Passed
             **Agent Run:** ${{ github.run_id }}
-            
+
             Review the changes carefully before merging.
 
       - name: Notify Slack on success
@@ -100,4 +105,3 @@ jobs:
           curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
             -d "{\"text\":\"❌ AICODE failed: Tests didn't pass. <https://github.com/htilly/SlackONOS/actions/runs/${{ github.run_id }}|View logs>\"}"
-
