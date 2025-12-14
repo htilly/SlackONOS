@@ -985,39 +985,45 @@ async function callAI(promptText) {
       messages: [{ role: "user", content: promptText }],
     });
     
-    // Log detailed response information
-    const stopReason = response.stop_reason;
-    const usage = response.usage || {};
-    const inputTokens = usage.input_tokens || 0;
-    const outputTokens = usage.output_tokens || 0;
-    const responseLength = response.content[0].text.length;
-    
-    console.log(`[AGENT] API Response Details:`);
-    console.log(`[AGENT]   Stop reason: ${stopReason}`);
-    console.log(`[AGENT]   Input tokens: ${inputTokens}`);
-    console.log(`[AGENT]   Output tokens: ${outputTokens}`);
-    console.log(`[AGENT]   Response length: ${responseLength} characters`);
-    console.log(`[AGENT]   Max tokens setting: 180000`);
-    
-    // Check if response was truncated
-    if (stopReason === "max_tokens") {
-      console.warn(`[AGENT] ⚠️  WARNING: Response was truncated due to max_tokens limit!`);
-      console.warn(`[AGENT]   Used ${outputTokens} output tokens out of 180000 allowed`);
-      console.warn(`[AGENT]   This suggests the model hit the output token limit`);
-    } else if (stopReason === "stop_sequence") {
-      console.log(`[AGENT] Response stopped at stop sequence`);
-    } else if (stopReason === "end_turn") {
-      console.log(`[AGENT] Response completed normally (end_turn)`);
-    } else {
-      console.log(`[AGENT] Response completed (stop_reason: ${stopReason})`);
+    // Log detailed response information (with error handling)
+    try {
+      const stopReason = response.stop_reason || 'unknown';
+      const usage = response.usage || {};
+      const inputTokens = usage.input_tokens || 0;
+      const outputTokens = usage.output_tokens || 0;
+      const responseText = response.content && response.content[0] && response.content[0].text ? response.content[0].text : '';
+      const responseLength = responseText.length;
+      
+      console.log(`[AGENT] API Response Details:`);
+      console.log(`[AGENT]   Stop reason: ${stopReason}`);
+      console.log(`[AGENT]   Input tokens: ${inputTokens}`);
+      console.log(`[AGENT]   Output tokens: ${outputTokens}`);
+      console.log(`[AGENT]   Response length: ${responseLength} characters`);
+      console.log(`[AGENT]   Max tokens setting: 180000`);
+      
+      // Check if response was truncated
+      if (stopReason === "max_tokens") {
+        console.warn(`[AGENT] ⚠️  WARNING: Response was truncated due to max_tokens limit!`);
+        console.warn(`[AGENT]   Used ${outputTokens} output tokens out of 180000 allowed`);
+        console.warn(`[AGENT]   This suggests the model hit the output token limit`);
+      } else if (stopReason === "stop_sequence") {
+        console.log(`[AGENT] Response stopped at stop sequence`);
+      } else if (stopReason === "end_turn") {
+        console.log(`[AGENT] Response completed normally (end_turn)`);
+      } else {
+        console.log(`[AGENT] Response completed (stop_reason: ${stopReason})`);
+      }
+      
+      // Store response metadata for later use
+      apiResponseMetadata = {
+        stop_reason: stopReason,
+        usage: usage,
+        was_truncated: stopReason === "max_tokens"
+      };
+    } catch (logError) {
+      console.warn(`[AGENT] Warning: Could not log API response details: ${logError.message}`);
+      apiResponseMetadata = null;
     }
-    
-    // Store response metadata for later use
-    apiResponseMetadata = {
-      stop_reason: stopReason,
-      usage: usage,
-      was_truncated: stopReason === "max_tokens"
-    };
     
     return response.content[0].text;
   } else if (provider === "openai") {
@@ -1036,48 +1042,239 @@ async function callAI(promptText) {
   }
 }
 
-console.log(`[AGENT] Calling ${provider.toUpperCase()} API...`);
-const apiStartTime = Date.now();
-let output;
+// NEW STRATEGY: One file at a time
+// Step 1: Identify which files need to be modified
+console.log(`[AGENT] Step 1: Identifying files to modify...`);
+const fileIdentificationPrompt = `You are analyzing a coding task to identify which files need to be modified.
+
+TASK: ${task}
+
+CODEBASE CONTEXT:
+${codebaseContent.substring(0, 150000)}${codebaseContent.length > 150000 ? '\n\n[... truncated for file identification ...]' : ''}
+
+Based on the task, list ONLY the file paths that need to be modified, one per line.
+Output format (CRITICAL - follow exactly):
+FILE: path/to/file1.js
+FILE: path/to/file2.html
+FILE: path/to/file3.js
+
+Rules:
+- Output ONLY file paths, one per line
+- Each line must start with "FILE: " followed by the file path
+- No explanations, no markdown, no code blocks
+- Only list files that actually need to be modified
+- Use exact file paths as they appear in the codebase
+
+Output the file list now:`;
+
+let filesToModify = [];
 try {
-  output = await retryWithBackoff(async () => {
-    return await callAI(prompt);
-  }, 3, 1000);
-  const apiDuration = Date.now() - apiStartTime;
-  console.log(`[AGENT] API call completed in ${apiDuration}ms`);
+  console.log(`[AGENT] Calling ${provider.toUpperCase()} API to identify files...`);
+  const fileListOutput = await retryWithBackoff(async () => {
+    return await callAI(fileIdentificationPrompt);
+  }, 2, 1000);
+  
+  // Extract file paths from output
+  const fileLines = fileListOutput.split('\n')
+    .map(line => line.trim())
+    .filter(line => line.startsWith('FILE:') || line.match(/^[a-zA-Z0-9_\/\.-]+\.(js|html|css|json|txt|yml|yaml)$/));
+  
+  filesToModify = fileLines
+    .map(line => {
+      // Handle "FILE: path" format
+      if (line.startsWith('FILE:')) {
+        return line.replace(/^FILE:\s*/, '').trim();
+      }
+      // Handle bare file paths
+      return line.trim();
+    })
+    .filter(f => f && f.length > 0)
+    .filter(f => {
+      // Verify file exists
+      try {
+        return fs.existsSync(f);
+      } catch {
+        return false;
+      }
+    });
+  
+  console.log(`[AGENT] Identified ${filesToModify.length} file(s) to modify:`);
+  filesToModify.forEach((f, i) => {
+    const exists = fs.existsSync(f);
+    console.log(`[AGENT]   ${i + 1}. ${f} ${exists ? '✓' : '✗ (not found)'}`);
+  });
+  
+  if (filesToModify.length === 0) {
+    console.warn(`[AGENT] No valid files identified, falling back to single-pass generation`);
+    filesToModify = null; // Fallback to old method
+  } else {
+    console.log(`[AGENT] Proceeding with one-file-at-a-time strategy`);
+  }
 } catch (error) {
-  const errorDetails = formatErrorDetails(error, {});
-  await handleError(error, `${provider.toUpperCase()} API Error`, { errorDetails });
-  // handleError calls process.exit(1), so we never reach here
+  console.warn(`[AGENT] File identification failed, falling back to single-pass: ${error.message}`);
+  filesToModify = null; // Fallback to old method
 }
 
-// Extract diff from potential markdown code blocks
-let diff = output.trim();
-if (output.includes("```")) {
-  // Try to extract content between code fences
-  // Handle both single and multiple code blocks
-  const matches = output.matchAll(/```(?:diff)?\n([\s\S]*?)```/g);
-  const extractedDiffs = [];
-  for (const match of matches) {
-    extractedDiffs.push(match[1].trim());
-  }
-  // Use the longest extracted diff (likely the actual diff)
-  if (extractedDiffs.length > 0) {
-    diff = extractedDiffs.reduce((a, b) => a.length > b.length ? a : b);
+let output;
+let allDiffs = [];
+
+if (filesToModify && filesToModify.length > 0) {
+  // Step 2: Generate diff for each file, one at a time
+  console.log(`[AGENT] Step 2: Generating diffs one file at a time...`);
+  
+  for (let i = 0; i < filesToModify.length; i++) {
+    const filePath = filesToModify[i];
+    console.log(`[AGENT] Generating diff for file ${i + 1}/${filesToModify.length}: ${filePath}`);
+    
+    // Load the specific file content
+    let fileContent = '';
+    try {
+      if (fs.existsSync(filePath)) {
+        fileContent = fs.readFileSync(filePath, 'utf8');
+      } else {
+        console.warn(`[AGENT] File not found: ${filePath}, skipping`);
+        continue;
+      }
+    } catch (e) {
+      console.warn(`[AGENT] Could not read file ${filePath}: ${e.message}, skipping`);
+      continue;
+    }
+    
+    // Create focused prompt for this single file
+    const singleFilePrompt = `You are modifying ONE SINGLE FILE for SlackONOS. Generate a complete, valid unified diff.
+
+TASK: ${task}
+
+FILE TO MODIFY: ${filePath}
+
+CURRENT FILE CONTENT:
+\`\`\`
+${fileContent}
+\`\`\`
+
+RELEVANT CONTEXT (other files for reference):
+${codebaseContent.substring(0, 80000)}${codebaseContent.length > 80000 ? '\n\n[... context truncated ...]' : ''}
+
+CRITICAL UNIFIED DIFF FORMAT - YOU MUST FOLLOW THIS EXACTLY:
+
+--- a/${filePath}
++++ b/${filePath}
+@@ -startLine,numLines +startLine,numLines @@
+ context line (starts with space)
+-old line (starts with minus)
++new line (starts with plus)
+ context line (starts with space)
+
+ABSOLUTE REQUIREMENTS:
+1. You MUST start with "--- a/${filePath}" (exact path, no truncation)
+2. You MUST immediately follow with "+++ b/${filePath}" (same path, b instead of a)
+3. You MUST include at least one "@@ -x,y +x,y @@" hunk header
+4. Include at least 3 lines of context before and after each change
+5. Use "+" prefix for additions, "-" prefix for removals, " " (space) prefix for context
+6. Ensure line numbers in @@ headers match actual file line numbers
+7. Output ONLY the diff - no explanations, no markdown code blocks, no text before/after
+8. The diff MUST be complete - if you cannot finish it, do NOT start it
+9. NEVER truncate the file path - always write the complete path
+10. NEVER output "+++ b/p" or any partial path - always the full path
+
+This is ONE FILE ONLY. Generate the complete diff now:`;
+    
+    try {
+      const fileDiffStartTime = Date.now();
+      const fileDiff = await retryWithBackoff(async () => {
+        return await callAI(singleFilePrompt);
+      }, 2, 1000);
+      const fileDiffDuration = Date.now() - fileDiffStartTime;
+      
+      // Extract diff from potential markdown
+      let cleanDiff = fileDiff.trim();
+      if (cleanDiff.includes('```')) {
+        const matches = cleanDiff.matchAll(/```(?:diff)?\n([\s\S]*?)```/g);
+        const extracted = [];
+        for (const match of matches) {
+          extracted.push(match[1].trim());
+        }
+        if (extracted.length > 0) {
+          cleanDiff = extracted.reduce((a, b) => a.length > b.length ? a : b);
+        }
+      }
+      
+      // Quick validation - must have both --- and +++
+      if (cleanDiff.includes(`--- a/${filePath}`) && cleanDiff.includes(`+++ b/${filePath}`) && cleanDiff.includes('@@')) {
+        allDiffs.push(cleanDiff);
+        console.log(`[AGENT] ✓ Generated valid diff for ${filePath} (${cleanDiff.length} chars, ${fileDiffDuration}ms)`);
+      } else {
+        console.warn(`[AGENT] ⚠️  Generated diff for ${filePath} appears invalid, skipping`);
+        console.warn(`[AGENT]   Contains ---: ${cleanDiff.includes(`--- a/${filePath}`)}`);
+        console.warn(`[AGENT]   Contains +++: ${cleanDiff.includes(`+++ b/${filePath}`)}`);
+        console.warn(`[AGENT]   Contains @@: ${cleanDiff.includes('@@')}`);
+      }
+    } catch (error) {
+      console.warn(`[AGENT] Failed to generate diff for ${filePath}: ${error.message}`);
+      // Continue with other files
+    }
   }
   
-  // If no code blocks found but output contains diff markers, use the whole output
-  if (!diff.includes("--- a/") && output.includes("--- a/")) {
-    // Extract everything after the first "--- a/" line
-    const diffStart = output.indexOf("--- a/");
-    diff = output.substring(diffStart).trim();
-    // Remove any trailing markdown or explanations
-    const diffEnd = diff.indexOf("\n\n```") !== -1 ? diff.indexOf("\n\n```") : 
-                    diff.indexOf("\n\n##") !== -1 ? diff.indexOf("\n\n##") :
-                    diff.indexOf("\n\n**") !== -1 ? diff.indexOf("\n\n**") :
-                    diff.length;
-    diff = diff.substring(0, diffEnd).trim();
+  // Combine all diffs
+  if (allDiffs.length > 0) {
+    output = allDiffs.join('\n\n');
+    console.log(`[AGENT] Combined ${allDiffs.length} file diff(s) into final patch (${output.length} chars)`);
+  } else {
+    console.error(`[AGENT] No valid diffs generated, falling back to single-pass method`);
+    filesToModify = null; // Fallback
   }
+}
+
+// Fallback to original single-pass method if one-file-at-a-time failed
+if (!filesToModify || allDiffs.length === 0) {
+  console.log(`[AGENT] Using single-pass generation method...`);
+  const apiStartTime = Date.now();
+  try {
+    output = await retryWithBackoff(async () => {
+      return await callAI(prompt);
+    }, 3, 1000);
+    const apiDuration = Date.now() - apiStartTime;
+    console.log(`[AGENT] API call completed in ${apiDuration}ms`);
+  } catch (error) {
+    const errorDetails = formatErrorDetails(error, {});
+    await handleError(error, `${provider.toUpperCase()} API Error`, { errorDetails });
+    // handleError calls process.exit(1), so we never reach here
+  }
+}
+
+// Extract diff from potential markdown code blocks (only if using fallback method)
+let diff = output.trim();
+if (!filesToModify || allDiffs.length === 0) {
+  // Only do markdown extraction for fallback single-pass method
+  if (output.includes("```")) {
+    // Try to extract content between code fences
+    // Handle both single and multiple code blocks
+    const matches = output.matchAll(/```(?:diff)?\n([\s\S]*?)```/g);
+    const extractedDiffs = [];
+    for (const match of matches) {
+      extractedDiffs.push(match[1].trim());
+    }
+    // Use the longest extracted diff (likely the actual diff)
+    if (extractedDiffs.length > 0) {
+      diff = extractedDiffs.reduce((a, b) => a.length > b.length ? a : b);
+    }
+    
+    // If no code blocks found but output contains diff markers, use the whole output
+    if (!diff.includes("--- a/") && output.includes("--- a/")) {
+      // Extract everything after the first "--- a/" line
+      const diffStart = output.indexOf("--- a/");
+      diff = output.substring(diffStart).trim();
+      // Remove any trailing markdown or explanations
+      const diffEnd = diff.indexOf("\n\n```") !== -1 ? diff.indexOf("\n\n```") : 
+                      diff.indexOf("\n\n##") !== -1 ? diff.indexOf("\n\n##") :
+                      diff.indexOf("\n\n**") !== -1 ? diff.indexOf("\n\n**") :
+                      diff.length;
+      diff = diff.substring(0, diffEnd).trim();
+    }
+  }
+} else {
+  // For one-file-at-a-time, diff is already clean (output from combined diffs)
+  diff = output;
 }
 
 // Enhanced diff validation
@@ -1093,29 +1290,51 @@ if (validationResult.errors.length > 0 || diff.match(/\+\+\+ b\/[^\n]*$/m)) {
   console.warn(`[AGENT] Last 5 lines:\n${lastLines}`);
   
   // Try to auto-fix incomplete or missing +++ b/ lines
+  console.log(`[AGENT] Attempting to auto-fix incomplete diff...`);
   const lines = diff.split('\n');
   let needsFix = false;
+  let fixesApplied = [];
   
   // Check for incomplete +++ b/ lines or missing +++ b/ lines after --- a/ lines
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].startsWith('--- a/')) {
       const oldPath = lines[i].substring(6).trim();
+      const isLastLine = (i === lines.length - 1);
       const nextLine = i + 1 < lines.length ? lines[i + 1] : '';
       
+      console.log(`[AGENT] Found --- a/ line at index ${i}: ${oldPath}`);
+      console.log(`[AGENT]   Is last line: ${isLastLine}`);
+      console.log(`[AGENT]   Next line: "${nextLine}" (length: ${nextLine.length})`);
+      
       // Check if +++ b/ line is missing or incomplete
-      if (!nextLine.startsWith('+++ b/')) {
+      if (isLastLine || !nextLine || !nextLine.startsWith('+++ b/')) {
         // Missing +++ b/ line - insert it
-        lines.splice(i + 1, 0, `+++ b/${oldPath}`);
+        const fixedLine = `+++ b/${oldPath}`;
+        lines.splice(i + 1, 0, fixedLine);
         needsFix = true;
-        console.log(`[AGENT] Auto-fixed missing +++ b/ line for: ${oldPath}`);
+        fixesApplied.push(`Inserted missing +++ b/${oldPath}`);
+        console.log(`[AGENT] ✓ Auto-fixed: Inserted missing +++ b/ line for: ${oldPath}`);
         i++; // Skip the line we just added
-      } else if (nextLine.startsWith('+++ b/') && nextLine.length < 20) {
+      } else if (nextLine.startsWith('+++ b/') && (nextLine.length < 20 || nextLine.match(/^\+{3} b\/[a-z]$/i))) {
         // Incomplete +++ b/ line - fix it
-        lines[i + 1] = `+++ b/${oldPath}`;
+        const fixedLine = `+++ b/${oldPath}`;
+        lines[i + 1] = fixedLine;
         needsFix = true;
-        console.log(`[AGENT] Auto-fixed incomplete +++ b/ line: ${lines[i + 1]}`);
+        fixesApplied.push(`Fixed incomplete +++ b/ line: ${nextLine} -> ${fixedLine}`);
+        console.log(`[AGENT] ✓ Auto-fixed: Replaced incomplete +++ b/ line`);
+        console.log(`[AGENT]   Before: ${nextLine}`);
+        console.log(`[AGENT]   After:  ${fixedLine}`);
+      } else {
+        console.log(`[AGENT]   +++ b/ line looks complete: ${nextLine}`);
       }
     }
+  }
+  
+  if (fixesApplied.length > 0) {
+    console.log(`[AGENT] Applied ${fixesApplied.length} auto-fix(es):`);
+    fixesApplied.forEach((fix, idx) => console.log(`[AGENT]   ${idx + 1}. ${fix}`));
+  } else {
+    console.log(`[AGENT] No auto-fixes needed or applicable`);
   }
   
   // If we made fixes, update diff and re-validate
@@ -1218,6 +1437,48 @@ if (linesChanged > 300) {
 }
 
 console.log(`[AGENT] Generated diff with ${linesChanged} lines changed (${validationResult.stats.filesChanged} files)`);
+
+// HARD VALIDATION: Check diff structure before attempting to apply
+console.log("[AGENT] Performing hard validation before patch application...");
+const hasPlusPlusPlus = diff.includes('+++ b/');
+const hasAtAt = diff.includes('@@');
+const hasMinusMinusMinus = diff.includes('--- a/');
+
+if (!hasMinusMinusMinus) {
+  await handleError(new Error("Diff missing '--- a/' markers"), "Invalid Diff Format", {});
+  process.exit(1);
+}
+
+if (!hasPlusPlusPlus) {
+  await handleError(new Error("Diff missing '+++ b/' markers - cannot apply patch"), "Invalid Diff Format", {});
+  process.exit(1);
+}
+
+if (!hasAtAt) {
+  await handleError(new Error("Diff missing '@@' hunk markers - cannot apply patch"), "Invalid Diff Format", {});
+  process.exit(1);
+}
+
+// Count file sections and verify each has both --- and +++
+const fileSections = diff.split(/^--- a\//gm).filter(s => s.trim());
+let incompleteSections = 0;
+for (const section of fileSections) {
+  const lines = section.split('\n');
+  if (lines.length < 2 || !lines[1].startsWith('+++ b/')) {
+    incompleteSections++;
+  }
+}
+
+if (incompleteSections > 0) {
+  await handleError(
+    new Error(`Found ${incompleteSections} incomplete file section(s) - each '--- a/' must be followed by '+++ b/'`),
+    "Incomplete Diff Sections",
+    { incompleteSections }
+  );
+  process.exit(1);
+}
+
+console.log(`[AGENT] ✓ Hard validation passed: ${fileSections.length} file section(s), all complete`);
 
 // Apply patch with multiple strategies
 fs.writeFileSync("/tmp/aicode.patch", diff);
