@@ -170,36 +170,47 @@ try {
   console.log("[AGENT] No .cursorrules file found");
 }
 
-// Try to identify and read relevant files based on the task
-// This helps the AI generate accurate diffs with correct line numbers
-let relevantFiles = "";
-const taskLower = task.toLowerCase();
+// Read all relevant source files for complete context
+// This ensures the AI has accurate file content for generating diffs
+let codebaseContent = "";
+const fileList = files.split("\n").filter(f => f.trim());
 
-// Common file patterns to check based on task keywords
-const filePatterns = [
-  { keywords: ["help", "admin", "command"], files: ["templates/help/helpTextAdmin.txt", "templates/help/helpText.txt"] },
-  { keywords: ["config", "setting"], files: ["config/config.json", "src/config-handler.js"] },
-  { keywords: ["slack", "message", "notification"], files: ["src/slack-handler.js", "src/notification-handler.js"] },
-  { keywords: ["discord"], files: ["src/discord-handler.js"] },
-  { keywords: ["sonos", "speaker", "playback"], files: ["src/sonos-handler.js"] },
-  { keywords: ["route", "endpoint", "web", "admin panel"], files: ["src/webserver.js", "public/admin.html"] },
-  { keywords: ["queue", "track"], files: ["src/queue-handler.js"] },
-  { keywords: ["vote", "voting"], files: ["src/voting-handler.js"] },
-];
+// Define which files to include (exclude large binaries, dependencies, etc.)
+const includedExtensions = ['.js', '.mjs', '.json', '.txt', '.html', '.css', '.md', '.yml', '.yaml'];
+const excludedPaths = ['node_modules/', 'package-lock.json', '.git/', 'coverage/', 'dist/', 'build/'];
 
-for (const pattern of filePatterns) {
-  if (pattern.keywords.some(keyword => taskLower.includes(keyword))) {
-    for (const filePath of pattern.files) {
-      try {
-        const content = fs.readFileSync(filePath, "utf8");
-        relevantFiles += `\n\n=== ${filePath} ===\n${content}`;
-        console.log(`[AGENT] Including content of ${filePath} for context`);
-      } catch (e) {
-        // File doesn't exist, skip it
-      }
+console.log("[AGENT] Reading codebase files...");
+let filesIncluded = 0;
+
+for (const filePath of fileList) {
+  // Skip if file is in excluded paths
+  if (excludedPaths.some(excluded => filePath.includes(excluded))) {
+    continue;
+  }
+
+  // Skip if file extension is not in allowed list
+  if (!includedExtensions.some(ext => filePath.endsWith(ext))) {
+    continue;
+  }
+
+  try {
+    const stats = fs.statSync(filePath);
+    // Skip files larger than 100KB to avoid token limits
+    if (stats.size > 100000) {
+      console.log(`[AGENT] Skipping large file: ${filePath} (${stats.size} bytes)`);
+      continue;
     }
+
+    const content = fs.readFileSync(filePath, "utf8");
+    codebaseContent += `\n\n=== ${filePath} ===\n${content}`;
+    filesIncluded++;
+  } catch (e) {
+    // File read error, skip it
+    console.log(`[AGENT] Could not read ${filePath}: ${e.message}`);
   }
 }
+
+console.log(`[AGENT] Included ${filesIncluded} files for AI context`);
 
 // Build specialized prompt for SlackONOS
 const prompt = `You are an autonomous coding agent for SlackONOS, a democratic music bot for Discord and Slack that controls Sonos speakers.
@@ -219,13 +230,11 @@ CODEBASE CONTEXT:
 Project Rules and Conventions:
 ${cursorRules}
 
-Repository Files:
-${files}
-
 Recent Commits:
 ${recentCommits}
 
-${relevantFiles ? `RELEVANT FILE CONTENTS (use these for accurate line numbers):\n${relevantFiles}` : ''}
+COMPLETE CODEBASE CONTENT (use these exact contents for accurate diffs):
+${codebaseContent}
 
 TASK FROM ADMIN (${requester}):
 ${task}
@@ -255,7 +264,7 @@ async function callAI(promptText) {
   if (provider === "claude") {
     const response = await aiClient.messages.create({
       model: aiModel,
-      max_tokens: 4096,
+      max_tokens: 8192,
       temperature: 0.2,
       messages: [{ role: "user", content: promptText }],
     });
