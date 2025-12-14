@@ -170,47 +170,78 @@ try {
   console.log("[AGENT] No .cursorrules file found");
 }
 
-// Read all relevant source files for complete context
-// This ensures the AI has accurate file content for generating diffs
-let codebaseContent = "";
+// Smart file selection: Include only the most relevant files based on task
+// This keeps us under the 200K token limit while providing accurate context
+let relevantFiles = "";
+const taskLower = task.toLowerCase();
 const fileList = files.split("\n").filter(f => f.trim());
 
-// Define which files to include (exclude large binaries, dependencies, etc.)
-const includedExtensions = ['.js', '.mjs', '.json', '.txt', '.html', '.css', '.md', '.yml', '.yaml'];
-const excludedPaths = ['node_modules/', 'package-lock.json', '.git/', 'coverage/', 'dist/', 'build/'];
+// File patterns to check based on task keywords
+const filePatterns = [
+  { keywords: ["help", "admin", "command"], files: ["templates/help/helpTextAdmin.txt", "templates/help/helpText.txt"] },
+  { keywords: ["config", "setting"], files: ["config/config.json", "src/config-handler.js"] },
+  { keywords: ["slack", "message", "notification"], files: ["src/slack-handler.js", "src/notification-handler.js"] },
+  { keywords: ["discord"], files: ["src/discord-handler.js"] },
+  { keywords: ["sonos", "speaker", "playback", "volume"], files: ["src/sonos-handler.js"] },
+  { keywords: ["web", "admin panel", "webui", "route", "endpoint"], files: ["src/webserver.js", "public/admin.html"] },
+  { keywords: ["queue", "track"], files: ["src/queue-handler.js"] },
+  { keywords: ["vote", "voting"], files: ["src/voting-handler.js"] },
+  { keywords: ["ai", "openai", "gemini"], files: ["src/ai-handler.js"] },
+  { keywords: ["test"], files: ["test/unit/"] },
+];
 
-console.log("[AGENT] Reading codebase files...");
+console.log("[AGENT] Identifying relevant files based on task...");
 let filesIncluded = 0;
 
-for (const filePath of fileList) {
-  // Skip if file is in excluded paths
-  if (excludedPaths.some(excluded => filePath.includes(excluded))) {
-    continue;
-  }
-
-  // Skip if file extension is not in allowed list
-  if (!includedExtensions.some(ext => filePath.endsWith(ext))) {
-    continue;
-  }
-
-  try {
-    const stats = fs.statSync(filePath);
-    // Skip files larger than 100KB to avoid token limits
-    if (stats.size > 100000) {
-      console.log(`[AGENT] Skipping large file: ${filePath} (${stats.size} bytes)`);
-      continue;
+// First, include files that match task keywords
+for (const pattern of filePatterns) {
+  if (pattern.keywords.some(keyword => taskLower.includes(keyword))) {
+    for (const filePath of pattern.files) {
+      try {
+        // Handle directory patterns
+        if (filePath.endsWith('/')) {
+          const dirFiles = fileList.filter(f => f.startsWith(filePath));
+          for (const dirFile of dirFiles.slice(0, 5)) { // Limit to 5 files per directory
+            const content = fs.readFileSync(dirFile, "utf8");
+            relevantFiles += `\n\n=== ${dirFile} ===\n${content}`;
+            filesIncluded++;
+            console.log(`[AGENT] Including ${dirFile}`);
+          }
+        } else {
+          const content = fs.readFileSync(filePath, "utf8");
+          relevantFiles += `\n\n=== ${filePath} ===\n${content}`;
+          filesIncluded++;
+          console.log(`[AGENT] Including ${filePath}`);
+        }
+      } catch (e) {
+        // File doesn't exist, skip it
+      }
     }
-
-    const content = fs.readFileSync(filePath, "utf8");
-    codebaseContent += `\n\n=== ${filePath} ===\n${content}`;
-    filesIncluded++;
-  } catch (e) {
-    // File read error, skip it
-    console.log(`[AGENT] Could not read ${filePath}: ${e.message}`);
   }
 }
 
-console.log(`[AGENT] Included ${filesIncluded} files for AI context`);
+// If no specific files matched, include a summary of available files
+if (filesIncluded === 0) {
+  console.log("[AGENT] No keyword match - including key architecture files");
+  const keyFiles = [
+    "src/webserver.js",
+    "src/slack-handler.js",
+    "src/discord-handler.js",
+    "templates/help/helpTextAdmin.txt"
+  ];
+
+  for (const filePath of keyFiles) {
+    try {
+      const content = fs.readFileSync(filePath, "utf8");
+      relevantFiles += `\n\n=== ${filePath} ===\n${content}`;
+      filesIncluded++;
+    } catch (e) {
+      // Skip if doesn't exist
+    }
+  }
+}
+
+console.log(`[AGENT] Included ${filesIncluded} relevant files for AI context`);
 
 // Build specialized prompt for SlackONOS
 const prompt = `You are an autonomous coding agent for SlackONOS, a democratic music bot for Discord and Slack that controls Sonos speakers.
@@ -233,8 +264,11 @@ ${cursorRules}
 Recent Commits:
 ${recentCommits}
 
-COMPLETE CODEBASE CONTENT (use these exact contents for accurate diffs):
-${codebaseContent}
+Repository Files (for reference):
+${files}
+
+RELEVANT FILE CONTENTS (use these exact contents for accurate diffs):
+${relevantFiles}
 
 TASK FROM ADMIN (${requester}):
 ${task}
