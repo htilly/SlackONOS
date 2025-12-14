@@ -873,8 +873,9 @@ for (const filePath of fileList) {
       continue;
     }
 
-    // Stop if we're approaching token limit (~600KB ≈ 150K tokens)
-    if (totalSize > 600000) {
+    // Stop if we're approaching token limit (~400KB ≈ 100K tokens)
+    // Reduced to leave more room for output (200K total - 100K input = ~100K output available)
+    if (totalSize > 400000) {
       console.log(`[AGENT] Reached size limit, skipping remaining files`);
       break;
     }
@@ -965,8 +966,11 @@ Rules for the diff format:
 8. CRITICAL: The diff MUST be complete - every file section must have BOTH "--- a/path" AND "+++ b/path" lines with complete file paths
 9. CRITICAL: Do NOT truncate the diff - if you reach token limits, prioritize completing fewer files rather than truncating
 10. Each file section must end properly - do not cut off mid-line or mid-hunk
+11. ABSOLUTELY CRITICAL: Every "+++ b/" line MUST contain the complete file path. Never write "+++ b/p" or any truncated path - always write the full path like "+++ b/public/setup/login.html"
+12. If you start a file section with "--- a/path/to/file", you MUST complete it with "+++ b/path/to/file" (same path, just with "b" instead of "a")
+13. Do NOT stop generating mid-file-path. Complete every line fully before moving to the next.
 
-Output ONLY the complete diff content, no explanations, no markdown code blocks. Ensure every file section is fully complete.`;
+Output ONLY the complete diff content, no explanations, no markdown code blocks. Ensure every file section is fully complete with complete file paths.`;
 
 // Call AI provider with unified interface
 async function callAI(promptText) {
