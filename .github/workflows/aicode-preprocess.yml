@@ -33,10 +33,16 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PREPROCESSING_MODEL: ${{ secrets.PREPROCESSING_MODEL || 'gpt-4o-mini' }}
           TASK: ${{ github.event.client_payload.task }}
+          REQUESTER: ${{ github.event.client_payload.requester }}
+          CONFLUENCE_URL: ${{ secrets.CONFLUENCE_URL }}
+          CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
+          CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+          CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY || 'AICODE' }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
           OUTPUT=$(node .github/agent/preprocess-task.mjs 2>&1)
           echo "$OUTPUT"
-          
+
           # Extract enhanced task from output
           if echo "$OUTPUT" | grep -q "ENHANCED_TASK_START"; then
             ENHANCED_TASK=$(echo "$OUTPUT" | sed -n '/ENHANCED_TASK_START/,/ENHANCED_TASK_END/p' | sed '1d;$d' | sed ':a;N;$!ba;s/\n/ /g')
@@ -47,12 +53,18 @@ jobs:
             # Fallback to original task
             echo "enhanced_task=${{ github.event.client_payload.task }}" >> $GITHUB_OUTPUT
           fi
-          
+
           # Extract JSON if available
           JSON_LINE=$(echo "$OUTPUT" | grep "ENHANCED_TASK_JSON:" || true)
           if [ -n "$JSON_LINE" ]; then
             JSON_DATA=$(echo "$JSON_LINE" | sed 's/ENHANCED_TASK_JSON://')
             echo "task_json=$JSON_DATA" >> $GITHUB_OUTPUT
+
+            # Extract Confluence URL
+            CONFLUENCE_URL=$(echo "$JSON_DATA" | jq -r '.confluenceUrl // "N/A"')
+            echo "confluence_url=$CONFLUENCE_URL" >> $GITHUB_OUTPUT
+          else
+            echo "confluence_url=N/A" >> $GITHUB_OUTPUT
           fi
 
       - name: Trigger main agent workflow
@@ -64,6 +76,7 @@ jobs:
           CHANNEL="${{ github.event.client_payload.channel }}"
           TIMESTAMP="${{ github.event.client_payload.timestamp }}"
           RUN_ID="${{ github.run_id }}"
+          CONFLUENCE_URL="${{ steps.preprocess.outputs.confluence_url }}"
 
           # Use jq to properly construct JSON payload with proper escaping
           PAYLOAD=$(jq -n \
@@ -74,6 +87,7 @@ jobs:
             --arg channel "$CHANNEL" \
             --arg timestamp "$TIMESTAMP" \
             --arg preprocessing_run_id "$RUN_ID" \
+            --arg confluence_url "$CONFLUENCE_URL" \
             '{
               event_type: $event_type,
               client_payload: {
@@ -82,7 +96,8 @@ jobs:
                 requester: $requester,
                 channel: $channel,
                 timestamp: $timestamp,
-                preprocessing_run_id: $preprocessing_run_id
+                preprocessing_run_id: $preprocessing_run_id,
+                confluence_url: $confluence_url
               }
             }')
 
