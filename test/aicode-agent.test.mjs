@@ -35,8 +35,8 @@ describe('AI Code Agent Integration', function() {
       expect(content).to.include('repository_dispatch:');
       expect(content).to.include('types: [aicode]');
       
-      // Check it runs the agent
-      expect(content).to.include('node .github/agent/agent.js');
+      // Check it runs the agent (supports multiple providers now)
+      expect(content).to.include('node --input-type=module .github/agent/agent.js');
       
       // Check it runs tests
       expect(content).to.include('npm test');
@@ -53,14 +53,15 @@ describe('AI Code Agent Integration', function() {
       
       const content = fs.readFileSync(agentPath, 'utf8');
       
-      // Check it imports required modules
-      expect(content).to.include('import OpenAI from "openai"');
+      // Check it imports required modules (supports multiple AI providers)
       expect(content).to.include('import { execSync } from "child_process"');
+      // Check for multi-provider support (Claude, OpenAI, or Gemini)
+      expect(content).to.match(/(@anthropic-ai\/sdk|@google\/generative-ai|openai|AI_PROVIDER)/);
       
       // Check it has safety checks
       expect(content).to.include('webauthn-handler.js');
       expect(content).to.include('auth-handler.js');
-      expect(content).to.include('SAFETY VIOLATION');
+      expect(content).to.match(/Safety Violation|SAFETY VIOLATION/i);
       
       // Check it validates diff format
       expect(content).to.include('diff --git');
