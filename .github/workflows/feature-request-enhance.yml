@@ -110,7 +110,6 @@ jobs:
   create-confluence:
     runs-on: ubuntu-latest
     needs: preprocess
-    if: needs.preprocess.outcome == 'success'
     permissions:
       contents: read
       issues: write
@@ -191,7 +190,6 @@ jobs:
   update-github-issue:
     runs-on: ubuntu-latest
     needs: preprocess
-    if: needs.preprocess.outcome == 'success'
     permissions:
       contents: read
       issues: write
@@ -244,8 +242,7 @@ jobs:
 
   add-comment:
     runs-on: ubuntu-latest
-    needs: [preprocess, update-github-issue]
-    if: needs.update-github-issue.outcome == 'success'
+    needs: update-github-issue
     permissions:
       issues: write
     steps:
