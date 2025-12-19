@@ -74,7 +74,7 @@ jobs:
         id: preprocess
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          PREPROCESSING_MODEL: ${{ secrets.PREPROCESSING_MODEL || 'gpt-4o-mini' }}
+          PREPROCESSING_MODEL: ${{ secrets.PREPROCESSING_MODEL }}
           TASK: ${{ github.event.issue.title }}
           REQUESTER: ${{ github.event.issue.user.login }}
           # Skip Confluence creation in preprocessing - will be done in parallel job
@@ -134,14 +134,14 @@ jobs:
         id: confluence
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          PREPROCESSING_MODEL: ${{ secrets.PREPROCESSING_MODEL || 'gpt-4o-mini' }}
+          PREPROCESSING_MODEL: ${{ secrets.PREPROCESSING_MODEL }}
           TASK: ${{ github.event.issue.title }}
           REQUESTER: ${{ github.event.issue.user.login }}
           CONFLUENCE_URL: ${{ secrets.CONFLUENCE_URL }}
           CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
           CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
-          CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY || 'AICODE' }}
-          CONFLUENCE_PARENT_PAGE_ID: ${{ secrets.CONFLUENCE_PARENT_PAGE_ID || '5177529' }}
+          CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+          CONFLUENCE_PARENT_PAGE_ID: ${{ secrets.CONFLUENCE_PARENT_PAGE_ID }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           # Use enhanced task from preprocessing
           ENHANCED_TASK: ${{ needs.preprocess.outputs.enhanced_task }}
