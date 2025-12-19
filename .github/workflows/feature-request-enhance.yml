@@ -30,8 +30,6 @@ jobs:
             else
               echo "has_enhancement=false" >> $GITHUB_OUTPUT
             fi
-          fi
-          
       - name: Check if issue already enhanced
         id: check-enhanced
         run: |
@@ -42,7 +40,6 @@ jobs:
             echo "Issue already has enhanced content, skipping"
           else
             echo "already_enhanced=false" >> $GITHUB_OUTPUT
-          fi
 
   preprocess:
     runs-on: ubuntu-latest
@@ -96,7 +93,6 @@ jobs:
           else
             # Fallback to original task
             echo "enhanced_task=${{ github.event.issue.title }}" >> $GITHUB_OUTPUT
-          fi
 
           # Extract JSON if available
           JSON_LINE=$(echo "$OUTPUT" | grep "ENHANCED_TASK_JSON:" || true)
@@ -105,7 +101,6 @@ jobs:
             echo "task_json=$JSON_DATA" >> $GITHUB_OUTPUT
           else
             echo "task_json=null" >> $GITHUB_OUTPUT
-          fi
 
   create-confluence:
     runs-on: ubuntu-latest
@@ -155,7 +150,6 @@ jobs:
             echo "confluence_url=$CONFLUENCE_URL" >> $GITHUB_OUTPUT
           else
             echo "confluence_url=" >> $GITHUB_OUTPUT
-          fi
 
       - name: Add Confluence link to issue
         if: steps.confluence.outputs.confluence_url != ''
@@ -190,6 +184,7 @@ jobs:
   update-github-issue:
     runs-on: ubuntu-latest
     needs: preprocess
+    if: needs.preprocess.outcome == 'success'
     permissions:
       contents: read
       issues: write
@@ -199,6 +194,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
+          set -e  # Exit on error
+          
+          # Ensure jq is available (should be pre-installed in ubuntu-latest)
+          if ! command -v jq &> /dev/null; then
+            echo "⚠️ jq not found, installing..."
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+          
           # Read enhanced task from JSON output to avoid shell quoting issues
           TASK_JSON="${{ needs.preprocess.outputs.task_json }}"
           
