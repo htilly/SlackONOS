@@ -54,10 +54,8 @@ jobs:
       enhanced_task: ${{ steps.preprocess.outputs.enhanced_task }}
       task_json: ${{ steps.preprocess.outputs.task_json }}
     steps:
-      - name: Checkout develop
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: develop
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -116,10 +114,8 @@ jobs:
     outputs:
       confluence_url: ${{ steps.confluence.outputs.confluence_url }}
     steps:
-      - name: Checkout develop
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: develop
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -198,9 +194,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
+          TASK_JSON: ${{ needs.preprocess.outputs.task_json }}
+          ENHANCED_TASK_OUTPUT: ${{ needs.preprocess.outputs.enhanced_task }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_USER: ${{ github.event.issue.user.login }}
+          ISSUE_CREATED: ${{ github.event.issue.created_at }}
         run: |
           # Read enhanced task from JSON output to avoid shell quoting issues
-          TASK_JSON="${{ needs.preprocess.outputs.task_json }}"
+          TASK_JSON="$TASK_JSON"
           
           if [ -n "$TASK_JSON" ] && [ "$TASK_JSON" != "null" ]; then
             # Extract values from JSON using jq
@@ -208,22 +210,22 @@ jobs:
             ORIGINAL_TASK=$(echo "$TASK_JSON" | jq -r '.original // empty')
           else
             # Fallback to outputs if JSON not available
-            ENHANCED_TASK="${{ needs.preprocess.outputs.enhanced_task }}"
-            ORIGINAL_TASK="${{ github.event.issue.title }}"
+            ENHANCED_TASK="$ENHANCED_TASK_OUTPUT"
+            ORIGINAL_TASK="$ISSUE_TITLE"
           fi
 
           # Get original body (may be null/empty)
-          ORIGINAL_BODY="${{ github.event.issue.body }}"
+          ORIGINAL_BODY="$ISSUE_BODY"
           if [ -z "$ORIGINAL_BODY" ] || [ "$ORIGINAL_BODY" = "null" ]; then
             ORIGINAL_BODY="_(No description provided)_"
           fi
-          
+
           # Build enhanced body with proper escaping using jq
           ENHANCED_BODY=$(jq -n \
             --arg enhanced "$ENHANCED_TASK" \
             --arg original "$ORIGINAL_BODY" \
-            --arg requester "${{ github.event.issue.user.login }}" \
-            --arg created "${{ github.event.issue.created_at }}" \
+            --arg requester "$ISSUE_USER" \
+            --arg created "$ISSUE_CREATED" \
             '"## 📝 Enhanced Feature Request\n\n" + $enhanced + "\n\n---\n\n## 📋 Original Request\n\n" + $original + "\n\n---\n\n**Requested by:** " + $requester + "  \n**Created:** " + $created')
 
           # Use jq to properly construct JSON payload for PATCH
