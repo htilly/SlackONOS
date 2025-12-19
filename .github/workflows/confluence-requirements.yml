@@ -15,23 +15,58 @@ jobs:
     - name: Prepare requirement data
       id: requirement
       run: |
-        ENHANCED_TASK="${{ github.event.client_payload.task }}"
-        ORIGINAL_TASK="${{ github.event.client_payload.original_task }}"
-        REQUESTER="${{ github.event.client_payload.requester }}"
-        TIMESTAMP="${{ github.event.client_payload.timestamp }}"
-        PREPROCESSING_RUN_ID="${{ github.event.client_payload.preprocessing_run_id }}"
+        # Use jq to safely extract values from event payload to avoid shell quoting issues
+        # Write event payload to temp file first
+        echo '${{ toJSON(github.event.client_payload) }}' > /tmp/event_payload.json
         
-        # Generate a title from the enhanced task (first line or first 100 chars)
-        TITLE=$(echo "$ENHANCED_TASK" | head -n 1 | cut -c 1-100)
-        if [ -z "$TITLE" ]; then
-          TITLE=$(echo "$ORIGINAL_TASK" | head -n 1 | cut -c 1-100)
+        # Extract values using jq (handles all escaping automatically)
+        ENHANCED_TASK=$(jq -r '.task // .original_task // ""' /tmp/event_payload.json)
+        ORIGINAL_TASK=$(jq -r '.original_task // .task // ""' /tmp/event_payload.json)
+        REQUESTER=$(jq -r '.requester // ""' /tmp/event_payload.json)
+        TIMESTAMP=$(jq -r '.timestamp // ""' /tmp/event_payload.json)
+        PREPROCESSING_RUN_ID=$(jq -r '.preprocessing_run_id // ""' /tmp/event_payload.json)
+        
+        # Generate title as today's date + summary from the task
+        DATE_STR=$(date +%Y-%m-%d)
+        
+        # Extract summary from enhanced task (first line or first 100 chars)
+        # Try to get a meaningful summary from the enhanced task
+        SUMMARY=$(echo "$ENHANCED_TASK" | head -n 1 | sed 's/^As an administrator, I want to //' | sed 's/ so that.*$//' | cut -c 1-80)
+        
+        # If summary is empty or too short, try original task
+        if [ -z "$SUMMARY" ] || [ ${#SUMMARY} -lt 10 ]; then
+          SUMMARY=$(echo "$ORIGINAL_TASK" | cut -c 1-80)
         fi
         
-        # Add timestamp to make title unique
-        DATE_STR=$(date +%Y-%m-%d)
-        TITLE_WITH_DATE="${TITLE} - ${DATE_STR}"
+        # Clean up summary - remove extra whitespace and ensure it's not empty
+        SUMMARY=$(echo "$SUMMARY" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+        if [ -z "$SUMMARY" ]; then
+          SUMMARY="Task"
+        fi
         
-        echo "title=$TITLE_WITH_DATE" >> $GITHUB_OUTPUT
+        TITLE="${DATE_STR} ${SUMMARY}"
+        
+        # Write all data to JSON file to avoid shell quoting issues
+        jq -n \
+          --arg title "$TITLE" \
+          --arg enhanced_task "$ENHANCED_TASK" \
+          --arg original_task "$ORIGINAL_TASK" \
+          --arg requester "$REQUESTER" \
+          --arg timestamp "$TIMESTAMP" \
+          --arg preprocessing_run_id "$PREPROCESSING_RUN_ID" \
+          '{
+            title: $title,
+            enhanced_task: $enhanced_task,
+            original_task: $original_task,
+            requester: $requester,
+            timestamp: $timestamp,
+            preprocessing_run_id: $preprocessing_run_id
+          }' > /tmp/requirement_data.json
+        
+        # Also set outputs for backward compatibility (using EOF for multiline values)
+        echo "title<<EOF" >> $GITHUB_OUTPUT
+        echo "$TITLE" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
         echo "enhanced_task<<EOF" >> $GITHUB_OUTPUT
         echo "$ENHANCED_TASK" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
@@ -53,12 +88,30 @@ jobs:
       run: |
         set -o pipefail
         
-        TITLE="${{ steps.requirement.outputs.title }}"
-        ENHANCED_TASK="${{ steps.requirement.outputs.enhanced_task }}"
-        ORIGINAL_TASK="${{ steps.requirement.outputs.original_task }}"
-        REQUESTER="${{ steps.requirement.outputs.requester }}"
-        TIMESTAMP="${{ steps.requirement.outputs.timestamp }}"
-        PREPROCESSING_RUN_ID="${{ steps.requirement.outputs.preprocessing_run_id }}"
+        # Read all values from JSON file to avoid shell quoting issues
+        if [ -f /tmp/requirement_data.json ] && jq -e . /tmp/requirement_data.json >/dev/null 2>&1; then
+          # Read from JSON file (safest method)
+          TITLE=$(jq -r '.title // ""' /tmp/requirement_data.json)
+          ENHANCED_TASK=$(jq -r '.enhanced_task // ""' /tmp/requirement_data.json)
+          ORIGINAL_TASK=$(jq -r '.original_task // ""' /tmp/requirement_data.json)
+          REQUESTER=$(jq -r '.requester // ""' /tmp/requirement_data.json)
+          TIMESTAMP=$(jq -r '.timestamp // ""' /tmp/requirement_data.json)
+          PREPROCESSING_RUN_ID=$(jq -r '.preprocessing_run_id // ""' /tmp/requirement_data.json)
+        else
+          # Fallback to outputs (may have quoting issues but better than nothing)
+          TITLE="${{ steps.requirement.outputs.title }}"
+          ENHANCED_TASK="${{ steps.requirement.outputs.enhanced_task }}"
+          ORIGINAL_TASK="${{ steps.requirement.outputs.original_task }}"
+          REQUESTER="${{ steps.requirement.outputs.requester }}"
+          TIMESTAMP="${{ steps.requirement.outputs.timestamp }}"
+          PREPROCESSING_RUN_ID="${{ steps.requirement.outputs.preprocessing_run_id }}"
+        fi
+        
+        # Ensure TITLE is not empty
+        if [ -z "$TITLE" ]; then
+          DATE_STR=$(date +%Y-%m-%d)
+          TITLE="${DATE_STR} Task"
+        fi
         
         # Convert enhanced task (user story) to Confluence storage format
         # Convert markdown-like formatting to HTML
