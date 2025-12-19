@@ -53,7 +53,6 @@ jobs:
     outputs:
       enhanced_task: ${{ steps.preprocess.outputs.enhanced_task }}
       task_json: ${{ steps.preprocess.outputs.task_json }}
-      confluence_url: ${{ steps.preprocess.outputs.confluence_url }}
     steps:
       - name: Checkout develop
         uses: actions/checkout@v4
@@ -114,6 +113,9 @@ jobs:
     if: needs.preprocess.outcome == 'success'
     permissions:
       contents: read
+      issues: write
+    outputs:
+      confluence_url: ${{ steps.confluence.outputs.confluence_url }}
     steps:
       - name: Checkout develop
         uses: actions/checkout@v4
@@ -133,107 +135,58 @@ jobs:
       - name: Create Confluence page
         id: confluence
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          PREPROCESSING_MODEL: ${{ secrets.PREPROCESSING_MODEL }}
           TASK: ${{ github.event.issue.title }}
           REQUESTER: ${{ github.event.issue.user.login }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
           CONFLUENCE_URL: ${{ secrets.CONFLUENCE_URL }}
           CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
           CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
           CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
           CONFLUENCE_PARENT_PAGE_ID: ${{ secrets.CONFLUENCE_PARENT_PAGE_ID }}
           GITHUB_RUN_ID: ${{ github.run_id }}
-          # Use enhanced task from preprocessing
+          GITHUB_REPOSITORY: ${{ github.repository }}
           ENHANCED_TASK: ${{ needs.preprocess.outputs.enhanced_task }}
         run: |
-          # Create a temporary script that only creates Confluence page
-          cat > /tmp/create-confluence.mjs << 'SCRIPT_EOF'
-          // Use native fetch (Node 20+)
-          
-          const enhancedTask = process.env.ENHANCED_TASK || "";
-          const task = process.env.TASK || "";
-          const requester = process.env.REQUESTER || "unknown";
-          const confluenceUrl = process.env.CONFLUENCE_URL || "";
-          const confluenceEmail = process.env.CONFLUENCE_EMAIL || "";
-          const confluenceApiToken = process.env.CONFLUENCE_API_TOKEN || "";
-          const confluenceSpaceKey = process.env.CONFLUENCE_SPACE_KEY || "AICODE";
-          const confluenceParentPageId = process.env.CONFLUENCE_PARENT_PAGE_ID || "";
-          const githubRunId = process.env.GITHUB_RUN_ID || "unknown";
-          
-          if (!confluenceUrl || !confluenceEmail || !confluenceApiToken) {
-            console.log("[CONFLUENCE] Confluence credentials not configured, skipping page creation");
-            process.exit(0);
-          }
-          
-          try {
-            const timestamp = new Date().toISOString().split('T')[0];
-            const pageTitle = `AICODE: ${task.substring(0, 80)} (${timestamp})`;
-            
-            const storageContent = `
-          <h2>Original Task</h2>
-          <p>${task.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>
-          
-          <h2>User Story</h2>
-          <p>${enhancedTask.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>
-          
-          <h2>Implementation Status</h2>
-          <p><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Yellow</ac:parameter><ac:parameter ac:name="title">In Progress</ac:parameter></ac:structured-macro></p>
-          
-          <h2>Related Links</h2>
-          <p>GitHub Run: <a href="https://github.com/htilly/SlackONOS/actions/runs/${githubRunId}">View Workflow</a></p>
-            `.trim();
-            
-            const auth = Buffer.from(`${confluenceEmail}:${confluenceApiToken}`).toString('base64');
-            
-            const pageData = {
-              type: 'page',
-              title: pageTitle,
-              space: { key: confluenceSpaceKey },
-              body: {
-                storage: {
-                  value: storageContent,
-                  representation: 'storage'
-                }
-              }
-            };
-            
-            if (confluenceParentPageId) {
-              pageData.ancestors = [{ id: confluenceParentPageId }];
-            }
-            
-            const response = await fetch(`${confluenceUrl}/rest/api/content`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Basic ${auth}`,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-              },
-              body: JSON.stringify(pageData)
-            });
-            
-            if (!response.ok) {
-              const errorText = await response.text();
-              console.error(`[CONFLUENCE] Failed to create page: ${response.status} ${response.statusText}`);
-              console.error(`[CONFLUENCE] Error details: ${errorText}`);
-              process.exit(1);
-            }
-            
-            const data = await response.json();
-            const pageUrl = `${confluenceUrl}/wiki${data._links.webui}`;
-            console.log(`[CONFLUENCE] ✅ Confluence page created: ${pageUrl}`);
-            console.log(`CONFLUENCE_URL:${pageUrl}`);
-          } catch (error) {
-            console.error(`[CONFLUENCE] Error creating page: ${error.message}`);
-            process.exit(1);
-          }
-          SCRIPT_EOF
-          
-          OUTPUT=$(node /tmp/create-confluence.mjs 2>&1)
+          OUTPUT=$(node .github/agent/create-confluence.mjs 2>&1)
           echo "$OUTPUT"
-          
+
           # Extract Confluence URL
-          CONFLUENCE_URL=$(echo "$OUTPUT" | grep "CONFLUENCE_URL:" | sed 's/CONFLUENCE_URL://' || echo "N/A")
-          echo "confluence_url=$CONFLUENCE_URL" >> $GITHUB_OUTPUT
+          CONFLUENCE_URL=$(echo "$OUTPUT" | grep "CONFLUENCE_URL:" | sed 's/CONFLUENCE_URL://' || echo "")
+          if [ -n "$CONFLUENCE_URL" ]; then
+            echo "confluence_url=$CONFLUENCE_URL" >> $GITHUB_OUTPUT
+          else
+            echo "confluence_url=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Add Confluence link to issue
+        if: steps.confluence.outputs.confluence_url != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CONFLUENCE_URL: ${{ steps.confluence.outputs.confluence_url }}
+        run: |
+          # Get current issue body
+          CURRENT_BODY=$(curl -s "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" | jq -r '.body')
+
+          # Add Confluence link to the end
+          UPDATED_BODY=$(jq -n \
+            --arg current "$CURRENT_BODY" \
+            --arg confluence "$CONFLUENCE_URL" \
+            '$current + "\n\n📄 **Requirements documented:** " + $confluence')
+
+          # Update issue with Confluence link
+          PAYLOAD=$(jq -n \
+            --arg body "$UPDATED_BODY" \
+            '{body: $body}')
+
+          curl -X PATCH "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD"
+
+          echo "✅ Added Confluence link to issue"
 
   update-github-issue:
     runs-on: ubuntu-latest
@@ -268,28 +221,12 @@ jobs:
           fi
           
           # Build enhanced body with proper escaping using jq
-          # Start with base content (without Confluence link for now)
-          BASE_BODY=$(jq -n \
+          ENHANCED_BODY=$(jq -n \
             --arg enhanced "$ENHANCED_TASK" \
             --arg original "$ORIGINAL_BODY" \
             --arg requester "${{ github.event.issue.user.login }}" \
             --arg created "${{ github.event.issue.created_at }}" \
-            '## 📝 Enhanced Feature Request
-
-\($enhanced)
-
----
-
-## 📋 Original Request
-
-\($original)
-
----
-
-**Requested by:** \($requester)  
-**Created:** \($created)')
-          
-          ENHANCED_BODY="$BASE_BODY"
+            '"## 📝 Enhanced Feature Request\n\n" + $enhanced + "\n\n---\n\n## 📋 Original Request\n\n" + $original + "\n\n---\n\n**Requested by:** " + $requester + "  \n**Created:** " + $created')
 
           # Use jq to properly construct JSON payload for PATCH
           PAYLOAD=$(jq -n \
@@ -305,54 +242,10 @@ jobs:
 
           echo "✅ Issue #${{ github.event.issue.number }} updated with enhanced description"
 
-  add-confluence-link:
-    runs-on: ubuntu-latest
-    needs: [preprocess, create-confluence, update-github-issue]
-    if: needs.create-confluence.outcome == 'success' && needs.update-github-issue.outcome == 'success'
-    permissions:
-      issues: write
-    steps:
-      - name: Add Confluence link to issue
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          CONFLUENCE_URL="${{ needs.create-confluence.outputs.confluence_url }}"
-          
-          if [ "$CONFLUENCE_URL" = "N/A" ] || [ -z "$CONFLUENCE_URL" ]; then
-            echo "No Confluence URL to add"
-            exit 0
-          fi
-          
-          # Get current issue body
-          CURRENT_BODY=$(curl -s "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}" \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" | jq -r '.body')
-          
-          # Add Confluence link to the end
-          UPDATED_BODY=$(jq -n \
-            --arg current "$CURRENT_BODY" \
-            --arg confluence "$CONFLUENCE_URL" \
-            '\($current)
-
-📄 **Requirements documented:** \($confluence)')
-          
-          # Update issue with Confluence link
-          PAYLOAD=$(jq -n \
-            --arg body "$UPDATED_BODY" \
-            '{body: $body}')
-          
-          curl -X PATCH "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}" \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD"
-          
-          echo "✅ Added Confluence link to issue"
-
   add-comment:
     runs-on: ubuntu-latest
-    needs: [preprocess, create-confluence, update-github-issue]
-    if: always() && (needs.preprocess.outcome == 'success' || needs.update-github-issue.outcome == 'success')
+    needs: [preprocess, update-github-issue]
+    if: needs.update-github-issue.outcome == 'success'
     permissions:
       issues: write
     steps:
@@ -360,27 +253,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          CONFLUENCE_URL="${{ needs.create-confluence.outputs.confluence_url }}"
-          
           # Build comment with proper escaping using jq
-          if [ "$CONFLUENCE_URL" != "N/A" ] && [ -n "$CONFLUENCE_URL" ]; then
-            COMMENT=$(jq -n \
-              --arg confluence "$CONFLUENCE_URL" \
-              '🤖 **Feature request enhanced!**
-
-This feature request has been automatically enhanced with a structured user story format.
-
-📄 Requirements documented: \($confluence)
-
-The issue description has been updated with acceptance criteria and technical notes.')
-          else
-            COMMENT=$(jq -n \
-              '🤖 **Feature request enhanced!**
-
-This feature request has been automatically enhanced with a structured user story format.
-
-The issue description has been updated with acceptance criteria and technical notes.')
-          fi
+          COMMENT=$(jq -n '"🤖 **Feature request enhanced!**\n\nThis feature request has been automatically enhanced with a structured user story format.\n\nThe issue description has been updated with acceptance criteria and technical notes."')
 
           # Use jq to properly construct JSON payload
           PAYLOAD=$(jq -n \
@@ -392,3 +266,5 @@ The issue description has been updated with acceptance criteria and technical no
             -H "Accept: application/vnd.github+json" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD"
+
+          echo "✅ Added comment to issue"
