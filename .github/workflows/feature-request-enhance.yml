@@ -199,6 +199,24 @@ jobs:
           TASK_JSON="${{ needs.preprocess.outputs.task_json }}"
           if [ -n "$TASK_JSON" ] && [ "$TASK_JSON" != "null" ]; then
             # Extract values from JSON using jq
+          set -e  # Exit on error
+          
+          # Ensure jq is available
+          if ! command -v jq &> /dev/null; then
+            echo "⚠️ jq not found, installing..."
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+          
+
+          set -e  # Exit on error
+          
+          # Ensure jq is available (should be pre-installed in ubuntu-latest)
+          if ! command -v jq &> /dev/null; then
+            echo "⚠️ jq not found, installing..."
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+          
+
             ENHANCED_TASK=$(echo "$TASK_JSON" | jq -r '.enhanced // empty')
             ORIGINAL_TASK=$(echo "$TASK_JSON" | jq -r '.original // empty')
           else
