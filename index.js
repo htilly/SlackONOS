@@ -2324,20 +2324,34 @@ async function getAdminStatus() {
 
 /**
  * Get current playing track and volume
+ * @param {Object} options - Options for fetching now playing info
+ * @param {boolean} options.skipQueue - If true, skip fetching the queue (faster, but no nextTracks)
  */
-async function getNowPlaying() {
+async function getNowPlaying(options = {}) {
   try {
+    const { skipQueue = false } = options;
+    
     // Parallelize all Sonos API calls for better performance
-    const [state, volume, queue] = await Promise.all([
+    const promises = [
       sonos.getCurrentState(),
-      sonos.getVolume(),
-      sonos.getQueue().catch(err => {
-        // Ignore queue errors for now-playing
-        return null;
-      })
-    ]);
+      sonos.getVolume()
+    ];
+    
+    // Only fetch queue if explicitly needed (skip for status polling to avoid choppy playback)
+    if (!skipQueue) {
+      promises.push(
+        sonos.getQueue().catch(err => {
+          // Ignore queue errors for now-playing
+          return null;
+        })
+      );
+    } else {
+      promises.push(Promise.resolve(null));
+    }
+    
+    const [state, volume, queue] = await Promise.all(promises);
 
-    // Fetch queue (next tracks)
+    // Fetch queue (next tracks) - only if we have queue data
     let nextTracks = [];
     if (queue && queue.items) {
       nextTracks = queue.items.slice(0, 5).map(item => ({
@@ -2503,7 +2517,10 @@ function startStatusPolling() {
   // Poll every 2 seconds for track changes
   statusPollInterval = setInterval(async () => {
     try {
-      const nowPlaying = await getNowPlaying();
+      // Skip queue fetch for status polling - we only need current track info
+      // This prevents choppy playback with large queues (400+ tracks)
+      // The queue is only needed for admin UI "next tracks", not for detecting track changes
+      const nowPlaying = await getNowPlaying({ skipQueue: true });
       const currentTrackId = nowPlaying.track 
         ? `${nowPlaying.track.title}|${nowPlaying.track.artist}|${nowPlaying.track.queuePosition || 0}`
         : null;
@@ -2899,7 +2916,7 @@ const commandRegistry = new Map([
   ['stats', { fn: _stats, admin: true }],
   ['configdump', { fn: _configdump, admin: true, aliases: ['cfgdump', 'confdump'] }],
   ['aiunparsed', { fn: _aiUnparsed, admin: true, aliases: ['aiun', 'aiunknown'] }],
-  ['aicode', { fn: _aicode, admin: true }],
+  ['featurerequest', { fn: _featurerequest, admin: true, aliases: ['feuturerequest'] }],
   ['test', { fn: (args, ch, u) => _addToSpotifyPlaylist(args, ch), admin: true }]
 ]);
 
@@ -5855,19 +5872,19 @@ async function _sendDirectMessage(userName, text) {
   }
 }
 
-async function _aicode(input, channel, userName) {
-  _logUserAction(userName, 'aicode');
+async function _featurerequest(input, channel, userName) {
+  _logUserAction(userName, 'featurerequest');
   
   if (!input || input.length < 2) {
-    _slackMessage('Usage: `aicode <task description>`\nExample: `aicode fix the help DM error handling`', channel);
+    _slackMessage('Usage: `featurerequest <feature description>`\nExample: `featurerequest add support for YouTube playlists`', channel);
     return;
   }
   
-  const task = input.slice(1).join(' ');
+  const featureDescription = input.slice(1).join(' ');
   
   try {
-    // Trigger GitHub repository_dispatch
-    const response = await fetch(`https://api.github.com/repos/htilly/SlackONOS/dispatches`, {
+    // Create GitHub issue with enhancement label
+    const response = await fetch(`https://api.github.com/repos/htilly/SlackONOS/issues`, {
       method: 'POST',
       headers: {
         'Authorization': `token ${config.get('githubToken')}`,
@@ -5875,25 +5892,23 @@ async function _aicode(input, channel, userName) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        event_type: 'aicode',
-        client_payload: {
-          task: task,
-          requester: userName,
-          channel: channel,
-          timestamp: Date.now()
-        }
+        title: featureDescription,
+        body: `**Requested by:** ${userName}\n**Channel:** ${channel}\n**Timestamp:** ${new Date().toISOString()}\n\n${featureDescription}`,
+        labels: ['enhancement']
       })
     });
     
     if (response.ok) {
-      _slackMessage(`🤖 AI agent triggered!\n*Task:* ${task}\n_Working on it..._`, channel);
-      logger.info(`[AICODE] Triggered for task: ${task} by ${userName}`);
+      const issue = await response.json();
+      _slackMessage(`✅ Feature request created!\n*Issue:* #${issue.number}\n*Title:* ${featureDescription}\n🔗 ${issue.html_url}`, channel);
+      logger.info(`[FEATUREREQUEST] Created issue #${issue.number} for: ${featureDescription} by ${userName}`);
     } else {
-      throw new Error(`GitHub API error: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`GitHub API error: ${response.status} - ${errorText}`);
     }
   } catch (err) {
-    logger.error(`[AICODE] Failed to trigger: ${err.message}`);
-    _slackMessage(`❌ Failed to trigger agent: ${err.message}`, channel);
+    logger.error(`[FEATUREREQUEST] Failed to create issue: ${err.message}`);
+    _slackMessage(`❌ Failed to create feature request: ${err.message}`, channel);
   }
 }
 
