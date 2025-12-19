@@ -193,8 +193,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
-
         run: |
+          set -e  # Exit on error
+          
+          # Ensure jq is available (should be pre-installed in ubuntu-latest)
+          if ! command -v jq &> /dev/null; then
+            echo "⚠️ jq not found, installing..."
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+          
           # Read enhanced task from JSON output to avoid shell quoting issues
           TASK_JSON="${{ needs.preprocess.outputs.task_json }}"
           if [ -n "$TASK_JSON" ] && [ "$TASK_JSON" != "null" ]; then
