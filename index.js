@@ -2340,15 +2340,15 @@ async function getNowPlaying(options = {}) {
     // Only fetch queue if explicitly needed (skip for status polling to avoid choppy playback)
     if (!skipQueue) {
       promises.push(
-        sonos.getQueue().catch(err => {
-          // Ignore queue errors for now-playing
-          return null;
-        })
+      sonos.getQueue().catch(err => {
+        // Ignore queue errors for now-playing
+        return null;
+      })
       );
     } else {
       promises.push(Promise.resolve(null));
     }
-    
+
     const [state, volume, queue] = await Promise.all(promises);
 
     // Fetch queue (next tracks) - only if we have queue data
