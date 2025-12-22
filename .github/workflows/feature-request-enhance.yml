@@ -30,6 +30,8 @@ jobs:
             else
               echo "has_enhancement=false" >> $GITHUB_OUTPUT
             fi
+          fi
+          
       - name: Check if issue already enhanced
         id: check-enhanced
         run: |
