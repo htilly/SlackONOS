@@ -6,63 +6,67 @@ on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: 'Issue number to process (optional)'
-        required: false
+        description: 'Issue number to process'
+        required: true
         type: string
+
+permissions:
+  issues: write
+  contents: read
 
 jobs:
   check-label:
     runs-on: ubuntu-latest
-    permissions:
-      issues: read
     outputs:
       has_enhancement: ${{ steps.check.outputs.has_enhancement }}
-      already_enhanced: ${{ steps.check_enhanced.outputs.already_enhanced }}
+      already_enhanced: ${{ steps.check.outputs.already_enhanced }}
+      issue_number: ${{ steps.set_issue.outputs.issue_number }}
     steps:
-      - name: Check enhancement label
+      - name: Set issue number
+        id: set_issue
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "issue_number=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "issue_number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch and check issue
         id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.set_issue.outputs.issue_number }}
         run: |
           set -e
-          
-          echo "Event action: ${{ github.event.action }}"
-          echo "Label name: ${{ github.event.label.name }}"
-          
-          # Handle labeled events (when a label is added to an existing issue)
-          if [ "${{ github.event.action }}" = "labeled" ]; then
-            if [ "${{ github.event.label.name }}" = "enhancement" ]; then
-              echo "✅ Labeled event with enhancement label"
-              echo "has_enhancement=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "❌ Labeled event but label is not 'enhancement'"
-              echo "has_enhancement=false" >> "$GITHUB_OUTPUT"
-            fi
-          # Handle opened events (when an issue is created, possibly with labels)
-          elif [ "${{ github.event.action }}" = "opened" ]; then
-            # Use join to get all label names, then check if enhancement is in the list
-            LABELS="${{ join(github.event.issue.labels.*.name, ' ') }}"
-            echo "Issue labels: $LABELS"
-            
-            if [ -n "$LABELS" ] && echo "$LABELS" | grep -qw "enhancement"; then
-              echo "✅ Opened event with enhancement label"
-              echo "has_enhancement=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "❌ Opened event but no enhancement label found"
-              echo "has_enhancement=false" >> "$GITHUB_OUTPUT"
-            fi
+
+          # Fetch issue data
+          ISSUE_JSON=$(curl -s \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/$ISSUE_NUMBER")
+
+          # Write to temp file for safe parsing
+          echo "$ISSUE_JSON" > /tmp/issue.json
+
+          # Extract labels
+          LABELS=$(jq -r '.labels[].name' /tmp/issue.json)
+
+          # Check for enhancement label (word boundary, not exact line)
+          if echo "$LABELS" | grep -qw "enhancement"; then
+            echo "✅ Issue has enhancement label"
+            echo "has_enhancement=true" >> "$GITHUB_OUTPUT"
           else
-            echo "❌ Unknown event action: ${{ github.event.action }}"
+            echo "❌ No enhancement label found"
             echo "has_enhancement=false" >> "$GITHUB_OUTPUT"
           fi
 
-
-      - name: Check if issue already enhanced
-        id: check_enhanced
-        run: |
-          set -e
-          BODY="${{ github.event.issue.body }}"
-          if echo "$BODY" | grep -qE "## .*Enhanced Feature Request"; then
+          # Check if already enhanced
+          BODY=$(jq -r '.body // ""' /tmp/issue.json)
+          if echo "$BODY" | grep -qF "## 📝 Enhanced Feature Request"; then
+            echo "⚠️  Issue already enhanced - skipping"
             echo "already_enhanced=true" >> "$GITHUB_OUTPUT"
           else
+            echo "✅ Issue not yet enhanced"
             echo "already_enhanced=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -72,6 +76,10 @@ jobs:
     if: needs.check-label.outputs.has_enhancement == 'true' && needs.check-label.outputs.already_enhanced == 'false'
     outputs:
       enhanced_task: ${{ steps.preprocess.outputs.enhanced_task }}
+      issue_title: ${{ steps.fetch.outputs.issue_title }}
+      issue_user: ${{ steps.fetch.outputs.issue_user }}
+      issue_body: ${{ steps.fetch.outputs.issue_body }}
+      issue_created: ${{ steps.fetch.outputs.issue_created }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,13 +94,38 @@ jobs:
         working-directory: .github/agent
         run: npm install
 
+      - name: Fetch full issue data
+        id: fetch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ needs.check-label.outputs.issue_number }}
+        run: |
+          ISSUE_JSON=$(curl -s \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/$ISSUE_NUMBER")
+
+          TITLE=$(echo "$ISSUE_JSON" | jq -r '.title')
+          USER=$(echo "$ISSUE_JSON" | jq -r '.user.login')
+          BODY=$(echo "$ISSUE_JSON" | jq -r '.body // ""')
+          CREATED=$(echo "$ISSUE_JSON" | jq -r '.created_at')
+
+          echo "issue_title=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "issue_user=$USER" >> "$GITHUB_OUTPUT"
+          echo "issue_created=$CREATED" >> "$GITHUB_OUTPUT"
+          {
+            echo "issue_body<<EOF"
+            echo "$BODY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Preprocess issue
         id: preprocess
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PREPROCESSING_MODEL: ${{ secrets.PREPROCESSING_MODEL }}
-          TASK: ${{ github.event.issue.title }}
-          REQUESTER: ${{ github.event.issue.user.login }}
+          TASK: ${{ steps.fetch.outputs.issue_title }}
+          REQUESTER: ${{ steps.fetch.outputs.issue_user }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
           set -e
@@ -102,7 +135,7 @@ jobs:
           if echo "$OUTPUT" | grep -q "ENHANCED_TASK_START"; then
             ENHANCED=$(echo "$OUTPUT" | sed -n '/ENHANCED_TASK_START/,/ENHANCED_TASK_END/p' | sed '1d;$d')
           else
-            ENHANCED="${{ github.event.issue.title }}"
+            ENHANCED="$TASK"
           fi
 
           {
@@ -113,9 +146,7 @@ jobs:
 
   create-confluence:
     runs-on: ubuntu-latest
-    needs: preprocess
-    permissions:
-      issues: write
+    needs: [check-label, preprocess]
     outputs:
       confluence_url: ${{ steps.confluence.outputs.confluence_url }}
     steps:
@@ -135,9 +166,9 @@ jobs:
       - name: Create Confluence page
         id: confluence
         env:
-          TASK: ${{ github.event.issue.title }}
-          REQUESTER: ${{ github.event.issue.user.login }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          TASK: ${{ needs.preprocess.outputs.issue_title }}
+          REQUESTER: ${{ needs.preprocess.outputs.issue_user }}
+          ISSUE_NUMBER: ${{ needs.check-label.outputs.issue_number }}
           CONFLUENCE_URL: ${{ secrets.CONFLUENCE_URL }}
           CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
           CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
@@ -154,62 +185,43 @@ jobs:
 
   update-issue:
     runs-on: ubuntu-latest
-    needs: [preprocess, create-confluence]
-    permissions:
-      issues: write
+    needs: [check-label, preprocess, create-confluence]
     steps:
       - name: Update issue body
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ENHANCED: ${{ needs.preprocess.outputs.enhanced_task }}
-          CONFLUENCE_URL: ${{ needs.create-confluence.outputs.confluence_url }}
+          ISSUE_NUMBER: ${{ needs.check-label.outputs.issue_number }}
         run: |
           set -euo pipefail
 
-          # Ensure jq exists
-          if ! command -v jq >/dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y jq
-          fi
-
-          # Fetch original issue body (as-is)
-          ORIGINAL=$(curl -s \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}" \
-            | jq -r '.body // "" | split("## 📝 Enhanced Feature Request")[0] // .')
-
-
-          # Build Markdown body (NO escaped \n, real newlines)
-          MARKDOWN=$(cat <<EOF
-## 📝 Enhanced Feature Request
-
-$ENHANCED
-
----
-
-📄 **Requirements documented:** ${CONFLUENCE_URL:-_Not available_}
-
----
-
-## 📋 Original Request
-
-$ORIGINAL
-
----
-
-**Requested by:** ${{ github.event.issue.user.login }}
-**Created:** ${{ github.event.issue.created_at }}
-EOF
-)
-
-          # Update the issue
-          curl -X PATCH \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg body "$MARKDOWN" '{body:$body}')" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}"
+          # Use jq to safely build JSON with proper escaping
+          jq -n \
+            --arg enhanced "${{ needs.preprocess.outputs.enhanced_task }}" \
+            --arg confluence "${{ needs.create-confluence.outputs.confluence_url }}" \
+            --arg original "${{ needs.preprocess.outputs.issue_body }}" \
+            --arg requester "${{ needs.preprocess.outputs.issue_user }}" \
+            --arg created "${{ needs.preprocess.outputs.issue_created }}" \
+            '{
+              body: (
+                "## 📝 Enhanced Feature Request\n\n" +
+                $enhanced +
+                "\n\n---\n\n" +
+                "📄 **Requirements documented:** " +
+                (if $confluence != "" then $confluence else "_Not available_" end) +
+                "\n\n---\n\n" +
+                "## 📋 Original Request\n\n" +
+                $original +
+                "\n\n---\n\n" +
+                "**Requested by:** " + $requester + "\n" +
+                "**Created:** " + $created
+              )
+            }' \
+          | curl -X PATCH \
+              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Content-Type: application/json" \
+              -d @- \
+              "https://api.github.com/repos/${{ github.repository }}/issues/$ISSUE_NUMBER"
 
           echo "✅ Issue updated with enhanced + original content"
 
@@ -217,13 +229,12 @@ EOF
 
   add-comment:
     runs-on: ubuntu-latest
-    needs: update-issue
-    permissions:
-      issues: write
+    needs: [check-label, update-issue]
     steps:
       - name: Comment
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ needs.check-label.outputs.issue_number }}
         run: |
           COMMENT="🤖 **Feature request enhanced!**
 
@@ -235,4 +246,4 @@ EOF
               -H "Accept: application/vnd.github+json" \
               -H "Content-Type: application/json" \
               -d @- \
-              "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments"
+              "https://api.github.com/repos/${{ github.repository }}/issues/$ISSUE_NUMBER/comments"
