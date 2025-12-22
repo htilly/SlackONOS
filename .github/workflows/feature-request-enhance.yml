@@ -42,6 +42,7 @@ jobs:
             echo "Issue already has enhanced content, skipping"
           else
             echo "already_enhanced=false" >> $GITHUB_OUTPUT
+          fi
 
   preprocess:
     runs-on: ubuntu-latest
