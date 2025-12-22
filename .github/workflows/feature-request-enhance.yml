@@ -3,10 +3,18 @@ name: Enhance Feature Requests
 on:
   issues:
     types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to process (optional)'
+        required: false
+        type: string
 
 jobs:
   check-label:
     runs-on: ubuntu-latest
+    permissions:
+      issues: read
     outputs:
       has_enhancement: ${{ steps.check.outputs.has_enhancement }}
       already_enhanced: ${{ steps.check_enhanced.outputs.already_enhanced }}
@@ -15,16 +23,35 @@ jobs:
         id: check
         run: |
           set -e
-
-          if [ "${{ github.event.action }}" = "labeled" ] && [ "${{ github.event.label.name }}" = "enhancement" ]; then
-            echo "has_enhancement=true" >> "$GITHUB_OUTPUT"
-          else
-            LABELS="${{ join(github.event.issue.labels.*.name, ',') }}"
-            if [ -n "$LABELS" ] && echo "$LABELS" | grep -q "enhancement"; then
+          
+          echo "Event action: ${{ github.event.action }}"
+          echo "Label name: ${{ github.event.label.name }}"
+          
+          # Handle labeled events (when a label is added to an existing issue)
+          if [ "${{ github.event.action }}" = "labeled" ]; then
+            if [ "${{ github.event.label.name }}" = "enhancement" ]; then
+              echo "✅ Labeled event with enhancement label"
               echo "has_enhancement=true" >> "$GITHUB_OUTPUT"
             else
+              echo "❌ Labeled event but label is not 'enhancement'"
               echo "has_enhancement=false" >> "$GITHUB_OUTPUT"
             fi
+          # Handle opened events (when an issue is created, possibly with labels)
+          elif [ "${{ github.event.action }}" = "opened" ]; then
+            # Use join to get all label names, then check if enhancement is in the list
+            LABELS="${{ join(github.event.issue.labels.*.name, ' ') }}"
+            echo "Issue labels: $LABELS"
+            
+            if [ -n "$LABELS" ] && echo "$LABELS" | grep -qw "enhancement"; then
+              echo "✅ Opened event with enhancement label"
+              echo "has_enhancement=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "❌ Opened event but no enhancement label found"
+              echo "has_enhancement=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "❌ Unknown event action: ${{ github.event.action }}"
+            echo "has_enhancement=false" >> "$GITHUB_OUTPUT"
           fi
 
 
