@@ -14,35 +14,32 @@ jobs:
       - name: Check if issue has enhancement label
         id: check
         run: |
-          set -euo pipefail
-
+          # For 'labeled' events, check if the label being added is 'enhancement'
+          # For 'opened' events, check if issue has 'enhancement' label
           if [ "${{ github.event.action }}" = "labeled" ]; then
             if [ "${{ github.event.label.name }}" = "enhancement" ]; then
-              echo "has_enhancement=true" >> "$GITHUB_OUTPUT"
+              echo "has_enhancement=true" >> $GITHUB_OUTPUT
             else
-              echo "has_enhancement=false" >> "$GITHUB_OUTPUT"
+              echo "has_enhancement=false" >> $GITHUB_OUTPUT
             fi
           else
+            # For 'opened' events, check all labels
             LABELS="${{ join(github.event.issue.labels.*.name, ',') }}"
             if echo "$LABELS" | grep -q "enhancement"; then
-              echo "has_enhancement=true" >> "$GITHUB_OUTPUT"
+              echo "has_enhancement=true" >> $GITHUB_OUTPUT
             else
-              echo "has_enhancement=false" >> "$GITHUB_OUTPUT"
+              echo "has_enhancement=false" >> $GITHUB_OUTPUT
             fi
-          fi
-
       - name: Check if issue already enhanced
         id: check-enhanced
         run: |
-          set -euo pipefail
-
+          # Check if issue already has enhanced content
           ISSUE_BODY="${{ github.event.issue.body }}"
           if echo "$ISSUE_BODY" | grep -q "Enhanced Feature Request"; then
-            echo "already_enhanced=true" >> "$GITHUB_OUTPUT"
-            echo "Issue already enhanced – skipping"
+            echo "already_enhanced=true" >> $GITHUB_OUTPUT
+            echo "Issue already has enhanced content, skipping"
           else
-            echo "already_enhanced=false" >> "$GITHUB_OUTPUT"
-          fi
+            echo "already_enhanced=false" >> $GITHUB_OUTPUT
 
   preprocess:
     runs-on: ubuntu-latest
@@ -54,69 +51,76 @@ jobs:
       enhanced_task: ${{ steps.preprocess.outputs.enhanced_task }}
       task_json: ${{ steps.preprocess.outputs.task_json }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout develop
+        uses: actions/checkout@v4
         with:
           ref: develop
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+          cache: 'npm'
 
       - name: Install agent dependencies
         working-directory: .github/agent
         run: npm install
 
-      - name: Preprocess feature request
+      - name: Preprocess feature request to user story (OpenAI only)
         id: preprocess
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PREPROCESSING_MODEL: ${{ secrets.PREPROCESSING_MODEL }}
           TASK: ${{ github.event.issue.title }}
           REQUESTER: ${{ github.event.issue.user.login }}
+          # Skip Confluence creation in preprocessing - will be done in parallel job
+          CONFLUENCE_URL: ""
+          CONFLUENCE_EMAIL: ""
+          CONFLUENCE_API_TOKEN: ""
+          CONFLUENCE_SPACE_KEY: ""
+          CONFLUENCE_PARENT_PAGE_ID: ""
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
-          set -euo pipefail
-
           OUTPUT=$(node .github/agent/preprocess-task.mjs 2>&1)
           echo "$OUTPUT"
 
+          # Extract enhanced task from output
           if echo "$OUTPUT" | grep -q "ENHANCED_TASK_START"; then
             ENHANCED_TASK=$(echo "$OUTPUT" | sed -n '/ENHANCED_TASK_START/,/ENHANCED_TASK_END/p' | sed '1d;$d')
-            {
-              echo "enhanced_task<<EOF"
-              echo "$ENHANCED_TASK"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
+            echo "enhanced_task<<EOF" >> $GITHUB_OUTPUT
+            echo "$ENHANCED_TASK" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
           else
-            echo "enhanced_task=${{ github.event.issue.title }}" >> "$GITHUB_OUTPUT"
-          fi
+            # Fallback to original task
+            echo "enhanced_task=${{ github.event.issue.title }}" >> $GITHUB_OUTPUT
 
+          # Extract JSON if available
           JSON_LINE=$(echo "$OUTPUT" | grep "ENHANCED_TASK_JSON:" || true)
           if [ -n "$JSON_LINE" ]; then
-            echo "task_json=${JSON_LINE#ENHANCED_TASK_JSON:}" >> "$GITHUB_OUTPUT"
+            JSON_DATA=$(echo "$JSON_LINE" | sed 's/ENHANCED_TASK_JSON://')
+            echo "task_json=$JSON_DATA" >> $GITHUB_OUTPUT
           else
-            echo "task_json=null" >> "$GITHUB_OUTPUT"
-          fi
+            echo "task_json=null" >> $GITHUB_OUTPUT
 
   create-confluence:
     runs-on: ubuntu-latest
     needs: preprocess
-    if: needs.preprocess.outcome == 'success'
     permissions:
       contents: read
       issues: write
     outputs:
       confluence_url: ${{ steps.confluence.outputs.confluence_url }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout develop
+        uses: actions/checkout@v4
         with:
           ref: develop
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+          cache: 'npm'
 
       - name: Install agent dependencies
         working-directory: .github/agent
@@ -137,12 +141,15 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           ENHANCED_TASK: ${{ needs.preprocess.outputs.enhanced_task }}
         run: |
-          set -euo pipefail
           OUTPUT=$(node .github/agent/create-confluence.mjs 2>&1)
           echo "$OUTPUT"
 
-          URL=$(echo "$OUTPUT" | grep "CONFLUENCE_URL:" | sed 's/CONFLUENCE_URL://')
-          echo "confluence_url=${URL:-}" >> "$GITHUB_OUTPUT"
+          # Extract Confluence URL
+          CONFLUENCE_URL=$(echo "$OUTPUT" | grep "CONFLUENCE_URL:" | sed 's/CONFLUENCE_URL://' || echo "")
+          if [ -n "$CONFLUENCE_URL" ]; then
+            echo "confluence_url=$CONFLUENCE_URL" >> $GITHUB_OUTPUT
+          else
+            echo "confluence_url=" >> $GITHUB_OUTPUT
 
       - name: Add Confluence link to issue
         if: steps.confluence.outputs.confluence_url != ''
@@ -150,26 +157,29 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CONFLUENCE_URL: ${{ steps.confluence.outputs.confluence_url }}
         run: |
-          set -euo pipefail
-          command -v jq >/dev/null || sudo apt-get update && sudo apt-get install -y jq
+          # Get current issue body
+          CURRENT_BODY=$(curl -s "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" | jq -r '.body')
 
-          CURRENT_BODY=$(curl -s \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}" \
-            | jq -r '.body')
-
+          # Add Confluence link to the end
           UPDATED_BODY=$(jq -n \
-            --arg body "$CURRENT_BODY" \
-            --arg link "$CONFLUENCE_URL" \
-            '$body + "\n\n📄 **Requirements documented:** " + $link')
+            --arg current "$CURRENT_BODY" \
+            --arg confluence "$CONFLUENCE_URL" \
+            '$current + "\n\n📄 **Requirements documented:** " + $confluence')
 
-          curl -X PATCH \
-            -H "Authorization: token $GITHUB_TOKEN" \
+          # Update issue with Confluence link
+          PAYLOAD=$(jq -n \
+            --arg body "$UPDATED_BODY" \
+            '{body: $body}')
+
+          curl -X PATCH "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
             -H "Content-Type: application/json" \
-            -d "$(jq -n --arg body "$UPDATED_BODY" '{body:$body}')" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}"
+            -d "$PAYLOAD"
+
+          echo "✅ Added Confluence link to issue"
 
   update-github-issue:
     runs-on: ubuntu-latest
@@ -187,7 +197,7 @@ jobs:
           command -v jq >/dev/null || sudo apt-get update && sudo apt-get install -y jq
 
           TASK_JSON='${{ needs.preprocess.outputs.task_json }}'
-          if [ "$TASK_JSON" != "null" ]; then
+          if [ "$TASK_JSON" != "null" ] && [ -n "$TASK_JSON" ]; then
             ENHANCED=$(echo "$TASK_JSON" | jq -r '.enhanced // empty')
           else
             ENHANCED='${{ needs.preprocess.outputs.enhanced_task }}'
@@ -207,27 +217,30 @@ jobs:
             -d "$(jq -n --arg body "$BODY" '{body:$body}')" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}"
 
+          echo "✅ Issue #${{ github.event.issue.number }} updated with enhanced description"
+
   add-comment:
     runs-on: ubuntu-latest
     needs: update-github-issue
-    if: needs.update-github-issue.outcome == 'success'
     permissions:
       issues: write
     steps:
-      - name: Add comment
+      - name: Add comment to issue
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          command -v jq >/dev/null || sudo apt-get update && sudo apt-get install -y jq
+          # Build comment with proper escaping using jq
+          COMMENT=$(jq -n '"🤖 **Feature request enhanced!**\n\nThis feature request has been automatically enhanced with a structured user story format.\n\nThe issue description has been updated with acceptance criteria and technical notes."')
 
-          COMMENT="🤖 **Feature request enhanced!**
+          # Use jq to properly construct JSON payload
+          PAYLOAD=$(jq -n \
+            --arg body "$COMMENT" \
+            '{body: $body}')
 
-This feature request has been automatically enhanced with a structured user story format."
-
-          curl -X POST \
-            -H "Authorization: token $GITHUB_TOKEN" \
+          curl -X POST "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
             -H "Content-Type: application/json" \
-            -d "$(jq -n --arg body "$COMMENT" '{body:$body}')" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments"
+            -d "$PAYLOAD"
+
+          echo "✅ Added comment to issue"
