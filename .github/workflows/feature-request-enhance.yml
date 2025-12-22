@@ -60,7 +60,7 @@ jobs:
         run: |
           set -e
           BODY="${{ github.event.issue.body }}"
-          if echo "$BODY" | grep -q "## .*Enhanced Feature Request"; then
+          if echo "$BODY" | grep -qE "## .*Enhanced Feature Request"; then
             echo "already_enhanced=true" >> "$GITHUB_OUTPUT"
           else
             echo "already_enhanced=false" >> "$GITHUB_OUTPUT"
@@ -149,7 +149,7 @@ jobs:
           OUTPUT=$(node .github/agent/create-confluence.mjs 2>&1)
           echo "$OUTPUT"
 
-          URL=$(echo "$OUTPUT" | grep "CONFLUENCE_URL:" | sed 's/CONFLUENCE_URL://')
+          URL=$(echo "$OUTPUT" | grep "CONFLUENCE_URL:" | sed 's/CONFLUENCE_URL://' | tr -d '[:space:]')
           echo "confluence_url=$URL" >> "$GITHUB_OUTPUT"
 
   update-issue:
@@ -174,10 +174,10 @@ jobs:
 
           # Fetch original issue body (as-is)
           ORIGINAL=$(curl -s \
-          -H "Authorization: token $GITHUB_TOKEN" \
-          -H "Accept: application/vnd.github+json" \
-          "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}" \
-          | jq -r '.body | split("## 📝 Enhanced Feature Request")[0] // ""')
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}" \
+            | jq -r '.body // "" | split("## 📝 Enhanced Feature Request")[0] // .')
 
 
           # Build Markdown body (NO escaped \n, real newlines)
@@ -225,9 +225,11 @@ EOF
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          jq -n \
-            --arg body "🤖 **Feature request enhanced!**\n\nIssue description and requirements are now structured and documented." \
-            '{body:$body}' \
+          COMMENT="🤖 **Feature request enhanced!**
+
+          Issue description and requirements are now structured and documented."
+
+          jq -n --arg body "$COMMENT" '{body:$body}' \
           | curl -X POST \
               -H "Authorization: token $GITHUB_TOKEN" \
               -H "Accept: application/vnd.github+json" \
