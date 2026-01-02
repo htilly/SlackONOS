@@ -4463,9 +4463,18 @@ async function _add(input, channel, userName) {
     if (state === 'stopped') {
       logger.info('Player stopped - ensuring queue is active source and flushing');
       try {
-        // Parallel stop and flush (flush is safe even if not stopped)
+        // Stop any active playback to force Sonos to use queue
+        try {
+          await sonos.stop();
+          await new Promise(resolve => setTimeout(resolve, 300));
+        } catch (stopErr) {
+          // Ignore stop errors (might already be stopped)
+          logger.debug('Stop command result (may already be stopped): ' + stopErr.message);
+        }
+        
+        // Flush queue to start fresh
         await sonos.flush();
-        await new Promise(resolve => setTimeout(resolve, 200)); // Reduced from 300ms
+        await new Promise(resolve => setTimeout(resolve, 300));
         logger.info('Queue flushed and ready');
       } catch (flushErr) {
         logger.warn('Could not flush queue: ' + flushErr.message);
@@ -4493,8 +4502,9 @@ async function _add(input, channel, userName) {
     // Try to queue the first valid candidate (most relevant result)
     let result = null;
     try {
+      logger.info(`Attempting to queue: ${firstCandidate.name} by ${firstCandidate.artist} (URI: ${firstCandidate.uri})`);
       await sonos.queue(firstCandidate.uri);
-      logger.info('Added track: ' + firstCandidate.name);
+      logger.info('Successfully queued track: ' + firstCandidate.name);
       result = firstCandidate;
     } catch (e) {
       const errorDetails = e.message || String(e);
@@ -4540,7 +4550,72 @@ async function _add(input, channel, userName) {
       // Start playback in background (don't await)
       (async () => {
         try {
-          await new Promise(resolve => setTimeout(resolve, 300)); // Brief delay for queue to settle
+          // Ensure queue is the active source before starting playback
+          // Stop any active playback to force Sonos to use queue
+          try {
+            await sonos.stop();
+            await new Promise(resolve => setTimeout(resolve, 500));
+          } catch (stopErr) {
+            // Ignore stop errors (might already be stopped)
+            logger.debug('Stop before play (may already be stopped): ' + stopErr.message);
+          }
+          
+          // Verify queue has items before trying to play (prevents UPnP error 701)
+          let queueReady = false;
+          let retries = 0;
+          while (!queueReady && retries < 5) {
+            try {
+              const queue = await sonos.getQueue();
+              if (queue && queue.items && queue.items.length > 0) {
+                queueReady = true;
+                logger.debug(`Queue verified: ${queue.items.length} items ready`);
+              } else {
+                logger.debug(`Queue not ready yet (attempt ${retries + 1}/5), waiting...`);
+                await new Promise(resolve => setTimeout(resolve, 300));
+                retries++;
+              }
+            } catch (queueErr) {
+              logger.debug(`Queue check failed (attempt ${retries + 1}/5): ${queueErr.message}`);
+              await new Promise(resolve => setTimeout(resolve, 300));
+              retries++;
+            }
+          }
+          
+          if (!queueReady) {
+            logger.warn('Queue not ready after 5 attempts, attempting playback anyway');
+          }
+          
+          // Try to activate queue by seeking to position 1 (alternative to SetAVTransportURI)
+          // This should activate the queue as the transport source
+          try {
+            logger.debug('Attempting to seek to queue position 1 to activate queue');
+            // Seek to track 1 in the queue to activate it
+            await sonos.avTransportService().Seek({
+              InstanceID: 0,
+              Unit: 'TRACK_NR',
+              Target: '1'
+            });
+            logger.debug('Successfully sought to track 1, queue should be active');
+            // Wait for seek to complete
+            await new Promise(resolve => setTimeout(resolve, 500));
+          } catch (seekErr) {
+            // If seek fails, try alternative: use next() to jump to first track
+            logger.debug('Seek failed, trying next() to activate queue: ' + seekErr.message);
+            try {
+              // Jump to first track in queue (this should activate the queue)
+              await sonos.next();
+              logger.debug('Used next() to activate queue');
+              await new Promise(resolve => setTimeout(resolve, 300));
+            } catch (nextErr) {
+              logger.debug('next() also failed: ' + nextErr.message);
+              // Continue anyway - play() might still work
+            }
+          }
+          
+          // Wait a moment to ensure queue is ready
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Start playback from queue
           await sonos.play();
           logger.info('Started playback from queue');
         } catch (playErr) {
