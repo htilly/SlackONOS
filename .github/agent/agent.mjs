@@ -1229,16 +1229,16 @@ This is ONE FILE ONLY. Generate the complete diff now:`;
 if (!filesToModify || allDiffs.length === 0) {
   console.log(`[AGENT] Using single-pass generation method...`);
   const apiStartTime = Date.now();
-  try {
-    output = await retryWithBackoff(async () => {
-      return await callAI(prompt);
-    }, 3, 1000);
-    const apiDuration = Date.now() - apiStartTime;
-    console.log(`[AGENT] API call completed in ${apiDuration}ms`);
-  } catch (error) {
-    const errorDetails = formatErrorDetails(error, {});
-    await handleError(error, `${provider.toUpperCase()} API Error`, { errorDetails });
-    // handleError calls process.exit(1), so we never reach here
+try {
+  output = await retryWithBackoff(async () => {
+    return await callAI(prompt);
+  }, 3, 1000);
+  const apiDuration = Date.now() - apiStartTime;
+  console.log(`[AGENT] API call completed in ${apiDuration}ms`);
+} catch (error) {
+  const errorDetails = formatErrorDetails(error, {});
+  await handleError(error, `${provider.toUpperCase()} API Error`, { errorDetails });
+  // handleError calls process.exit(1), so we never reach here
   }
 }
 
@@ -1246,31 +1246,31 @@ if (!filesToModify || allDiffs.length === 0) {
 let diff = output.trim();
 if (!filesToModify || allDiffs.length === 0) {
   // Only do markdown extraction for fallback single-pass method
-  if (output.includes("```")) {
-    // Try to extract content between code fences
-    // Handle both single and multiple code blocks
-    const matches = output.matchAll(/```(?:diff)?\n([\s\S]*?)```/g);
-    const extractedDiffs = [];
-    for (const match of matches) {
-      extractedDiffs.push(match[1].trim());
-    }
-    // Use the longest extracted diff (likely the actual diff)
-    if (extractedDiffs.length > 0) {
-      diff = extractedDiffs.reduce((a, b) => a.length > b.length ? a : b);
-    }
-    
-    // If no code blocks found but output contains diff markers, use the whole output
-    if (!diff.includes("--- a/") && output.includes("--- a/")) {
-      // Extract everything after the first "--- a/" line
-      const diffStart = output.indexOf("--- a/");
-      diff = output.substring(diffStart).trim();
-      // Remove any trailing markdown or explanations
-      const diffEnd = diff.indexOf("\n\n```") !== -1 ? diff.indexOf("\n\n```") : 
-                      diff.indexOf("\n\n##") !== -1 ? diff.indexOf("\n\n##") :
-                      diff.indexOf("\n\n**") !== -1 ? diff.indexOf("\n\n**") :
-                      diff.length;
-      diff = diff.substring(0, diffEnd).trim();
-    }
+if (output.includes("```")) {
+  // Try to extract content between code fences
+  // Handle both single and multiple code blocks
+  const matches = output.matchAll(/```(?:diff)?\n([\s\S]*?)```/g);
+  const extractedDiffs = [];
+  for (const match of matches) {
+    extractedDiffs.push(match[1].trim());
+  }
+  // Use the longest extracted diff (likely the actual diff)
+  if (extractedDiffs.length > 0) {
+    diff = extractedDiffs.reduce((a, b) => a.length > b.length ? a : b);
+  }
+  
+  // If no code blocks found but output contains diff markers, use the whole output
+  if (!diff.includes("--- a/") && output.includes("--- a/")) {
+    // Extract everything after the first "--- a/" line
+    const diffStart = output.indexOf("--- a/");
+    diff = output.substring(diffStart).trim();
+    // Remove any trailing markdown or explanations
+    const diffEnd = diff.indexOf("\n\n```") !== -1 ? diff.indexOf("\n\n```") : 
+                    diff.indexOf("\n\n##") !== -1 ? diff.indexOf("\n\n##") :
+                    diff.indexOf("\n\n**") !== -1 ? diff.indexOf("\n\n**") :
+                    diff.length;
+    diff = diff.substring(0, diffEnd).trim();
+  }
   }
 } else {
   // For one-file-at-a-time, diff is already clean (output from combined diffs)
@@ -1372,9 +1372,9 @@ if (validationResult.errors.length > 0 || diff.match(/\+\+\+ b\/[^\n]*$/m)) {
       }
       
       const errorMsg = `${truncationReason}. The AI model may have generated an incomplete diff.\n\nErrors:\n${validationResult.errors.join('\n')}\n\nAPI Response Info:\n- Stop reason: ${stopReason}\n- Output tokens used: ${outputTokens}\n- Was truncated: ${wasTruncated}\n\nDiff preview (last 500 chars):\n\`\`\`\n${diff.substring(Math.max(0, diffLength - 500))}\n\`\`\`\n\nPossible causes:\n- Model hit output token limit (check max_tokens setting)\n- Input context too large, leaving insufficient room for output\n- Model stopped generating for other reasons\n\nSuggestions:\n- Reduce input context size (fewer files) - already reduced to 400KB\n- Break task into smaller parts\n- Verify max_tokens is sufficient (currently 180K)`;
-      const errorDetails = formatErrorDetails(new Error(errorMsg), { diff: diff.substring(Math.max(0, diffLength - 1000)), files: validationResult.stats.filesChanged });
+    const errorDetails = formatErrorDetails(new Error(errorMsg), { diff: diff.substring(Math.max(0, diffLength - 1000)), files: validationResult.stats.filesChanged });
       await handleError(new Error(errorMsg), "Incomplete Diff (Truncated)", { diff: diff.substring(Math.max(0, diffLength - 1000)), errorDetails });
-      // handleError calls process.exit(1), so we never reach here
+    // handleError calls process.exit(1), so we never reach here
     }
   }
 }
