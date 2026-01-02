@@ -6,6 +6,7 @@
   "scripts": {
     "pretest": "if [ ! -f 'config/config.json' ]; then cp 'config/config.json.example' 'config/config.json'; fi",
     "test": "NODE_ENV=test mocha --reporter spec 'test/**/*.mjs' --ignore 'test/tools/**' --exit",
+    "test:coverage": "NODE_ENV=test c8 --reporter=text --reporter=html --reporter=lcov mocha --reporter spec 'test/**/*.mjs' --ignore 'test/tools/**' --exit",
     "test:record": "node test/tools/record-spotify-responses.mjs",
     "test:integration": "node test/tools/integration-test-suite.mjs",
     "test:integration:verbose": "node test/tools/integration-test-suite.mjs --verbose"
@@ -25,26 +26,27 @@
     "url": "git@github.com:htilly/SlackONOS.git"
   },
   "devDependencies": {
-    "chai": "6.2.1",
+    "c8": "^10.1.3",
+    "chai": "6.2.2",
     "mocha": "^11.7.5",
-    "sinon": "^21.0.0"
+    "sinon": "^21.0.1"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@jsfeb26/urllib-sync": "^1.1.4",
     "@sefinek/google-tts-api": "^2.1.11",
+    "@simplewebauthn/server": "^13.2.2",
     "@slack/rtm-api": "^7.0.4",
     "@slack/socket-mode": "^2.0.5",
     "@slack/web-api": "^7.12.0",
-    "@simplewebauthn/server": "^13.2.2",
     "bcrypt": "^6.0.0",
     "discord.js": "^14.17.3",
-    "selfsigned": "^5.2.0",
     "mp3-duration": "^1.1.0",
     "nconf": "^0.13.0",
-    "openai": "^6.9.1",
-    "posthog-node": "^5.15.0",
+    "openai": "^6.15.0",
+    "posthog-node": "^5.18.0",
+    "selfsigned": "^5.4.0",
     "sonos": "^1.14.2",
     "soundcraft-ui-connection": "^4.0.0",
     "urlencode": "^2.0.0",
