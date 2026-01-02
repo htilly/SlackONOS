@@ -1,0 +1,19 @@
+{
+  "exclude": [
+    "test/**",
+    "**/*.test.mjs",
+    "**/*.spec.mjs",
+    "config/**",
+    "node_modules/**",
+    "coverage/**",
+    "**/tools/**",
+    "**/*.example"
+  ],
+  "reporter": ["text", "html", "lcov"],
+  "check-coverage": false,
+  "lines": 0,
+  "functions": 0,
+  "branches": 0,
+  "statements": 0
+}
+
