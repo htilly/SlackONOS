@@ -44,7 +44,7 @@
     "discord.js": "^14.17.3",
     "mp3-duration": "^1.1.0",
     "nconf": "^0.13.0",
-    "openai": "^6.15.0",
+    "openai": "^6.16.0",
     "posthog-node": "^5.18.0",
     "selfsigned": "^5.4.0",
     "sonos": "^1.14.2",
