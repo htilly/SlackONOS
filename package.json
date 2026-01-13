@@ -46,7 +46,7 @@
     "nconf": "^0.13.0",
     "openai": "^6.15.0",
     "posthog-node": "^5.18.0",
-    "selfsigned": "^5.4.0",
+    "selfsigned": "^5.5.0",
     "sonos": "^1.14.2",
     "soundcraft-ui-connection": "^4.0.0",
     "urlencode": "^2.0.0",
