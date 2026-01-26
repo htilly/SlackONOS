@@ -30,6 +30,7 @@ const voteLimitPerUser = 4;
 let voteScore = {};
 let trackVoteCount = {}; // Vote count per track (keyed by track key: URI or title+artist)
 let trackVoteUsers = {}; // Track users who have voted for each track (keyed by track key)
+let trackVoteMetadata = {}; // Track metadata (title, artist) for display even if track leaves queue
 
 // Flush vote state
 let flushVoteCounter = 0;
@@ -290,6 +291,9 @@ function clearVoteCountForTrack(trackRef, artist) {
   if (trackKey in trackVoteUsers) {
     trackVoteUsers[trackKey].clear();
   }
+  if (trackKey in trackVoteMetadata) {
+    delete trackVoteMetadata[trackKey];
+  }
 }
 
 // ==========================================
@@ -341,6 +345,9 @@ async function vote(input, channel, userName) {
     }
     trackVoteCount[trackKey] += 1;
     trackVoteUsers[trackKey].add(userName);
+    
+    // Store track metadata for display even if track leaves queue later
+    trackVoteMetadata[trackKey] = { title: voteTrackName, artist: voteTrackArtist };
 
     await sendMessage('🗳️ This is VOTE *' + trackVoteCount[trackKey] + '/' + voteLimit + '* for *' + voteTrackName + '* - Almost there! 🎵', channel);
 
@@ -393,30 +400,40 @@ async function votecheck(channel) {
   // Get current queue to match track keys to track numbers
   try {
     const result = await sonos.getQueue();
+
+    // Build a Map of trackKey -> track info for O(1) lookups (instead of O(n²) nested loops)
+    const queueMap = new Map();
+    for (let i = 0; i < result.items.length; i++) {
+      const item = result.items[i];
+      const itemKey = _trackKey(item.title, item.artist, item.uri);
+      queueMap.set(itemKey, { index: i, title: item.title, artist: item.artist });
+    }
+
     let voteInfo = '';
     let foundAny = false;
-    
+
     for (const trackKey in trackVoteCount) {
       const votes = trackVoteCount[trackKey];
       if (votes > 0) {
-        // Try to find the track in the queue by matching URI or title+artist
+        // O(1) lookup instead of O(n) nested loop
         let trackInfo = '';
-        for (let i = 0; i < result.items.length; i++) {
-          const item = result.items[i];
-          const itemKey = _trackKey(item.title, item.artist, item.uri);
-          if (itemKey === trackKey) {
-            trackInfo = `Track #${i}: ${item.title} by ${item.artist}`;
-            break;
+        const queueTrack = queueMap.get(trackKey);
+        if (queueTrack) {
+          trackInfo = `Track #${queueTrack.index}: *${queueTrack.title}* by _${queueTrack.artist}_`;
+        } else {
+          // Track no longer in queue - use stored metadata if available
+          const metadata = trackVoteMetadata[trackKey];
+          if (metadata && metadata.title) {
+            trackInfo = `*${metadata.title}* by _${metadata.artist}_ (no longer in queue)`;
+          } else {
+            trackInfo = `Track (no longer in queue)`;
           }
-        }
-        if (!trackInfo) {
-          trackInfo = `Track (key: ${trackKey.substring(0, 20)}...)`;
         }
         voteInfo += `${trackInfo}: ${votes}/${voteLimit} votes\n`;
         foundAny = true;
       }
     }
-    
+
     if (foundAny) {
       await sendMessage(`Current vote counts:\n${voteInfo}`, channel);
     } else {

@@ -25,6 +25,9 @@
 > `votecheck` - Check the current vote counts.
 > `flushvote` - Vote to clear the entire queue. Needs *{{flushVoteLimit}}* votes within *{{voteTimeLimitMinutes}}* min. 🗑️
 
+*📝 Feedback:*
+> `featurerequest <feature description>` - Create a GitHub issue for a feature request. ✨
+
 _Tip: You can use Spotify URIs (spotify:track:...) OR paste Spotify links (https://open.spotify.com/...) with add, append, addalbum, and addplaylist commands!_
 
 💡 _Suggestions or bugs? <https://github.com/htilly/SlackONOS|GitHub>_

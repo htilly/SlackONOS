@@ -619,3 +619,323 @@ describe('Voting System Logic', function() {
     });
   });
 });
+
+// ==========================================
+// ACTUAL VOTING MODULE TESTS
+// ==========================================
+
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+
+describe('Voting Module (voting.js)', function() {
+  let voting;
+  let mockDeps;
+  let messages;
+  let userActions;
+  
+  beforeEach(function() {
+    // Clear module cache to get fresh module state
+    delete require.cache[require.resolve('../voting.js')];
+    voting = require('../voting.js');
+    
+    messages = [];
+    userActions = [];
+    
+    mockDeps = {
+      logger: {
+        info: () => {},
+        error: () => {},
+        warn: () => {},
+        debug: () => {}
+      },
+      sendMessage: async (msg, channel) => {
+        messages.push({ msg, channel });
+      },
+      sonos: {
+        getQueue: async () => ({
+          items: [
+            { id: 'Q:0/1', title: 'Track 1', artist: 'Artist 1', uri: 'spotify:track:1' },
+            { id: 'Q:0/2', title: 'Track 2', artist: 'Artist 2', uri: 'spotify:track:2' },
+            { id: 'Q:0/3', title: 'Track 3', artist: 'Artist 3', uri: 'spotify:track:3' }
+          ]
+        }),
+        currentTrack: async () => ({ queuePosition: 1, title: 'Current Track', artist: 'Current Artist' }),
+        flush: async () => {},
+        next: async () => {},
+        reorderTracksInQueue: async () => {}
+      },
+      getCurrentTrackTitle: async () => ({ title: 'Test Track', artist: 'Test Artist' }),
+      logUserAction: async (user, action) => {
+        userActions.push({ user, action });
+      },
+      gongMessages: ['GONG!'],
+      voteMessages: ['Voted!']
+    };
+    
+    voting.initialize(mockDeps);
+    voting.setConfig({
+      gongLimit: 3,
+      voteLimit: 3,
+      voteImmuneLimit: 3,
+      flushVoteLimit: 3,
+      voteTimeLimitMinutes: 5
+    });
+  });
+
+  describe('initialize', function() {
+    it('should throw if logger not provided', function() {
+      delete require.cache[require.resolve('../voting.js')];
+      const freshVoting = require('../voting.js');
+      
+      expect(() => freshVoting.initialize({})).to.throw('Voting module requires a logger');
+    });
+
+    it('should accept minimal dependencies', function() {
+      delete require.cache[require.resolve('../voting.js')];
+      const freshVoting = require('../voting.js');
+      
+      expect(() => freshVoting.initialize({ logger: mockDeps.logger })).to.not.throw();
+    });
+  });
+
+  describe('setConfig and getConfig', function() {
+    it('should update gongLimit', function() {
+      voting.setConfig({ gongLimit: 5 });
+      expect(voting.getConfig().gongLimit).to.equal(5);
+    });
+
+    it('should update voteLimit', function() {
+      voting.setConfig({ voteLimit: 10 });
+      expect(voting.getConfig().voteLimit).to.equal(10);
+    });
+
+    it('should update multiple values at once', function() {
+      voting.setConfig({
+        gongLimit: 2,
+        voteLimit: 4,
+        flushVoteLimit: 8
+      });
+      
+      const config = voting.getConfig();
+      expect(config.gongLimit).to.equal(2);
+      expect(config.voteLimit).to.equal(4);
+      expect(config.flushVoteLimit).to.equal(8);
+    });
+
+    it('should not update undefined values', function() {
+      voting.setConfig({ gongLimit: 5 });
+      voting.setConfig({ voteLimit: 10 });
+      
+      expect(voting.getConfig().gongLimit).to.equal(5);
+      expect(voting.getConfig().voteLimit).to.equal(10);
+    });
+  });
+
+  describe('Track Key and Normalization', function() {
+    it('should not detect non-existent track as banned', function() {
+      expect(voting.isTrackGongBanned('Unknown Track', 'Unknown Artist')).to.be.false;
+    });
+
+    it('should detect banned track', function() {
+      voting.banTrackFromGong({ title: 'Banned Track', artist: 'Banned Artist' });
+      expect(voting.isTrackGongBanned({ title: 'Banned Track', artist: 'Banned Artist' })).to.be.true;
+    });
+
+    it('should handle object track reference', function() {
+      voting.banTrackFromGong({ title: 'Test', artist: 'Artist', uri: 'spotify:track:123' });
+      expect(voting.isTrackGongBanned({ title: 'Test', artist: 'Artist', uri: 'spotify:track:123' })).to.be.true;
+    });
+
+    it('should handle string track reference (legacy)', function() {
+      voting.banTrackFromGong('Legacy Track', 'Legacy Artist');
+      expect(voting.isTrackGongBanned('Legacy Track', 'Legacy Artist')).to.be.true;
+    });
+
+    it('should handle null track reference', function() {
+      expect(voting.isTrackGongBanned(null)).to.be.false;
+    });
+  });
+
+  describe('getImmuneTracks', function() {
+    it('should return empty array initially', function() {
+      expect(voting.getImmuneTracks()).to.be.an('array');
+    });
+
+    it('should return banned tracks', function() {
+      voting.banTrackFromGong({ title: 'Track 1', artist: 'Artist 1' });
+      voting.banTrackFromGong({ title: 'Track 2', artist: 'Artist 2' });
+      
+      const immune = voting.getImmuneTracks();
+      expect(immune.length).to.be.at.least(2);
+    });
+  });
+
+  describe('resetGongState', function() {
+    it('should reset gong state', function() {
+      // This is a unit test of the reset function
+      // The gong state is internal, but we can verify it doesn't throw
+      expect(() => voting.resetGongState()).to.not.throw();
+    });
+  });
+
+  describe('hasActiveVotes', function() {
+    it('should return false for unvoted track', function() {
+      expect(voting.hasActiveVotes(0, 'spotify:track:1', 'Track 1', 'Artist 1')).to.be.false;
+    });
+  });
+
+  describe('clearVoteCountForTrack', function() {
+    it('should not throw for non-existent track', function() {
+      expect(() => voting.clearVoteCountForTrack({ title: 'Nonexistent', artist: 'Unknown' })).to.not.throw();
+    });
+  });
+
+  describe('gong', function() {
+    it('should send message when no track playing', async function() {
+      mockDeps.getCurrentTrackTitle = async () => null;
+      voting.initialize(mockDeps);
+      
+      await voting.gong('C123', 'user1', () => {});
+      
+      expect(messages.length).to.be.greaterThan(0);
+      expect(messages[0].msg).to.include('Nothing');
+    });
+
+    it('should log user action', async function() {
+      await voting.gong('C123', 'user1', () => {});
+      
+      expect(userActions.some(a => a.user === 'user1' && a.action === 'gong')).to.be.true;
+    });
+
+    it('should prevent double gong from same user', async function() {
+      await voting.gong('C123', 'user1', () => {});
+      messages.length = 0;
+      
+      await voting.gong('C123', 'user1', () => {});
+      
+      expect(messages.some(m => m.msg.includes('already gonged'))).to.be.true;
+    });
+  });
+
+  describe('gongcheck', function() {
+    it('should send message about gong status', async function() {
+      await voting.gongcheck('C123');
+      
+      expect(messages.length).to.be.greaterThan(0);
+    });
+
+    it('should handle no track playing', async function() {
+      mockDeps.getCurrentTrackTitle = async () => null;
+      voting.initialize(mockDeps);
+      
+      await voting.gongcheck('C123');
+      
+      expect(messages.some(m => m.msg.includes('Nothing'))).to.be.true;
+    });
+  });
+
+  describe('vote', function() {
+    it('should send message for invalid track number', async function() {
+      await voting.vote(['vote', '99'], 'C123', 'user1');
+      
+      expect(messages.some(m => m.msg.includes('isn\'t in the queue'))).to.be.true;
+    });
+
+    it('should log user action', async function() {
+      await voting.vote(['vote', '0'], 'C123', 'user1');
+      
+      expect(userActions.some(a => a.user === 'user1' && a.action === 'vote')).to.be.true;
+    });
+
+    it('should prevent double vote for same track', async function() {
+      await voting.vote(['vote', '0'], 'C123', 'user1');
+      messages.length = 0;
+      
+      await voting.vote(['vote', '0'], 'C123', 'user1');
+      
+      expect(messages.some(m => m.msg.includes('already voted'))).to.be.true;
+    });
+
+    it('should allow different users to vote for same track', async function() {
+      await voting.vote(['vote', '0'], 'C123', 'user1');
+      await voting.vote(['vote', '0'], 'C123', 'user2');
+      
+      // Should have vote count messages
+      expect(messages.some(m => m.msg.includes('VOTE'))).to.be.true;
+    });
+  });
+
+  describe('votecheck', function() {
+    it('should send message when no votes', async function() {
+      await voting.votecheck('C123');
+      
+      expect(messages.some(m => m.msg.includes('No tracks have been voted'))).to.be.true;
+    });
+  });
+
+  describe('voteImmune', function() {
+    it('should send message for invalid track number', async function() {
+      await voting.voteImmune(['voteimmune', '99'], 'C123', 'user1');
+      
+      expect(messages.some(m => m.msg.includes('Track not found'))).to.be.true;
+    });
+
+    it('should prevent double immunity vote from same user', async function() {
+      await voting.voteImmune(['voteimmune', '0'], 'C123', 'user1');
+      messages.length = 0;
+      
+      await voting.voteImmune(['voteimmune', '0'], 'C123', 'user1');
+      
+      expect(messages.some(m => m.msg.includes('already'))).to.be.true;
+    });
+  });
+
+  describe('voteImmunecheck', function() {
+    it('should send message about immunity status', async function() {
+      await voting.voteImmunecheck('C123');
+      
+      expect(messages.some(m => m.msg.includes('votes'))).to.be.true;
+    });
+  });
+
+  describe('listImmune', function() {
+    it('should list immune tracks', async function() {
+      await voting.listImmune('C123');
+      
+      expect(messages.length).to.be.greaterThan(0);
+    });
+
+    it('should show no immune tracks message when empty', async function() {
+      delete require.cache[require.resolve('../voting.js')];
+      const freshVoting = require('../voting.js');
+      freshVoting.initialize(mockDeps);
+      
+      await freshVoting.listImmune('C123');
+      
+      expect(messages.some(m => m.msg.includes('No tracks are currently immune'))).to.be.true;
+    });
+  });
+
+  describe('flushvote', function() {
+    it('should log user action', async function() {
+      await voting.flushvote('C123', 'user1');
+      
+      expect(userActions.some(a => a.user === 'user1' && a.action === 'flushvote')).to.be.true;
+    });
+
+    it('should start voting period on first vote', async function() {
+      await voting.flushvote('C123', 'user1');
+      
+      expect(messages.some(m => m.msg.includes('Voting period started'))).to.be.true;
+    });
+
+    it('should prevent double flush vote from same user', async function() {
+      await voting.flushvote('C123', 'user1');
+      messages.length = 0;
+      
+      await voting.flushvote('C123', 'user1');
+      
+      expect(messages.some(m => m.msg.includes('already cast your flush vote'))).to.be.true;
+    });
+  });
+});

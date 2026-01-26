@@ -45,6 +45,7 @@ const selfsigned = require('selfsigned');
 const AIHandler = require('./ai-handler');
 const voting = require('./voting');
 const musicHelper = require('./music-helper');
+const commandHandlers = require('./lib/command-handlers');
 const gongMessage = fs.readFileSync('templates/messages/gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('templates/messages/vote.txt', 'utf8').split('\n').filter(Boolean);
 const ttsMessage = fs.readFileSync('templates/messages/tts.txt', 'utf8').split('\n').filter(Boolean);
@@ -944,6 +945,21 @@ try {
       voteImmuneLimit,
       flushVoteLimit,
       voteTimeLimitMinutes,
+    });
+
+    // Initialize Command Handlers
+    commandHandlers.initialize({
+      logger: logger,
+      sonos: sonos,
+      spotify: spotify,
+      sendMessage: (msg, ch, opts) => _slackMessage(msg, ch, opts),
+      logUserAction: _logUserAction,
+      getConfig: () => ({
+        maxVolume,
+        searchLimit,
+      }),
+      voting: voting,
+      soundcraft: soundcraft,
     });
 
     // Check that at least one platform is configured
@@ -2870,9 +2886,9 @@ const commandRegistry = new Map([
   ['add', { fn: _add, admin: false }],
   ['addalbum', { fn: _addalbum, admin: false }],
   ['addplaylist', { fn: _addplaylist, admin: false }],
-  ['search', { fn: _search, admin: false }],
-  ['searchalbum', { fn: (args, ch, u) => _searchalbum(args, ch), admin: false }],
-  ['searchplaylist', { fn: _searchplaylist, admin: false }],
+  ['search', { fn: commandHandlers.search, admin: false }],
+  ['searchalbum', { fn: (args, ch, u) => commandHandlers.searchalbum(args, ch), admin: false }],
+  ['searchplaylist', { fn: commandHandlers.searchplaylist, admin: false }],
   ['current', { fn: (args, ch, u) => _currentTrack(ch), admin: false, aliases: ['wtf'] }],
   ['source', { fn: (args, ch, u) => _showSource(ch), admin: false }],
   ['gong', { fn: (args, ch, u) => voting.gong(ch, u, () => _gongplay('play', ch)), admin: false, aliases: ['dong', ':gong:', ':gun:'] }],
@@ -2881,11 +2897,11 @@ const commandRegistry = new Map([
   ['vote', { fn: (args, ch, u) => voting.vote(args, ch, u), admin: false, aliases: [':star:'] }],
   ['voteimmunecheck', { fn: (args, ch, u) => voting.voteImmunecheck(ch), admin: false }],
   ['votecheck', { fn: (args, ch, u) => voting.votecheck(ch), admin: false }],
-  ['list', { fn: (args, ch, u) => _showQueue(ch), admin: false, aliases: ['ls', 'playlist'] }],
-  ['upnext', { fn: (args, ch, u) => _upNext(ch), admin: false }],
-  ['volume', { fn: (args, ch) => _getVolume(ch), admin: false }],
+  ['list', { fn: (args, ch, u) => commandHandlers.showQueue(ch), admin: false, aliases: ['ls', 'playlist'] }],
+  ['upnext', { fn: (args, ch, u) => commandHandlers.upNext(ch), admin: false }],
+  ['volume', { fn: (args, ch) => commandHandlers.getVolume(ch), admin: false }],
   ['flushvote', { fn: (args, ch, u) => voting.flushvote(ch, u), admin: false }],
-  ['size', { fn: (args, ch, u) => _countQueue(ch), admin: false, aliases: ['count', 'count(list)'] }],
+  ['size', { fn: (args, ch, u) => commandHandlers.countQueue(ch), admin: false, aliases: ['count', 'count(list)'] }],
   ['status', { fn: (args, ch, u) => _status(ch), admin: false }],
   ['help', { fn: (args, ch, u) => _help(args, ch, u), admin: false }],
   ['bestof', { fn: _bestof, admin: false }],
@@ -2894,30 +2910,31 @@ const commandRegistry = new Map([
   // Admin-only commands
   ['debug', { fn: (args, ch, u) => _debug(ch, u), admin: true }],
   ['telemetry', { fn: (args, ch, u) => _telemetryStatus(ch), admin: true }],
-  ['next', { fn: (args, ch, u) => _nextTrack(ch, u), admin: true }],
-  ['stop', { fn: _stop, admin: true }],
-  ['flush', { fn: _flush, admin: true }],
-  ['play', { fn: _play, admin: true }],
-  ['pause', { fn: _pause, admin: true }],
-  ['resume', { fn: _resume, admin: true, aliases: ['playpause'] }],
-  ['previous', { fn: _previous, admin: true }],
-  ['shuffle', { fn: _shuffle, admin: true }],
-  ['normal', { fn: _normal, admin: true }],
-  ['setvolume', { fn: _setVolume, admin: true }],
+  ['next', { fn: (args, ch, u) => commandHandlers.nextTrack(ch, u), admin: true }],
+  ['stop', { fn: commandHandlers.stop, admin: true }],
+  ['flush', { fn: commandHandlers.flush, admin: true }],
+  ['play', { fn: commandHandlers.play, admin: true }],
+  ['pause', { fn: commandHandlers.pause, admin: true }],
+  ['resume', { fn: commandHandlers.resume, admin: true, aliases: ['playpause'] }],
+  ['previous', { fn: commandHandlers.previous, admin: true }],
+  ['shuffle', { fn: commandHandlers.shuffle, admin: true }],
+  ['normal', { fn: commandHandlers.normal, admin: true }],
+  ['setvolume', { fn: commandHandlers.setVolume, admin: true }],
   ['setcrossfade', { fn: _setCrossfade, admin: true, aliases: ['crossfade'] }],
   ['setconfig', { fn: _setconfig, admin: true, aliases: ['getconfig', 'config'] }],
   ['blacklist', { fn: _blacklist, admin: true }],
   ['trackblacklist', { fn: _trackblacklist, admin: true, aliases: ['songblacklist', 'bantrack', 'bansong'] }],
-  ['remove', { fn: (args, ch, u) => _removeTrack(args, ch), admin: true }],
-  ['thanos', { fn: (args, ch, u) => _purgeHalfQueue(args, ch), admin: true, aliases: ['snap'] }],
+  ['remove', { fn: (args, ch, u) => commandHandlers.removeTrack(args, ch), admin: true }],
+  ['thanos', { fn: (args, ch, u) => commandHandlers.purgeHalfQueue(args, ch), admin: true, aliases: ['snap'] }],
   ['listimmune', { fn: (args, ch, u) => voting.listImmune(ch), admin: true }],
   ['tts', { fn: (args, ch, u) => _tts(args, ch), admin: true, aliases: ['say'] }],
   ['move', { fn: _moveTrackAdmin, admin: true, aliases: ['mv'] }],
   ['stats', { fn: _stats, admin: true }],
   ['configdump', { fn: _configdump, admin: true, aliases: ['cfgdump', 'confdump'] }],
   ['aiunparsed', { fn: _aiUnparsed, admin: true, aliases: ['aiun', 'aiunknown'] }],
-  ['featurerequest', { fn: _featurerequest, admin: true, aliases: ['feuturerequest'] }],
-  ['test', { fn: (args, ch, u) => _addToSpotifyPlaylist(args, ch), admin: true }]
+  ['featurerequest', { fn: _featurerequest, admin: false, aliases: ['feuturerequest'] }],
+  ['test', { fn: (args, ch, u) => _addToSpotifyPlaylist(args, ch), admin: true }],
+  ['diagnostics', { fn: _diagnostics, admin: true, aliases: ['diag', 'checksource'] }]
 ]);
 
 // Build alias map for quick lookup
@@ -3044,12 +3061,25 @@ async function handleNaturalLanguage(text, channel, userName, platform = 'slack'
   const firstWord = cleanText.split(/\s+/)[0].toLowerCase();
   const restOfText = cleanText.slice(firstWord.length).trim().toLowerCase();
 
+  // Check if it's a known command
+  const isKnownCommand = commandRegistry.has(firstWord) || aliasMap.has(firstWord);
+  
+  // Admin commands should always skip AI and go directly to processInput
+  if (isKnownCommand) {
+    const cmdKey = commandRegistry.has(firstWord) ? firstWord : aliasMap.get(firstWord);
+    const cmdMeta = commandRegistry.get(cmdKey);
+    if (cmdMeta && cmdMeta.admin) {
+      logger.info(`>>> Skipping AI - admin command "${firstWord}" should be processed directly`);
+      return processInput(cleanText, channel, userName, platform, isAdmin);
+    }
+  }
+
   // Natural language indicators that should go through AI even if starting with a command
   const naturalLangPattern = /\b(some|couple|few|several|good|best|nice|great|top|tunes|songs|music|tracks|for a|for the)\b/i;
   const looksLikeNaturalLang = naturalLangPattern.test(restOfText);
   logger.info(`>>> firstWord="${firstWord}", looksLikeNaturalLang=${looksLikeNaturalLang}`);
 
-  if ((commandRegistry.has(firstWord) || aliasMap.has(firstWord)) && !looksLikeNaturalLang) {
+  if (isKnownCommand && !looksLikeNaturalLang) {
     logger.info(`>>> Skipping AI - known command "${firstWord}" without natural language`);
     return processInput(cleanText, channel, userName, platform, isAdmin);
   }
@@ -3607,294 +3637,45 @@ async function _checkUser(userId) {
   }
 }
 
-async function _getVolume(channel) {
-  try {
-    const vol = await sonos.getVolume();
-    logger.info('The volume is: ' + vol);
-    let message = '🔊 *Sonos:* Currently blasting at *' + vol + '* out of ' + maxVolume + ' (your ears\' limits, not ours)';
-
-    // If Soundcraft is enabled, also show Soundcraft channel volumes
-    if (soundcraft.isEnabled()) {
-      const scVolumes = await soundcraft.getAllVolumes();
-      if (Object.keys(scVolumes).length > 0) {
-        message += '\n\n🎛️ *Soundcraft Channels:*';
-        for (const [name, scVol] of Object.entries(scVolumes)) {
-          message += `\n> *${name}:* ${scVol}%`;
-        }
-      }
-    }
-
-    _slackMessage(message, channel);
-  } catch (err) {
-    logger.error('Error occurred: ' + err);
-  }
-}
-
-function _setVolume(input, channel, userName) {
-  _logUserAction(userName, 'setVolume');
-  // Admin check now handled in processInput (platform-aware)
-
-  // Check if Soundcraft is enabled and if we have multiple arguments
-  if (soundcraft.isEnabled() && input.length >= 2) {
-    const channelNames = soundcraft.getChannelNames();
-
-    // Check if first argument is a Soundcraft channel name
-    const possibleChannelName = input[1];
-    if (channelNames.includes(possibleChannelName)) {
-      // Syntax: _setvolume <channel> <volume>
-      const vol = Number(input[2]);
-
-      if (!input[2] || isNaN(vol)) {
-        _slackMessage(`🤔 Usage: \`setvolume ${possibleChannelName} <number>\`\n\nExample: \`setvolume ${possibleChannelName} 50\``, channel);
-        return;
-      }
-
-      if (vol < 0 || vol > 100) {
-        _slackMessage(`🚨 Volume must be between 0 and 100. You tried: ${vol}`, channel);
-        return;
-      }
-
-      // Convert 0-100 scale to dB using linear mapping
-      // Soundcraft range: -70 dB (silent) to 0 dB (max)
-      // 0% = -70 dB, 50% = -35 dB, 100% = 0 dB
-      const minDB = -70;
-      const maxDB = 0;
-      const volDB = minDB + (maxDB - minDB) * (vol / 100);
-      
-      logger.info(`Setting Soundcraft channel '${possibleChannelName}' to ${vol}% (${volDB} dB)`);
-
-      soundcraft.setVolume(possibleChannelName, volDB)
-        .then(success => {
-          if (success) {
-            _slackMessage(`🔊 Soundcraft channel *${possibleChannelName}* volume set to *${vol}%* (${volDB} dB)`, channel);
-          } else {
-            _slackMessage(`❌ Failed to set Soundcraft volume. Check logs for details.`, channel);
-          }
-        })
-        .catch(err => {
-          logger.error('Error setting Soundcraft volume: ' + err);
-          _slackMessage(`❌ Error setting Soundcraft volume: ${err.message}`, channel);
-        });
-      return;
-    }
-  }
-
-  // Default behavior: Set Sonos volume
-  const vol = Number(input[1]);
-
-  if (isNaN(vol)) {
-    // If Soundcraft is enabled, show helpful message with available channels
-    if (soundcraft.isEnabled()) {
-      const channelNames = soundcraft.getChannelNames();
-      const channelList = channelNames.map(c => `\`${c}\``).join(', ');
-      _slackMessage(
-        `🤔 Invalid volume!\n\n` +
-        `*Sonos:* \`setvolume <number>\`\n` +
-        `*Soundcraft:* \`setvolume <channel> <number>\`\n\n` +
-        `Available Soundcraft channels: ${channelList}`,
-        channel
-      );
-    } else {
-      _slackMessage('🤔 That\'s not a number, that\'s... I don\'t even know what that is. Try again with actual digits!', channel);
-    }
-    return;
-  }
-
-  logger.info('Volume is: ' + vol);
-  if (vol > maxVolume) {
-    _slackMessage('🚨 Whoa there, ' + userName + '! That\'s louder than a metal concert in a phone booth. Max is *' + maxVolume + '*. Try again! 🎸', channel);
-    return;
-  }
-
-  setTimeout(() => {
-    sonos
-      .setVolume(vol)
-      .then(() => {
-        logger.info('The volume is set to: ' + vol);
-        _getVolume(channel);
-      })
-      .catch((err) => {
-        logger.error('Error occurred while setting volume: ' + err);
-      });
-  }, 1000);
-}
-
-function _countQueue(channel, cb) {
-  sonos
-    .getQueue()
-    .then((result) => {
-      if (cb) {
-        return cb(result.total);
-      }
-      _slackMessage(`🎵 We've got *${result.total}* ${result.total === 1 ? 'track' : 'tracks'} queued up and ready to rock! 🎸`, channel);
-    })
-    .catch((err) => {
-      logger.error(err);
-      if (cb) {
-        return cb(null, err);
-      }
-      _slackMessage('🤷 Error getting queue length. Try again in a moment! 🔄', channel);
-    });
-}
-
-async function _showQueue(channel) {
-  try {
-    // Parallelize all Sonos API calls for better performance
-    const [result, state] = await Promise.all([
-      sonos.getQueue(),
-      sonos.getCurrentState()
-    ]);
-
-    // Get source information and current track directly (don't use _currentTrack callback)
-    let sourceInfo = null;
-    let track = null;
-
-    if (state === 'playing') {
-      // Parallelize source and track fetching
-      [sourceInfo, track] = await Promise.all([
-        _getCurrentSource(),
-        sonos.currentTrack().catch(trackErr => {
-          logger.warn('Could not get current track: ' + trackErr.message);
-          return null;
-        })
-      ]);
-    }
-    
-    if (!result || !result.items || result.items.length === 0) {
-      logger.debug('Queue is empty');
-      let emptyMsg = '🦗 *Crickets...* The queue is empty! Try `add <song>` to get started! 🎵';
-      if (state === 'playing' && sourceInfo && sourceInfo.type === 'external') {
-        emptyMsg += '\n⚠️ Note: Currently playing from external source (not queue). Run `stop` to switch to queue.';
-      }
-      _slackMessage(emptyMsg, channel);
-      return;
-    }
-    
-    // Build single compact message
-    let message = '';
-    
-    if (state === 'playing' && track) {
-      message += `Currently playing: *${track.title}* by _${track.artist}_\n`;
-      if (track.duration && track.position) {
-        const remaining = track.duration - track.position;
-        const remainingMin = Math.floor(remaining / 60);
-        const remainingSec = Math.floor(remaining % 60);
-        const durationMin = Math.floor(track.duration / 60);
-        const durationSec = Math.floor(track.duration % 60);
-        message += `:stopwatch: ${remainingMin}:${remainingSec.toString().padStart(2, '0')} remaining (${durationMin}:${durationSec.toString().padStart(2, '0')} total)\n`;
-      }
-      
-      if (sourceInfo && sourceInfo.type === 'external') {
-        message += `⚠️ Source: *External* (not from queue)\n`;
-      }
-    } else {
-      message += `Playback state: *${state}*\n`;
-    }
-    
-    message += `\nTotal tracks in queue: ${result.total}\n====================\n`;
-    
-    logger.info(`Total tracks in queue: ${result.total}, items returned: ${result.items.length}`);
-    logger.debug(`Queue items: ${JSON.stringify(result.items.map((item, i) => ({ pos: i, title: item.title, artist: item.artist })))}`);
-    if (track) {
-      logger.debug(`Current track: queuePosition=${track.queuePosition}, title="${track.title}", artist="${track.artist}"`);
-    }
-
-    const tracks = [];
-
-    result.items.map(function (item, i) {
-      let trackTitle = item.title;
-      let prefix = '';
-
-      // Check if this is the currently playing track
-      // Match by position OR by title/artist if position matches
-      const positionMatch = track && (i + 1) === track.queuePosition;
-      const nameMatch = track && item.title === track.title && item.artist === track.artist;
-      const isCurrentTrack = positionMatch || (nameMatch && sourceInfo && sourceInfo.type === 'queue');
-
-      // Check if track is gong banned (immune)
-      const isImmune = voting.isTrackGongBanned({ title: item.title, artist: item.artist, uri: item.uri });
-      if (isImmune) {
-        prefix = ':lock: ';
-        trackTitle = item.title;
-      } else if (isCurrentTrack && sourceInfo && sourceInfo.type === 'queue') {
-        trackTitle = '*' + trackTitle + '*';
-      } else {
-        trackTitle = '_' + trackTitle + '_';
-      }
-
-      // Add star prefix for ANY track that has active votes (regardless of position)
-      const hasVotes = voting.hasActiveVotes(i, item.uri, item.title, item.artist);
-      if (hasVotes) {
-        prefix = ':star: ' + prefix;
-      }
-
-      if (isCurrentTrack && sourceInfo && sourceInfo.type === 'queue') {
-        tracks.push(':notes: ' + '_#' + i + '_ ' + trackTitle + ' by ' + item.artist);
-      } else {
-        tracks.push(prefix + '>_#' + i + '_ ' + trackTitle + ' by ' + item.artist);
-      }
-    });
-    
-    // Check if we should use threads (always thread if >20 tracks)
-    const shouldUseThread = result.total > 20;
-    const threadOptions = shouldUseThread ? { forceThread: true } : {};
-    
-    for (var i in tracks) {
-      message += tracks[i] + '\n';
-      if (i > 0 && Math.floor(i % 100) === 0) {
-        _slackMessage(message, channel, threadOptions);
-        message = '';
-      }
-    }
-    
-    if (message) {
-      _slackMessage(message, channel, threadOptions);
-    }
-  } catch (err) {
-    logger.error('Error fetching queue: ' + err);
-    _slackMessage('🚨 Error fetching queue. Try again! 🔄', channel);
-  }
-}
+// Note: Volume commands (_getVolume, _setVolume), _countQueue, and _showQueue have been moved to lib/command-handlers.js
 
 async function _showSource(channel) {
   try {
     const state = await sonos.getCurrentState();
-    
+
     if (state !== 'playing') {
       _slackMessage(`⏸️ Playback is *${state}*. No source active.`, channel);
       return;
     }
-    
-    const sourceInfo = await _getCurrentSource();
+
     const track = await sonos.currentTrack();
-    
+
     if (!track) {
       _slackMessage('🔇 No track information available.', channel);
       return;
     }
-    
+
     let message = `🎵 Currently playing: *${track.title}* by _${track.artist}_\n\n`;
-    
-    if (sourceInfo) {
-      if (sourceInfo.type === 'queue') {
-        message += `📋 **Source: Queue** (position #${sourceInfo.queuePosition})\n`;
-        message += `✅ Sonos is playing from the queue managed by SlackONOS.`;
-      } else {
-        message += `⚠️ **Source: External** (not from queue)\n`;
-        message += `🔍 Sonos is playing from an external source, likely:\n`;
-        message += `   • Spotify Connect (from Spotify app)\n`;
-        message += `   • AirPlay (from iPhone/iPad/Mac)\n`;
-        message += `   • Line-in (physical connection)\n`;
-        message += `   • Another music service app\n\n`;
-        message += `💡 **To switch to queue:**\n`;
-        message += `   1. Run \`stop\` to stop current playback\n`;
-        message += `   2. Run \`add <song>\` to add to queue\n`;
-        message += `   3. Playback will start from queue automatically`;
-      }
+
+    // Simple check: track.queuePosition > 0 means playing from queue
+    const isFromQueue = track.queuePosition > 0;
+
+    if (isFromQueue) {
+      message += `📋 **Source: Queue** (position #${track.queuePosition})\n`;
+      message += `✅ Sonos is playing from the queue managed by SlackONOS.`;
     } else {
-      message += `❓ Could not determine source. Track may be from external source.`;
+      message += `⚠️ **Source: External** (not from queue)\n`;
+      message += `🔍 Sonos is playing from an external source, likely:\n`;
+      message += `   • Spotify Connect (from Spotify app)\n`;
+      message += `   • AirPlay (from iPhone/iPad/Mac)\n`;
+      message += `   • Line-in (physical connection)\n`;
+      message += `   • Another music service app\n\n`;
+      message += `💡 **To switch to queue:**\n`;
+      message += `   1. Run \`stop\` to stop current playback\n`;
+      message += `   2. Run \`add <song>\` to add to queue\n`;
+      message += `   3. Playback will start from queue automatically`;
     }
-    
+
     _slackMessage(message, channel);
   } catch (err) {
     logger.error('Error getting source info: ' + err);
@@ -3902,7 +3683,8 @@ async function _showSource(channel) {
   }
 }
 
-function _upNext(channel) {
+// Note: _upNext has been moved to lib/command-handlers.js
+function _upNextDeprecated(channel) {
   sonos
     .getQueue()
     .then((result) => {
@@ -4481,16 +4263,13 @@ async function _add(input, channel, userName) {
       }
     } else if (queue && queue.items) {
       // Check for duplicates if playing (using pre-fetched queue)
-      const isDuplicate = queue.items.some((item) => {
-        return item.uri === firstCandidate.uri ||
-               (item.title === firstCandidate.name && item.artist === firstCandidate.artist);
-      });
+      // Use findIndex directly instead of .some() then .findIndex() - avoids double scan
+      const duplicatePosition = queue.items.findIndex(item =>
+        item.uri === firstCandidate.uri ||
+        (item.title === firstCandidate.name && item.artist === firstCandidate.artist)
+      );
 
-      if (isDuplicate) {
-        const duplicatePosition = queue.items.findIndex(item =>
-          item.uri === firstCandidate.uri ||
-          (item.title === firstCandidate.name && item.artist === firstCandidate.artist)
-        );
+      if (duplicatePosition >= 0) {
         _slackMessage(
           `*${firstCandidate.name}* by _${firstCandidate.artist}_ is already in the queue at position #${duplicatePosition}! :musical_note:\nWant it to play sooner? Use \`vote ${duplicatePosition}\` to move it up! :arrow_up:`,
           channel
@@ -4802,40 +4581,7 @@ async function _queueAlbum(result, albumSearchTerm, channel, userName) {
   }
 }
 
-async function _searchplaylist(input, channel, userName) {
-  _logUserAction(userName, 'searchplaylist');
-  // Search for a playlist on Spotify
-  if (!input || input.length < 2) {
-    _slackMessage('🔍 Tell me which playlist to search for! `searchplaylist <name>` 🎶', channel);
-    return;
-  }
-  const playlist = input.slice(1).join(' ');
-  logger.info('Playlist to search for: ' + playlist);
-
-  try {
-    const playlists = await spotify.searchPlaylistList(playlist, 10); // Fetch 10 to handle null results
-
-    if (!playlists || playlists.length === 0) {
-      _slackMessage('🤷 Couldn\'t find that playlist. Check the spelling or try a different search! 🎶', channel);
-      return;
-    }
-
-    // Sort by relevance and followers using shared function
-    const sortedPlaylists = _sortPlaylistsByRelevance(playlists, playlist);
-
-    // Show top 5 results
-    const topFive = sortedPlaylists.slice(0, 5);
-    let message = `Found ${sortedPlaylists.length} playlists:\n`;
-    topFive.forEach((result, index) => {
-      message += `>${index + 1}. *${result.name}* by _${result.owner}_ (${result.tracks} tracks)\n`;
-    });
-
-    _slackMessage(message, channel);
-  } catch (err) {
-    logger.error('Error searching for playlist: ' + err.message);
-    _slackMessage('🚨 Couldn\'t search for playlists. Error: ' + err.message + ' 🔄', channel);
-  }
-}
+// Note: _searchplaylist has been moved to lib/command-handlers.js
 
 async function _addplaylist(input, channel, userName) {
   _logUserAction(userName, 'addplaylist');
@@ -5238,69 +4984,7 @@ function _sortTracksByRelevance(tracks, searchTerm) {
   });
 }
 
-async function _search(input, channel, userName) {
-  _logUserAction(userName, 'search');
-  // Search for a track on Spotify
-  if (!input || input.length < 2) {
-    _slackMessage('🔍 What should I search for? Try `search <song or artist>` 🎵', channel);
-    return;
-  }
-
-  const term = input.slice(1).join(' ');
-  logger.info('Track to search for: ' + term);
-
-  try {
-    const tracks = await spotify.searchTrackList(term, searchLimit);
-
-    if (!tracks || tracks.length === 0) {
-      _slackMessage("🤷 Couldn't find anything matching that. Try different keywords or check the spelling! 🎵", channel);
-      return;
-    }
-
-    // Sort tracks by relevance using shared function
-    const sortedTracks = _sortTracksByRelevance(tracks, term);
-
-    let message = `🎵 Found *${sortedTracks.length} ${sortedTracks.length === 1 ? 'track' : 'tracks'}*:\n`;
-    sortedTracks.forEach((track, index) => {
-      message += `>${index + 1}. *${track.name}* by _${track.artists[0].name}_\n`;
-    });
-    _slackMessage(message, channel);
-  } catch (err) {
-    logger.error('Error searching for track: ' + err.message);
-    _slackMessage('🚨 Couldn\'t search for tracks. Error: ' + err.message + ' Try again! 🔄', channel);
-  }
-}
-
-async function _searchalbum(input, channel) {
-  // Search for an album on Spotify
-  if (!input || input.length < 2) {
-    _slackMessage('🔍 You gotta tell me what album to search for! Try `searchalbum <album name>` 🎶', channel);
-    return;
-  }
-  const album = input.slice(1).join(' ');
-  logger.info('Album to search for: ' + album);
-
-  try {
-    const albums = await spotify.searchAlbumList(album, searchLimit);
-
-    if (!albums || albums.length === 0) {
-      _slackMessage('🤔 Couldn\'t find that album. Try including the artist name or checking the spelling! 🎶', channel);
-      return;
-    }
-
-    // Sort albums by relevance using shared function
-    const sortedAlbums = _sortAlbumsByRelevance(albums, album);
-
-    let message = `Found ${sortedAlbums.length} albums:\n`;
-    sortedAlbums.forEach((albumResult) => {
-      message += `> *${albumResult.name}* by _${albumResult.artist}_\n`;
-    });
-    _slackMessage(message, channel);
-  } catch (err) {
-    logger.error('Error searching for album: ' + err.message);
-    _slackMessage('🚨 Couldn\'t search for albums. Error: ' + err.message + ' 🔄', channel);
-  }
-}
+// Note: Search commands (_search, _searchalbum) have been moved to lib/command-handlers.js
 
 function _currentTrackTitle(channel, cb) {
   sonos
@@ -5335,7 +5019,7 @@ async function _getCurrentSource() {
         const queue = await sonos.getQueue();
         if (queue && queue.items) {
           logger.debug(`Source check: queue has ${queue.items.length} items, total=${queue.total}`);
-          
+
           // Check if queuePosition matches an item in the queue
           const queueIndex = track.queuePosition - 1; // Convert to 0-based index
           if (queueIndex >= 0 && queueIndex < queue.items.length) {
@@ -5350,13 +5034,13 @@ async function _getCurrentSource() {
           } else {
             logger.warn(`Source check: queuePosition ${track.queuePosition} is out of bounds (queue has ${queue.items.length} items)`);
           }
-          
-          // Try to find track by name/artist match
-          const queueTrack = queue.items.find((item, index) => 
+
+          // Try to find track by name/artist match - use findIndex to avoid double scan
+          const foundIndex = queue.items.findIndex((item) =>
             item.title === track.title && item.artist === track.artist
           );
-          if (queueTrack) {
-            const foundPosition = queue.items.indexOf(queueTrack) + 1;
+          if (foundIndex >= 0) {
+            const foundPosition = foundIndex + 1;
             logger.debug(`Source check: found track in queue at position ${foundPosition} (but queuePosition was ${track.queuePosition})`);
             return { type: 'queue', queuePosition: foundPosition, note: 'position_mismatch' };
           }
@@ -5364,26 +5048,26 @@ async function _getCurrentSource() {
       } catch (queueErr) {
         logger.debug('Could not check queue for source: ' + queueErr.message);
       }
-      
+
       // If queuePosition exists but doesn't match, might be stale or external
       logger.warn(`Source check: queuePosition ${track.queuePosition} exists but track not found in queue - might be external source`);
-    }
-    
-    // Try to get queue and check if current track matches
-    try {
-      const queue = await sonos.getQueue();
-      if (queue && queue.items) {
-        const queueTrack = queue.items.find((item, index) => 
-          item.title === track.title && item.artist === track.artist
-        );
-        if (queueTrack) {
-          const position = queue.items.indexOf(queueTrack) + 1;
-          logger.debug(`Source check: found track in queue at position ${position} (no queuePosition in track)`);
-          return { type: 'queue', queuePosition: position };
+    } else {
+      // No queuePosition - try to get queue and check if current track matches
+      try {
+        const queue = await sonos.getQueue();
+        if (queue && queue.items) {
+          const foundIndex = queue.items.findIndex((item) =>
+            item.title === track.title && item.artist === track.artist
+          );
+          if (foundIndex >= 0) {
+            const position = foundIndex + 1;
+            logger.debug(`Source check: found track in queue at position ${position} (no queuePosition in track)`);
+            return { type: 'queue', queuePosition: position };
+          }
         }
+      } catch (queueErr) {
+        logger.debug('Could not check queue for source: ' + queueErr.message);
       }
-    } catch (queueErr) {
-      logger.debug('Could not check queue for source: ' + queueErr.message);
     }
     
     // If track doesn't match queue, it's likely from external source
@@ -5392,6 +5076,55 @@ async function _getCurrentSource() {
   } catch (err) {
     logger.warn('Error getting source info: ' + err.message);
     return null;
+  }
+}
+
+/**
+ * Admin diagnostic command - performs deep source checking by fetching and scanning the queue
+ * This is the original _getCurrentSource logic kept as a diagnostic tool
+ */
+async function _diagnostics(input, channel, userName) {
+  _logUserAction(userName, 'diagnostics');
+  try {
+    _slackMessage('🔍 Running diagnostic check...', channel);
+
+    const track = await sonos.currentTrack();
+    if (!track) {
+      _slackMessage('⚠️ No track is currently playing.', channel);
+      return;
+    }
+
+    const sourceInfo = await _getCurrentSource();
+
+    let message = '📊 **Diagnostic Report**\n\n';
+    message += `🎵 Current Track: *${track.title}* by _${track.artist}_\n`;
+    message += `📍 Queue Position (API): ${track.queuePosition || 'null/undefined'}\n\n`;
+
+    if (sourceInfo) {
+      if (sourceInfo.type === 'queue') {
+        message += `✅ **Source Type:** Queue\n`;
+        message += `📋 **Queue Position (verified):** #${sourceInfo.queuePosition}\n`;
+        if (sourceInfo.note === 'position_mismatch') {
+          message += `⚠️ **Note:** Position mismatch detected - API position differs from queue scan\n`;
+        }
+      } else {
+        message += `⚠️ **Source Type:** External\n`;
+        message += `🔍 Track not found in queue - likely from:\n`;
+        message += `   • Spotify Connect\n`;
+        message += `   • AirPlay\n`;
+        message += `   • Line-in\n`;
+        message += `   • Other music service\n`;
+      }
+    } else {
+      message += `❌ **Source Type:** Unknown (diagnostic failed)\n`;
+    }
+
+    message += `\n💡 **Note:** Regular commands now use fast queuePosition check instead of full queue scan for better performance.`;
+
+    _slackMessage(message, channel);
+  } catch (err) {
+    logger.error('Error in diagnostics: ' + err);
+    _slackMessage('🚨 Diagnostic check failed: ' + err.message, channel);
   }
 }
 
@@ -5425,15 +5158,13 @@ function _currentTrack(channel, cb) {
             message += `\n⏱️ ${remainingMin}:${remainingSec.toString().padStart(2, '0')} remaining (${durationMin}:${durationSec.toString().padStart(2, '0')} total)`;
           }
 
-          // Check source
-          const sourceInfo = await _getCurrentSource();
-          if (sourceInfo) {
-            if (sourceInfo.type === 'queue') {
-              message += `\n📋 Source: *Queue* (position #${sourceInfo.queuePosition})`;
-            } else {
-              message += `\n⚠️ Source: *External* (not from queue - Spotify Connect/AirPlay/Line-in?)`;
-              message += `\n💡 Tip: Run \`flush\` and \`stop\`, then \`add <song>\` to use queue`;
-            }
+          // Check source - simple check using queuePosition
+          const isFromQueue = track.queuePosition > 0;
+          if (isFromQueue) {
+            message += `\n📋 Source: *Queue* (position #${track.queuePosition})`;
+          } else {
+            message += `\n⚠️ Source: *External* (not from queue - Spotify Connect/AirPlay/Line-in?)`;
+            message += `\n💡 Tip: Run \`flush\` and \`stop\`, then \`add <song>\` to use queue`;
           }
 
           if (voting.isTrackGongBanned({ title: track.title, artist: track.artist, uri: track.uri })) {
@@ -5480,14 +5211,11 @@ async function _gongplay(command, channel) {
         try {
           // Find and remove the gong sound from the queue
           const queue = await sonos.getQueue();
-          let gongIndex = -1;
 
-          for (let i = 0; i < queue.items.length; i++) {
-            if (queue.items[i].title === 'Gong 1' || queue.items[i].uri.includes('1FzsAo5gX5oEJD9PFVH5FO')) {
-              gongIndex = i;
-              break;
-            }
-          }
+          // Use findIndex instead of manual loop for cleaner and potentially faster search
+          const gongIndex = queue.items.findIndex(item =>
+            item.title === 'Gong 1' || item.uri.includes('1FzsAo5gX5oEJD9PFVH5FO')
+          );
 
           if (gongIndex >= 0) {
             // Sonos uses 1-based indexing for removeTracksFromQueue
@@ -5513,122 +5241,8 @@ async function _gongplay(command, channel) {
   }
 }
 
-function _nextTrack(channel, userName) {
-  _logUserAction(userName, 'next');
-  // Admin check now handled in processInput (platform-aware)
-  sonos
-    .next()
-    .then(() => {
-      _slackMessage('⏭️ Skipped! On to the next banger... 🎵', channel);
-    })
-    .catch((err) => {
-      logger.error('Error skipping to next track: ' + err);
-    });
-}
-
-function _previous(input, channel, userName) {
-  _logUserAction(userName, 'previous');
-  // Admin check now handled in processInput (platform-aware)
-  sonos
-    .previous()
-    .then(() => {
-      _slackMessage('⏮️ Going back in time! Previous track loading... 🕙', channel);
-    })
-    .catch((err) => {
-      logger.error('Error going to previous track: ' + err);
-    });
-}
-
-function _stop(input, channel, userName) {
-  _logUserAction(userName, 'stop');
-  // Admin check now handled in processInput (platform-aware)
-  sonos
-    .stop()
-    .then(() => {
-      _slackMessage('⏹️ *Silence falls...* Playback stopped. 🔇', channel);
-    })
-    .catch((err) => {
-      logger.error('Error stopping playback: ' + err);
-    });
-}
-
-function _play(input, channel, userName) {
-  _logUserAction(userName, 'play');
-  // Admin check now handled in processInput (platform-aware)
-  sonos
-    .play()
-    .then(() => {
-      _slackMessage('▶️ Let\'s gooo! Music is flowing! 🎶', channel);
-    })
-    .catch((err) => {
-      logger.error('Error starting playback: ' + err);
-    });
-}
-
-function _pause(input, channel, userName) {
-  _logUserAction(userName, 'pause');
-  // Admin check now handled in processInput (platform-aware)
-  sonos
-    .pause()
-    .then(() => {
-      _slackMessage('⏸️ Taking a breather... Paused! 💨', channel);
-    })
-    .catch((err) => {
-      logger.error('Error pausing playback: ' + err);
-    });
-}
-
-function _resume(input, channel, userName) {
-  _logUserAction(userName, 'resume');
-  // Admin check now handled in processInput (platform-aware)
-  sonos
-    .play()
-    .then(() => {
-      _slackMessage('▶️ Back to the groove! Resuming playback... 🎵', channel);
-    })
-    .catch((err) => {
-      logger.error('Error resuming playback: ' + err);
-    });
-}
-
-function _flush(input, channel, userName) {
-  _logUserAction(userName, 'flush');
-  // Admin check now handled in processInput (platform-aware)
-  sonos
-    .flush()
-    .then(() => {
-      _slackMessage('🚽 *FLUSHED!* The queue has been wiped clean. Time to start fresh! 🎶', channel);
-    })
-    .catch((err) => {
-      logger.error('Error flushing queue: ' + err);
-    });
-}
-
-function _shuffle(input, channel, userName) {
-  _logUserAction(userName, 'shuffle');
-  // Admin check now handled in processInput (platform-aware)
-  sonos
-    .setPlayMode('SHUFFLE')
-    .then(() => {
-      _slackMessage('🎲 *Shuffle mode activated!* Queue randomized - let chaos reign! 🎵🔀', channel);
-    })
-    .catch((err) => {
-      logger.error('Error setting play mode to shuffle: ' + err);
-    });
-}
-
-function _normal(input, channel, userName) {
-  _logUserAction(userName, 'normal');
-  // Admin check now handled in processInput (platform-aware)
-  sonos
-    .setPlayMode('NORMAL')
-    .then(() => {
-      _slackMessage('📋 Back to normal! Queue is now in the order you actually wanted. ✅', channel);
-    })
-    .catch((err) => {
-      logger.error('Error setting play mode to normal: ' + err);
-    });
-}
+// Note: Playback commands (_nextTrack, _previous, _stop, _play, _pause, _resume, _flush, _shuffle, _normal)
+// have been moved to lib/command-handlers.js
 
 async function _setCrossfade(input, channel, userName) {
   _logUserAction(userName, 'setCrossfade');
@@ -5684,54 +5298,7 @@ async function _setCrossfade(input, channel, userName) {
   }
 }
 
-function _removeTrack(input, channel) {
-  // Admin check now handled in processInput (platform-aware)
-  if (!input || input.length < 2) {
-    _slackMessage('🔢 You must provide the track number to remove! Use `remove <number>` 🎯', channel);
-    return;
-  }
-  const trackNb = parseInt(input[1]) + 1;  // +1 because Sonos uses 1-based indexing
-  if (isNaN(trackNb)) {
-    _slackMessage('🤔 That\'s not a valid track number. Check the queue with `list`! 📋', channel);
-    return;
-  }
-  sonos
-    .removeTracksFromQueue(trackNb, 1)  // Remove 1 track starting at trackNb
-    .then(() => {
-      logger.info('Removed track with index: ' + trackNb);
-      _slackMessage(`🗑️ Track #${input[1]} has been yeeted from the queue! 🚀`, channel);
-    })
-    .catch((err) => {
-      logger.error('Error removing track from queue: ' + err);
-      _slackMessage('🚨 Error removing track from queue. Try again! 🔄', channel);
-    });
-}
-
-function _purgeHalfQueue(input, channel) {
-  // Admin check now handled in processInput (platform-aware)
-  sonos
-    .getQueue()
-    .then((result) => {
-      const halfQueue = Math.floor(result.total / 2);
-      if (halfQueue === 0) {
-        _slackMessage('🤷 The queue is too tiny to snap! Thanos needs at least 2 tracks to work his magic. 👏', channel);
-        return;
-      }
-      sonos
-        .removeTracksFromQueue(halfQueue, halfQueue)
-        .then(() => {
-          _slackMessage(`👏 *SNAP!* Perfectly balanced, as all things should be. ${halfQueue} tracks turned to dust. ✨💨`, channel);
-        })
-        .catch((err) => {
-          logger.error('Error removing tracks from queue: ' + err);
-          _slackMessage('💥 Error executing the snap. Even Thanos has off days... Try again! 🔄', channel);
-        });
-    })
-    .catch((err) => {
-      logger.error('Error getting queue for snap: ' + err);
-      _slackMessage('🚨 Error getting queue for the snap. Try again! 🔄', channel);
-    });
-}
+// Note: Queue commands (_removeTrack, _purgeHalfQueue) have been moved to lib/command-handlers.js
 
 function _status(channel, cb) {
   sonos
@@ -5949,6 +5516,7 @@ async function _sendDirectMessage(userName, text) {
 
 async function _featurerequest(input, channel, userName) {
   _logUserAction(userName, 'featurerequest');
+  logger.info(`[FEATUREREQUEST] Command called by ${userName} in ${channel} with input: ${JSON.stringify(input)}`);
   
   if (!input || input.length < 2) {
     _slackMessage('Usage: `featurerequest <feature description>`\nExample: `featurerequest add support for YouTube playlists`', channel);
@@ -5957,12 +5525,21 @@ async function _featurerequest(input, channel, userName) {
   
   const featureDescription = input.slice(1).join(' ');
   
+  // Check if githubToken is configured
+  const githubToken = config.get('githubToken');
+  if (!githubToken) {
+    logger.warn('[FEATUREREQUEST] githubToken not configured');
+    _slackMessage('❌ Feature request functionality is not configured. Please set `githubToken` in the config to enable this feature.', channel);
+    return;
+  }
+  
   try {
+    logger.info(`[FEATUREREQUEST] Creating GitHub issue: ${featureDescription}`);
     // Create GitHub issue with enhancement label
     const response = await fetch(`https://api.github.com/repos/htilly/SlackONOS/issues`, {
       method: 'POST',
       headers: {
-        'Authorization': `token ${config.get('githubToken')}`,
+        'Authorization': `token ${githubToken}`,
         'Accept': 'application/vnd.github+json',
         'Content-Type': 'application/json'
       },
@@ -5979,10 +5556,11 @@ async function _featurerequest(input, channel, userName) {
       logger.info(`[FEATUREREQUEST] Created issue #${issue.number} for: ${featureDescription} by ${userName}`);
     } else {
       const errorText = await response.text();
+      logger.error(`[FEATUREREQUEST] GitHub API error: ${response.status} - ${errorText}`);
       throw new Error(`GitHub API error: ${response.status} - ${errorText}`);
     }
   } catch (err) {
-    logger.error(`[FEATUREREQUEST] Failed to create issue: ${err.message}`);
+    logger.error(`[FEATUREREQUEST] Failed to create issue: ${err.message}`, err);
     _slackMessage(`❌ Failed to create feature request: ${err.message}`, channel);
   }
 }
@@ -6094,6 +5672,7 @@ async function _setconfig(input, channel, userName) {
 > \`crossfadeEnabled\`: ${config.get('crossfadeEnabled') || false}
 > \`crossfadeDurationSeconds\`: ${Number(config.get('crossfadeDurationSeconds') || 6)}
 > \`slackAlwaysThread\`: ${config.get('slackAlwaysThread') || false}
+> \`logLevel\`: ${config.get('logLevel') || 'info'}
 
 *Usage:* \`setconfig <key> <value>\`
 *Example:* \`setconfig gongLimit 5\`
@@ -6131,7 +5710,8 @@ async function _setconfig(input, channel, userName) {
     soundcraftEnabled: { type: 'boolean' },
     soundcraftIp: { type: 'string', minLen: 0, maxLen: 50 },
     crossfadeEnabled: { type: 'boolean' },
-    slackAlwaysThread: { type: 'boolean' }
+    slackAlwaysThread: { type: 'boolean' },
+    logLevel: { type: 'string', minLen: 4, maxLen: 5, allowed: ['error', 'warn', 'info', 'debug'] }
   };
 
   // Make config key case-insensitive
