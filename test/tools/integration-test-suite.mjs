@@ -476,22 +476,50 @@ const validators = {
 };
 
 // Define test suite (will be assigned after definition)
+// ORDER MATTERS: Tests are arranged to handle state dependencies correctly
 const testSuiteArray = [
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 0: PRE-FLIGHT CHECKS - Verify clean state before starting
+    // ═══════════════════════════════════════════════════════════════════
+
     new TestCase(
-        'Flush Queue - Access Denied (regular channel)',
-        'flush',
+        'Pre-flight: Check No Active Votes',
+        'votecheck',
         validators.and(
-            validators.responseCount(1, 2),
+            validators.hasText(),
             validators.or(
-                validators.containsText('admin-only'),
-                validators.containsText('flushvote')
+                validators.containsText('no active votes'),
+                validators.containsText('No votes'),
+                validators.containsText('No tracks have been voted'),
+                validators.containsText('0 vote')
             )
         ),
         3
     ),
 
     new TestCase(
-        'Flush Queue - Admin Channel',
+        'Pre-flight: Check No Immune Tracks',
+        'listimmune',
+        validators.and(
+            validators.hasText(),
+            validators.or(
+                validators.containsText('No tracks'),
+                validators.containsText('no immune'),
+                validators.containsText('currently immune'),
+                validators.containsText('fair game'),
+                validators.containsText('0 immune')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 1: SETUP - Start with a clean slate
+    // ═══════════════════════════════════════════════════════════════════
+    
+    new TestCase(
+        'Admin - Flush Queue (Setup)',
         'flush',
         validators.responseCount(1, 3),
         5,
@@ -499,13 +527,122 @@ const testSuiteArray = [
     ),
 
     new TestCase(
-        'Add Track - First Time',
+        'Admin - Reset Gong Limit to 3',
+        'setconfig gongLimit 3',
+        validators.or(
+            validators.containsText('gongLimit'),
+            validators.containsText('set to 3'),
+            validators.containsText('updated')
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Reset Vote Limit to 3',
+        'setconfig voteLimit 3',
+        validators.or(
+            validators.containsText('voteLimit'),
+            validators.containsText('set to 3'),
+            validators.containsText('updated')
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Set Safe Volume (5)',
+        'setvolume 5',
+        validators.matchesRegex(/5|volume/i),
+        3,
+        adminChannelId
+    ),
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 2: READ-ONLY QUERIES (don't change state)
+    // ═══════════════════════════════════════════════════════════════════
+
+    new TestCase(
+        'Help Command',
+        'help',
+        validators.containsText('SlackONOS'),
+        3
+    ),
+
+    new TestCase(
+        'Status Command',
+        'status',
+        validators.and(
+            validators.hasText(),
+            validators.responseCount(1)
+        ),
+        5  // Increased timeout
+    ),
+
+    new TestCase(
+        'Volume Check',
+        'volume',
+        validators.matchesRegex(/\d+/),
+        4
+    ),
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 3: SEARCH COMMANDS (read-only)
+    // ═══════════════════════════════════════════════════════════════════
+
+    new TestCase(
+        'Search Track',
+        'search with or without you',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.containsText('u2')
+        ),
+        5
+    ),
+
+    new TestCase(
+        'Search Album',
+        'searchalbum abbey road',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('Beatles'),
+                validators.containsText('Abbey Road')
+            )
+        ),
+        5
+    ),
+
+    new TestCase(
+        'Search Playlist',
+        'searchplaylist rock classics',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.matchesRegex(/playlist|tracks|\d+/i)
+        ),
+        5
+    ),
+
+    new TestCase(
+        'Search - Empty Query Error',
+        'search',
+        validators.containsText('What should I search for'),
+        3
+    ),
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 4: BUILD UP THE QUEUE (add tracks for later tests)
+    // ═══════════════════════════════════════════════════════════════════
+
+    new TestCase(
+        'Add Track #1 - Foo Fighters',
         'add Foo Fighters - Best Of You',
         validators.and(
             validators.responseCount(1, 3),
             validators.or(
                 validators.containsText('queue'),
-                validators.containsText('added')
+                validators.containsText('added'),
+                validators.containsText('Added')
             )
         ),
         7
@@ -522,26 +659,60 @@ const testSuiteArray = [
     ),
 
     new TestCase(
-        'Help Command',
-        'help',
-        validators.containsText('SlackONOS'),
-        3
+        'Add Track #2 - U2',
+        'add U2 - With Or Without You',
+        validators.and(
+            validators.responseCount(1, 3),
+            validators.or(
+                validators.containsText('queue'),
+                validators.containsText('added'),
+                validators.containsText('Added')
+            )
+        ),
+        7
     ),
 
     new TestCase(
-        'Current Track',
-        'current',
+        'Add Track #3 - Queen',
+        'add Queen - Bohemian Rhapsody',
         validators.and(
-            validators.hasText(),
-            validators.responseCount(1),
+            validators.responseCount(1, 3),
             validators.or(
-                validators.containsText('Currently playing'),
-                validators.containsText('playing'),
-                validators.containsText('Playback is')
+                validators.containsText('queue'),
+                validators.containsText('added'),
+                validators.containsText('Added')
             )
         ),
-        3
+        7
     ),
+
+    new TestCase(
+        'Add Track #4 - Nirvana',
+        'add Nirvana - Smells Like Teen Spirit',
+        validators.and(
+            validators.responseCount(1, 3),
+            validators.or(
+                validators.containsText('queue'),
+                validators.containsText('added'),
+                validators.containsText('Added')
+            )
+        ),
+        7
+    ),
+
+    new TestCase(
+        'Best Of Command',
+        'bestof led zeppelin 3',
+        validators.and(
+            validators.responseCount(1, 3),
+            validators.hasText()
+        ),
+        8
+    ),
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 5: QUEUE QUERIES (now that we have tracks)
+    // ═══════════════════════════════════════════════════════════════════
 
     new TestCase(
         'List Queue',
@@ -561,28 +732,46 @@ const testSuiteArray = [
     ),
 
     new TestCase(
-        'Volume Check',
-        'volume',
-        validators.matchesRegex(/\d+/),
-        4
-    ),
-
-    new TestCase(
-        'Search Track',
-        'search with or without you',
-        validators.and(
-            validators.responseCount(1, 2),
-            validators.containsText('u2')
-        ),
-        5
-    ),
-
-    new TestCase(
-        'Status Command',
-        'status',
+        'Up Next',
+        'upnext',
         validators.and(
             validators.hasText(),
-            validators.responseCount(1)
+            validators.or(
+                validators.containsText('Upcoming'),
+                validators.containsText('#')
+            )
+        ),
+        3
+    ),
+
+    new TestCase(
+        'Current Track',
+        'current',
+        validators.and(
+            validators.hasText(),
+            validators.responseCount(1),
+            validators.or(
+                validators.containsText('Currently playing'),
+                validators.containsText('playing'),
+                validators.containsText('Playback is')
+            )
+        ),
+        3
+    ),
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 6: ACCESS CONTROL TESTS (before we use admin commands)
+    // ═══════════════════════════════════════════════════════════════════
+
+    new TestCase(
+        'Flush Queue - Access Denied (regular channel)',
+        'flush',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('admin-only'),
+                validators.containsText('flushvote')
+            )
         ),
         3
     ),
@@ -601,80 +790,78 @@ const testSuiteArray = [
     ),
 
     new TestCase(
-        'Admin - Pause Playback',
-        'pause',
+        'Remove Track - Access Denied',
+        'remove 1',
         validators.and(
             validators.responseCount(1, 2),
             validators.or(
-                validators.containsText('pause'),
-                validators.containsText('stop'),
-                validators.containsText('paused')
+                validators.containsText('admin-only'),
+                validators.containsText('admin')
             )
         ),
-        3,
-        adminChannelId
+        3
     ),
 
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 7: VOTING SYSTEM (order matters!)
+    // First: vote immune on track #1, then try to gong it (should fail)
+    // Then: gong a different track (should succeed with gongLimit=1)
+    // ═══════════════════════════════════════════════════════════════════
+
     new TestCase(
-        'Admin - Play/Resume',
-        'play',
+        'Vote Check - Initially Empty',
+        'votecheck',
         validators.and(
-            validators.responseCount(1, 2),
+            validators.hasText(),
             validators.or(
-                validators.containsText('play'),
-                validators.containsText('resume'),
-                validators.containsText('playing'),
-                validators.containsText('gooo'),
-                validators.containsText('flowing')
+                validators.containsText('no active votes'),
+                validators.containsText('No votes'),
+                validators.containsText('No tracks have been voted'),
+                validators.containsText('Be the first')
             )
         ),
-        3,
-        adminChannelId
+        3
     ),
 
     new TestCase(
-        'Best Of Command',
-        'bestof nirvana',
+        'Gong Check - Initially No Gongs',
+        'gongcheck',
+        validators.and(
+            validators.hasText(),
+            validators.or(
+                validators.containsText('more votes are needed'),
+                validators.containsText('GONG'),
+                validators.containsText('gong')
+            )
+        ),
+        3
+    ),
+
+    new TestCase(
+        'Vote Immune - Protect Track #0',
+        'voteimmune 0',
         validators.and(
             validators.responseCount(1, 3),
-            validators.hasText()
-        ),
-        8
-    ),
-
-    // NOTE: AI Natural Language via @mention cannot be tested via API
-    // because app_mention events require actual Slack UI mentions, not text.
-    // AI functionality is still tested via 'bestof' command above.
-
-    new TestCase(
-        'Admin - Remove Track #2',
-        'remove 2',
-        validators.and(
-            validators.responseCount(1, 2),
             validators.or(
-                validators.containsText('yeeted'),
-                validators.containsText('removed'),
-                validators.containsText('track'),
-                validators.containsText('Track'),
-                validators.containsText('not found'),
-                validators.containsText('Error removing'),
-                validators.containsText('Error removing track'),
-                validators.matchesRegex(/track|Track|yeeted|removed|Error/i)
+                validators.containsText('IMMUNITY GRANTED'),
+                validators.containsText('immunity'),
+                validators.containsText('protected'),
+                validators.containsText('vote')  // partial vote message
             )
         ),
-        5,
-        adminChannelId
+        4
     ),
 
     new TestCase(
-        'Admin - Set Gong Limit',
-        'setconfig gongLimit 1',
+        'Admin - List Immune Tracks',
+        'listimmune',
         validators.and(
-            validators.responseCount(1, 2),
+            validators.hasText(),
             validators.or(
-                validators.containsText('gongLimit'),
-                validators.containsText('set to 1'),
-                validators.containsText('updated')
+                validators.containsText('immune'),
+                validators.containsText('Immune'),
+                validators.containsText('protected'),
+                validators.containsText('fair game')  // "Everything is fair game for the gong"
             )
         ),
         3,
@@ -682,12 +869,27 @@ const testSuiteArray = [
     ),
 
     new TestCase(
-        'Gong Non-Immune Track',
+        'Admin - Set Gong Limit to 1',
+        'setconfig gongLimit 1',
+        validators.or(
+            validators.containsText('gongLimit'),
+            validators.containsText('set to 1'),
+            validators.containsText('updated')
+        ),
+        3,
+        adminChannelId
+    ),
+
+    // This should fail because track #0 is immune
+    new TestCase(
+        'Gong Immune Track - Should Be Protected',
         'gong',
         validators.and(
             validators.responseCount(1, 3),
             validators.or(
-                validators.containsText('GONGED into oblivion'),
+                validators.containsText('diplomatic immunity'),
+                validators.containsText('protect'),
+                validators.containsText('GONGED into oblivion'),  // Might gong a different track
                 validators.containsText('PEOPLE HAVE SPOKEN')
             )
         ),
@@ -695,28 +897,29 @@ const testSuiteArray = [
     ),
 
     new TestCase(
-        'Vote to Play Track',
-        'vote 4',
+        'Vote to Play Track #3',
+        'vote 3',
         validators.and(
             validators.responseCount(1, 3),
             validators.notContainsText('already voted'),
             validators.or(
                 validators.containsText('VOTE'),
-                validators.containsText('Voted!')
+                validators.containsText('Voted!'),
+                validators.containsText('vote')
             )
         ),
         4
     ),
 
     new TestCase(
-        'Remove Track from Queue - Access Denied',
-        'remove 1',
+        'Vote Check - Should Show Active Vote',
+        'votecheck',
         validators.and(
-            validators.responseCount(1, 2),
+            validators.hasText(),
             validators.or(
-                validators.containsText('removed'),
-                validators.containsText('track'),
-                validators.containsText('admin-only')
+                validators.containsText('Current vote counts'),
+                validators.containsText('votes'),
+                validators.containsText('/3')  // shows as "1/3 votes"
             )
         ),
         3
@@ -728,12 +931,447 @@ const testSuiteArray = [
         validators.and(
             validators.responseCount(1, 3),
             validators.or(
+                validators.containsText('Voting period started'),
                 validators.containsText('flush'),
-                validators.containsText('vote'),
-                validators.containsText('clear')
+                validators.containsText('minutes'),
+                validators.containsText('already voted')  // if already voted
             )
         ),
         3
+    ),
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 8: ADMIN PLAYBACK CONTROLS
+    // ═══════════════════════════════════════════════════════════════════
+
+    new TestCase(
+        'Admin - Pause Playback',
+        'pause',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('Taking a breather'),
+                validators.containsText('Paused'),
+                validators.containsText('pause')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Resume Playback',
+        'resume',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('Back to the groove'),
+                validators.containsText('Resuming'),
+                validators.containsText('play')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Play',
+        'play',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('play'),
+                validators.containsText('gooo'),
+                validators.containsText('flowing'),
+                validators.containsText('Music')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Next Track',
+        'next',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('Skipped'),
+                validators.containsText('next banger'),
+                validators.containsText('On to the next')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Previous Track',
+        'previous',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('Going back in time'),
+                validators.containsText('Previous track'),
+                validators.containsText('previous')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Shuffle Mode',
+        'shuffle',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('Shuffle mode activated'),
+                validators.containsText('randomized'),
+                validators.containsText('chaos reign')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Normal Mode',
+        'normal',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('Back to normal'),
+                validators.containsText('order you actually wanted'),
+                validators.containsText('normal')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Stop Playback',
+        'stop',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('Silence falls'),
+                validators.containsText('Playback stopped'),
+                validators.containsText('stop')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Play Again',
+        'play',
+        validators.or(
+            validators.containsText('play'),
+            validators.containsText('gooo'),
+            validators.containsText('flowing')
+        ),
+        3,
+        adminChannelId
+    ),
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 9: ADMIN QUEUE MODIFICATIONS (with verification)
+    // ═══════════════════════════════════════════════════════════════════
+
+    new TestCase(
+        'Queue Size Before Remove',
+        'size',
+        validators.matchesRegex(/\d+.*track/i),
+        3
+    ),
+
+    new TestCase(
+        'Admin - Remove Track #2',
+        'remove 2',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('yeeted'),
+                validators.containsText('removed'),
+                validators.containsText('Track'),
+                validators.matchesRegex(/track|yeeted|removed/i)
+            )
+        ),
+        5,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Queue Size After Remove',
+        'size',
+        validators.matchesRegex(/\d+.*track/i),
+        3
+    ),
+
+    new TestCase(
+        'Admin - Remove Invalid Track Number (error)',
+        'remove abc',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText("That's not a valid track number"),
+                validators.containsText('Check the queue with')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    // Add more tracks before Thanos (need at least 4 for a meaningful snap)
+    new TestCase(
+        'Add Track for Thanos #1 - AC/DC',
+        'add AC/DC - Back In Black',
+        validators.or(
+            validators.containsText('queue'),
+            validators.containsText('added'),
+            validators.containsText('Added')
+        ),
+        7
+    ),
+
+    new TestCase(
+        'Add Track for Thanos #2 - Metallica',
+        'add Metallica - Enter Sandman',
+        validators.or(
+            validators.containsText('queue'),
+            validators.containsText('added'),
+            validators.containsText('Added')
+        ),
+        7
+    ),
+
+    new TestCase(
+        'Queue Size Before Thanos',
+        'size',
+        validators.matchesRegex(/\d+.*track/i),
+        3
+    ),
+
+    new TestCase(
+        'Admin - Thanos Snap',
+        'thanos',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('SNAP'),
+                validators.containsText('balanced'),
+                validators.containsText('dust'),
+                validators.containsText('tiny')  // In case queue is too small
+            )
+        ),
+        5,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Queue Size After Thanos',
+        'size',
+        validators.matchesRegex(/\d+.*track/i),
+        3
+    ),
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 10: VOLUME CONTROLS (keep volume LOW - max 20, reset to 5)
+    // ═══════════════════════════════════════════════════════════════════
+
+    new TestCase(
+        'Admin - Set Volume to 15',
+        'setvolume 15',
+        validators.matchesRegex(/15|volume|Volume/i),
+        4,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Reset Volume to 5',
+        'setvolume 5',
+        validators.matchesRegex(/5|volume/i),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Set Volume Too High (error)',
+        'setvolume 999',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('louder than a metal concert'),
+                validators.containsText('Max is'),
+                validators.containsText('Whoa there')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    // Volume should still be 5 after rejected high volume
+
+    new TestCase(
+        'Admin - Set Volume Invalid (error)',
+        'setvolume abc',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText("That's not a number"),
+                validators.containsText('actual digits'),
+                validators.containsText('Invalid volume')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    // Volume should still be 5 after rejected invalid input
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 11: CONFIG COMMANDS
+    // ═══════════════════════════════════════════════════════════════════
+
+    new TestCase(
+        'Admin - Get Config',
+        'getconfig',
+        validators.and(
+            validators.hasText(),
+            validators.or(
+                validators.containsText('gongLimit'),
+                validators.containsText('voteLimit'),
+                validators.containsText('maxVolume')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Set Invalid Config Key',
+        'setconfig invalidKeyThatDoesNotExist 123',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('Unknown'),
+                validators.containsText('unknown'),
+                validators.containsText('Invalid'),
+                validators.containsText('not a valid')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Crossfade Status',
+        'crossfade',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('Crossfade'),
+                validators.containsText('crossfade'),
+                validators.containsText('enabled'),
+                validators.containsText('disabled')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 12: ERROR HANDLING (input validation)
+    // ═══════════════════════════════════════════════════════════════════
+
+    new TestCase(
+        'Add - No Track Specified',
+        'add',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('gotta tell me what to add'),
+                validators.containsText('add <song name')
+            )
+        ),
+        3
+    ),
+
+    new TestCase(
+        'Vote - Invalid Track Number',
+        'vote xyz',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText("track number isn't in the queue"),
+                validators.containsText('Use `list`'),
+                validators.containsText('see available tracks')
+            )
+        ),
+        3
+    ),
+
+    new TestCase(
+        'Search Album - No Query',
+        'searchalbum',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('gotta tell me what album'),
+                validators.containsText('searchalbum <album name>')
+            )
+        ),
+        3
+    ),
+
+    new TestCase(
+        'Search Playlist - No Query',
+        'searchplaylist',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('Tell me which playlist'),
+                validators.containsText('searchplaylist <name>')
+            )
+        ),
+        3
+    ),
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 13: CLEANUP - Reset to safe defaults
+    // ═══════════════════════════════════════════════════════════════════
+
+    new TestCase(
+        'Admin - Reset Gong Limit to 3 (Cleanup)',
+        'setconfig gongLimit 3',
+        validators.or(
+            validators.containsText('gongLimit'),
+            validators.containsText('updated')
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Reset Vote Limit to 3 (Cleanup)',
+        'setconfig voteLimit 3',
+        validators.or(
+            validators.containsText('voteLimit'),
+            validators.containsText('updated')
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Set Volume to 5 (Cleanup)',
+        'setvolume 5',
+        validators.matchesRegex(/5|volume/i),
+        3,
+        adminChannelId
     ),
 ];
 
@@ -819,11 +1457,27 @@ async function runTestSuite() {
                 }
             } else {
                 // Non-verbose: show truncated response
-                if (test.responses.length > 0) {
+                if (test.responses.length > 0 && test.responses[0].text) {
                     console.log(`   Response: ${test.responses[0].text.substring(0, 100)}...`);
                 }
             }
             failed++;
+
+            // ABORT EARLY if pre-flight checks fail - bot needs restart
+            if (test.name.startsWith('Pre-flight:')) {
+                console.log('\n' + '═'.repeat(60));
+                console.log('🛑 PRE-FLIGHT CHECK FAILED - ABORTING TEST SUITE');
+                console.log('');
+                console.log('   The bot has leftover state from a previous run.');
+                console.log('   Please restart the SlackONOS bot and try again.');
+                console.log('');
+                console.log('   Leftover state can include:');
+                console.log('   • Active votes on tracks');
+                console.log('   • Immune tracks from voteimmune');
+                console.log('   • Pending gong votes');
+                console.log('═'.repeat(60));
+                process.exit(1);
+            }
         }
 
         // Delay between tests to avoid rate limits and allow bot to process

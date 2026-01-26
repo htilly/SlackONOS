@@ -26,6 +26,7 @@
 > `telemetry` - Show telemetry status and privacy information.
 > `stats` - Show usage statistics for all users.
 > `stats [user]` - Show usage statistics for a specific user.
+> `diagnostics` (or `diag` / `checksource`) - Deep source check (scans queue). 🔍
 > `featurerequest <feature description>` - Create a GitHub issue for a feature request with enhancement label.
 
 *🤖 AI Settings:*
