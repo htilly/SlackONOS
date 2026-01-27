@@ -4,16 +4,16 @@ on:
   issues:
     types: [opened, labeled]
   workflow_dispatch:
-
-# Prevent parallel runs for the same issue
-concurrency:
-  group: enhance-feature-request-${{ github.event.issue.number || inputs.issue_number }}
-  cancel-in-progress: false
     inputs:
       issue_number:
         description: 'Issue number to process'
         required: true
         type: string
+
+# Prevent parallel runs for the same issue
+concurrency:
+  group: enhance-feature-request-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: false
 
 permissions:
   issues: write
