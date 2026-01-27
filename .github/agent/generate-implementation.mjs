@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { readFileSync, writeFileSync, existsSync } from "fs";
-import { resolve, dirname } from "path";
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
+import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
 
@@ -10,7 +10,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * Generate Implementation - Use Claude to analyze codebase and IMPLEMENT code changes
  *
  * This script uses Claude to:
- * 1. Analyze the existing codebase
+ * 1. Intelligently identify relevant files based on the task
  * 2. Generate actual code changes (diffs)
  * 3. Apply the changes to the codebase
  */
@@ -33,60 +33,196 @@ if (!anthropicApiKey) {
 const anthropic = new Anthropic({ apiKey: anthropicApiKey });
 
 /**
- * Read relevant project files to give Claude context
+ * Get all files in the repository
  */
-function getProjectContext() {
+function getAllFiles() {
   const repoRoot = resolve(__dirname, "../..");
   const files = [];
+  
+  function walkDir(dir, basePath = "") {
+    try {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = join(dir, entry.name);
+        const relPath = basePath ? join(basePath, entry.name) : entry.name;
+        
+        // Skip excluded paths
+        if (relPath.includes('node_modules/') || 
+            relPath.includes('.git/') || 
+            relPath.includes('coverage/') ||
+            relPath.includes('dist/') ||
+            relPath.includes('build/') ||
+            relPath.startsWith('.') && !relPath.startsWith('.github/')) {
+          continue;
+        }
+        
+        if (entry.isDirectory()) {
+          walkDir(fullPath, relPath);
+        } else if (entry.isFile()) {
+          // Only include code files
+          const ext = entry.name.split('.').pop();
+          if (['js', 'mjs', 'json', 'html', 'css', 'txt', 'yml', 'yaml'].includes(ext)) {
+            files.push(relPath);
+          }
+        }
+      }
+    } catch (e) {
+      // Skip directories we can't read
+    }
+  }
+  
+  walkDir(repoRoot);
+  return files;
+}
 
-  // Read package.json for dependencies
-  try {
-    const packageJson = readFileSync(resolve(repoRoot, "package.json"), "utf8");
-    files.push({
-      path: "package.json",
-      content: packageJson
-    });
-  } catch (e) {
-    console.warn("[IMPLEMENTATION] Could not read package.json");
+/**
+ * Select relevant files based on task description (keyword-based)
+ */
+function selectRelevantFiles(task, fileList) {
+  const taskLower = task.toLowerCase();
+  const relevantFiles = new Set();
+  
+  // Keyword to file mapping (updated for current codebase structure)
+  const keywordMap = {
+    'spotify': ['lib/spotify.js', 'lib/command-handlers.js'],
+    'discord': ['lib/discord.js'],
+    'slack': ['lib/slack.js'],
+    'sonos': ['index.js'],
+    'vote': ['lib/voting.js', 'index.js'],
+    'gong': ['lib/voting.js', 'index.js'],
+    'admin': ['public/setup/admin.js', 'public/setup/admin.html'],
+    'auth': ['lib/auth-handler.js', 'lib/webauthn-handler.js'],
+    'ai': ['lib/ai-handler.js'],
+    'soundcraft': ['lib/soundcraft-handler.js'],
+    'help': ['templates/help/', 'index.js'],
+    'web': ['public/setup/', 'public/'],
+    'config': ['index.js'],
+    'queue': ['lib/add-handlers.js', 'index.js'],
+    'search': ['lib/spotify.js', 'lib/command-handlers.js', 'index.js'],
+    'command': ['lib/command-handlers.js', 'index.js'],
+    'feature': ['index.js', 'lib/command-handlers.js'],
+    'alias': ['index.js', 'lib/command-handlers.js'],
+    'github': ['lib/github-app.js', 'index.js']
+  };
+  
+  // Find relevant files based on keywords
+  for (const [keyword, files] of Object.entries(keywordMap)) {
+    if (taskLower.includes(keyword)) {
+      for (const file of files) {
+        // Check if file exists in fileList
+        const matchingFiles = fileList.filter(f => 
+          f.includes(file) || f.endsWith(file) || f === file
+        );
+        matchingFiles.forEach(f => relevantFiles.add(f));
+      }
+    }
+  }
+  
+  // Also check for direct file mentions
+  for (const file of fileList) {
+    const fileName = file.split('/').pop();
+    if (taskLower.includes(fileName.toLowerCase().replace(/\.(js|mjs|json)$/, ''))) {
+      relevantFiles.add(file);
+    }
+  }
+  
+  return Array.from(relevantFiles);
+}
+
+/**
+ * Read relevant project files to give Claude context
+ */
+function getProjectContext(task) {
+  const repoRoot = resolve(__dirname, "../..");
+  const files = [];
+  const fileList = getAllFiles();
+  
+  // Priority files (always include)
+  const priorityFiles = [
+    'package.json',
+    'index.js'
+  ];
+  
+  // Get task-relevant files
+  const relevantFiles = selectRelevantFiles(task, fileList);
+  console.log(`[IMPLEMENTATION] Identified ${relevantFiles.length} relevant files based on task keywords`);
+  if (relevantFiles.length > 0) {
+    console.log(`[IMPLEMENTATION] Relevant files: ${relevantFiles.join(', ')}`);
   }
 
-  // Read main index file
-  try {
-    const indexJs = readFileSync(resolve(repoRoot, "index.js"), "utf8");
-    files.push({
-      path: "index.js",
-      content: indexJs.substring(0, 10000) // More context for main file
-    });
-  } catch (e) {
-    console.warn("[IMPLEMENTATION] Could not read index.js");
+  // First pass: Include priority files
+  for (const filePath of priorityFiles) {
+    try {
+      const fullPath = resolve(repoRoot, filePath);
+      if (existsSync(fullPath)) {
+        const content = readFileSync(fullPath, "utf8");
+        // Include full content for priority files
+        files.push({
+          path: filePath,
+          content: filePath === 'index.js' ? content.substring(0, 15000) : content
+        });
+      }
+    } catch (e) {
+      console.warn(`[IMPLEMENTATION] Could not read ${filePath}`);
+    }
   }
 
-  // Read lib directory files
-  try {
-    const libFiles = [
-      "lib/slack.js",
-      "lib/discord.js",
-      "lib/voting.js",
-      "lib/command-handlers.js",
-      "lib/ai-handler.js",
-      "lib/spotify.js",
-      "lib/add-handlers.js"
-    ];
+  // Second pass: Include task-relevant files
+  for (const filePath of relevantFiles) {
+    try {
+      const fullPath = resolve(repoRoot, filePath);
+      if (existsSync(fullPath)) {
+        const stats = statSync(fullPath);
+        // Skip very large files
+        if (stats.size > 100000) {
+          console.log(`[IMPLEMENTATION] Skipping large file: ${filePath} (${stats.size} bytes)`);
+          continue;
+        }
+        
+        const content = readFileSync(fullPath, "utf8");
+        files.push({
+          path: filePath,
+          content: content // Include full content for relevant files
+        });
+      }
+    } catch (e) {
+      console.warn(`[IMPLEMENTATION] Could not read ${filePath}`);
+    }
+  }
 
-    for (const libFile of libFiles) {
-      const fullPath = resolve(repoRoot, libFile);
+  // Third pass: Include other lib files if we have space (limit to prevent token overflow)
+  const maxFiles = 15; // Limit total files
+  const libFiles = [
+    'lib/slack.js',
+    'lib/discord.js',
+    'lib/voting.js',
+    'lib/command-handlers.js',
+    'lib/ai-handler.js',
+    'lib/spotify.js',
+    'lib/add-handlers.js'
+  ];
+  
+  for (const filePath of libFiles) {
+    if (files.length >= maxFiles) break;
+    
+    // Skip if already included
+    if (files.some(f => f.path === filePath)) continue;
+    
+    try {
+      const fullPath = resolve(repoRoot, filePath);
       if (existsSync(fullPath)) {
         const content = readFileSync(fullPath, "utf8");
         files.push({
-          path: libFile,
-          content: content.substring(0, 5000) // More context per file
+          path: filePath,
+          content: content.substring(0, 8000) // Truncate non-priority files
         });
       }
+    } catch (e) {
+      // Skip if can't read
     }
-  } catch (e) {
-    console.warn("[IMPLEMENTATION] Could not read lib files");
   }
 
+  console.log(`[IMPLEMENTATION] Including ${files.length} files in context`);
   return files;
 }
 
@@ -144,7 +280,7 @@ async function generateImplementation() {
     console.log(`[IMPLEMENTATION] Generating code implementation with ${model}...`);
     console.log(`[IMPLEMENTATION] Feature request: ${enhancedTask}`);
 
-    const projectFiles = getProjectContext();
+    const projectFiles = getProjectContext(enhancedTask);
 
     // Build context from project files
     let contextText = "Here are relevant files from the project:\n\n";
