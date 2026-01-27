@@ -397,12 +397,16 @@ jobs:
             PR_BODY=$(echo "$PR_BODY" | sed "s/\$ISSUE_NUMBER/$ISSUE_NUMBER/g")
 
             # Create PR
-            gh pr create \
+            PR_NUMBER=$(gh pr create \
               --title "feat: Implementation plan for issue #$ISSUE_NUMBER" \
               --body "$PR_BODY" \
               --base develop \
               --head "$BRANCH_NAME" \
-              --label "ai-generated,enhancement"
+              --label "enhancement" \
+              --json number --jq '.[0].number')
+
+            # Try to add ai-generated label if it exists (ignore error if label doesn't exist)
+            gh pr edit "$PR_NUMBER" --add-label "ai-generated" 2>/dev/null || echo "⚠️  Label 'ai-generated' not found, skipping"
 
             echo "✅ Created PR for branch $BRANCH_NAME"
           else
