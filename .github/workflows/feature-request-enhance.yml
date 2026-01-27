@@ -256,8 +256,12 @@ jobs:
 
   generate-implementation:
     runs-on: ubuntu-latest
-    needs: [check-label, preprocess]
-    if: needs.preprocess.outcome == 'success'
+    needs: [check-label]
+    # Run if issue has enhancement label and isn't already enhanced
+    # Don't depend on preprocess to avoid skipping if preprocess fails/is skipped
+    if: |
+      needs.check-label.outputs.has_enhancement == 'true' &&
+      needs.check-label.outputs.already_enhanced == 'false'
     permissions:
       contents: write
       pull-requests: write
@@ -279,13 +283,31 @@ jobs:
         working-directory: .github/agent
         run: npm install
 
+      - name: Fetch issue data
+        id: fetch-issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ needs.check-label.outputs.issue_number }}
+        run: |
+          ISSUE_JSON=$(curl -s \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/$ISSUE_NUMBER")
+          TITLE=$(echo "$ISSUE_JSON" | jq -r '.title')
+          BODY=$(echo "$ISSUE_JSON" | jq -r '.body // ""')
+          {
+            echo "issue_title<<EOF"
+            echo "$TITLE"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Generate implementation with Claude
         id: generate
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_MODEL: ${{ secrets.CLAUDE_MODEL }}
-          ENHANCED_TASK: ${{ needs.preprocess.outputs.enhanced_task }}
-          TASK: ${{ needs.preprocess.outputs.issue_title }}
+          ENHANCED_TASK: ${{ steps.fetch-issue.outputs.issue_title }}
+          TASK: ${{ steps.fetch-issue.outputs.issue_title }}
           ISSUE_NUMBER: ${{ needs.check-label.outputs.issue_number }}
         run: |
           set -e
