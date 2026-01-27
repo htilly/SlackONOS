@@ -35,17 +35,18 @@ const path = require('path');
 const googleTTS = require('@sefinek/google-tts-api');
 const config = require('nconf');
 const winston = require('winston');
-const Spotify = require('./spotify-async');
-const utils = require('./utils');
+const Spotify = require('./lib/spotify');
+const utils = require('./lib/utils');
 const process = require('process');
 const parseString = require('xml2js').parseString;
 const http = require('http');
 const https = require('https');
 const selfsigned = require('selfsigned');
-const AIHandler = require('./ai-handler');
-const voting = require('./voting');
-const musicHelper = require('./music-helper');
+const AIHandler = require('./lib/ai-handler');
+const voting = require('./lib/voting');
+const musicHelper = require('./lib/music-helper');
 const commandHandlers = require('./lib/command-handlers');
+const addHandlers = require('./lib/add-handlers');
 const gongMessage = fs.readFileSync('templates/messages/gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('templates/messages/vote.txt', 'utf8').split('\n').filter(Boolean);
 const ttsMessage = fs.readFileSync('templates/messages/tts.txt', 'utf8').split('\n').filter(Boolean);
@@ -100,8 +101,8 @@ const userActionsFile = path.join(__dirname, 'config/userActions.json');
 const blacklistFile = path.join(__dirname, 'config/blacklist.json');
 const trackBlacklistFile = path.join(__dirname, 'config/track-blacklist.json');
 const aiUnparsedFile = path.join(__dirname, 'config/ai-unparsed.log');
-const WinstonWrapper = require('./logger');
-const Telemetry = require('./telemetry');
+const WinstonWrapper = require('./lib/logger');
+const Telemetry = require('./lib/telemetry');
 
 // Helper to load user blacklist
 function loadBlacklist() {
@@ -476,7 +477,7 @@ const spotify = Spotify({
 }, logger);
 
 /* Initialize Soundcraft Handler */
-const SoundcraftHandler = require('./soundcraft-handler');
+const SoundcraftHandler = require('./lib/soundcraft-handler');
 
 // Parse soundcraftChannels if it's a string (from config file)
 let soundcraftChannels = config.get('soundcraftChannels') || [];
@@ -510,8 +511,8 @@ if (config.get('soundcraftEnabled')) {
 /* Initialize Music Helper with blacklist checker */
 musicHelper.initialize(spotify, logger, isTrackBlacklisted);
 
-const SlackSystem = require('./slack');
-const DiscordSystem = require('./discord');
+const SlackSystem = require('./lib/slack');
+const DiscordSystem = require('./lib/discord');
 
 // Command router stub - will be properly defined after commandRegistry
 // This allows us to pass it to Slack/Discord initialization
@@ -960,6 +961,20 @@ try {
       }),
       voting: voting,
       soundcraft: soundcraft,
+    });
+
+    // Initialize Add Handlers
+    addHandlers.initialize({
+      logger: logger,
+      sonos: sonos,
+      spotify: spotify,
+      sendMessage: (msg, ch, opts) => _slackMessage(msg, ch, opts),
+      logUserAction: _logUserAction,
+      isTrackBlacklisted: isTrackBlacklisted,
+      musicHelper: musicHelper,
+      getConfig: () => config,
+      getAdminChannel: () => global.adminChannel,
+      getCurrentPlatform: () => currentPlatform,
     });
 
     // Check that at least one platform is configured
@@ -2883,9 +2898,9 @@ function normalizeUser(userString) {
 
 const commandRegistry = new Map([
   // Common commands
-  ['add', { fn: _add, admin: false }],
-  ['addalbum', { fn: _addalbum, admin: false }],
-  ['addplaylist', { fn: _addplaylist, admin: false }],
+  ['add', { fn: addHandlers.add, admin: false }],
+  ['addalbum', { fn: addHandlers.addalbum, admin: false }],
+  ['addplaylist', { fn: addHandlers.addplaylist, admin: false }],
   ['search', { fn: commandHandlers.search, admin: false }],
   ['searchalbum', { fn: (args, ch, u) => commandHandlers.searchalbum(args, ch), admin: false }],
   ['searchplaylist', { fn: commandHandlers.searchplaylist, admin: false }],
@@ -2905,7 +2920,7 @@ const commandRegistry = new Map([
   ['status', { fn: (args, ch, u) => _status(ch), admin: false }],
   ['help', { fn: (args, ch, u) => _help(args, ch, u), admin: false }],
   ['bestof', { fn: _bestof, admin: false }],
-  ['append', { fn: _append, admin: false }],
+  ['append', { fn: addHandlers.append, admin: false }],
 
   // Admin-only commands
   ['debug', { fn: (args, ch, u) => _debug(ch, u), admin: true }],
@@ -4085,7 +4100,7 @@ async function _debug(channel, userName) {
         // Try to get client ID from Discord module
         let clientId = 'unknown';
         try {
-          const discordModule = require('./discord');
+          const discordModule = require('./lib/discord');
           const discordClient = discordModule.getDiscordClient();
           if (discordClient && discordClient.user) {
             clientId = discordClient.user.id;
@@ -4186,805 +4201,9 @@ async function _telemetryStatus(channel) {
   }
 }
 
-// This function needs to be a little smarter
-async function _add(input, channel, userName) {
-  _logUserAction(userName, 'add');
-  // Add a track to the queue
-  // If stopped: flush queue and start fresh
-  // If playing: just add to existing queue
-  if (!input || input.length < 2) {
-    _slackMessage('🎵 You gotta tell me what to add! Use `add <song name or artist>` 🎶', channel);
-    return;
-  }
-  const track = input.slice(1).join(' ');
-  logger.info('Track to add: ' + track);
-
-  try {
-    const tracks = await spotify.searchTrackList(track, 3); // Reduced from 7 to 3 for faster validation
-    if (!tracks || tracks.length === 0) {
-      _slackMessage("🤷 Couldn't find anything matching that. Try different keywords or check the spelling! 🎵", channel);
-      return;
-    }
-
-    // Sort tracks by relevance using the same logic as search command
-    const sortedTracks = _sortTracksByRelevance(tracks, track);
-
-    // Pre-validate all candidates in parallel before attempting to queue
-    const candidates = sortedTracks
-      .filter(t => musicHelper.isValidSpotifyUri(t.uri))
-      .map(t => ({
-        name: t.name,
-        artist: t.artist,
-        uri: t.uri
-      }));
-
-    if (candidates.length === 0) {
-      _slackMessage("🤷 Found tracks but they have invalid format. Try a different search! 🎵", channel);
-      return;
-    }
-
-    // Check if first result is blacklisted (most common case)
-    const firstCandidate = candidates[0];
-    if (isTrackBlacklisted(firstCandidate.name, firstCandidate.artist)) {
-      logger.info(`Track blocked by blacklist: ${firstCandidate.name} by ${firstCandidate.artist}`);
-      _slackMessage(`🚫 Sorry, *${firstCandidate.name}* by ${firstCandidate.artist} is on the blacklist and cannot be added.`, channel);
-      return;
-    }
-
-    // Parallelize getting state and queue to save time
-    const [state, queue] = await Promise.all([
-      sonos.getCurrentState(),
-      sonos.getQueue().catch(err => {
-        logger.warn('Could not get queue: ' + err.message);
-        return null;
-      })
-    ]);
-    logger.info('Current state for add: ' + state);
-
-    // Handle stopped state - flush queue
-    if (state === 'stopped') {
-      logger.info('Player stopped - ensuring queue is active source and flushing');
-      try {
-        // Stop any active playback to force Sonos to use queue
-        try {
-          await sonos.stop();
-          await new Promise(resolve => setTimeout(resolve, 300));
-        } catch (stopErr) {
-          // Ignore stop errors (might already be stopped)
-          logger.debug('Stop command result (may already be stopped): ' + stopErr.message);
-        }
-        
-        // Flush queue to start fresh
-        await sonos.flush();
-        await new Promise(resolve => setTimeout(resolve, 300));
-        logger.info('Queue flushed and ready');
-      } catch (flushErr) {
-        logger.warn('Could not flush queue: ' + flushErr.message);
-      }
-    } else if (queue && queue.items) {
-      // Check for duplicates if playing (using pre-fetched queue)
-      // Use findIndex directly instead of .some() then .findIndex() - avoids double scan
-      const duplicatePosition = queue.items.findIndex(item =>
-        item.uri === firstCandidate.uri ||
-        (item.title === firstCandidate.name && item.artist === firstCandidate.artist)
-      );
-
-      if (duplicatePosition >= 0) {
-        _slackMessage(
-          `*${firstCandidate.name}* by _${firstCandidate.artist}_ is already in the queue at position #${duplicatePosition}! :musical_note:\nWant it to play sooner? Use \`vote ${duplicatePosition}\` to move it up! :arrow_up:`,
-          channel
-        );
-        return;
-      }
-    }
-
-    // Try to queue the first valid candidate (most relevant result)
-    let result = null;
-    try {
-      logger.info(`Attempting to queue: ${firstCandidate.name} by ${firstCandidate.artist} (URI: ${firstCandidate.uri})`);
-      await sonos.queue(firstCandidate.uri);
-      logger.info('Successfully queued track: ' + firstCandidate.name);
-      result = firstCandidate;
-    } catch (e) {
-      const errorDetails = e.message || String(e);
-      const upnpErrorMatch = errorDetails.match(/errorCode[>](\d+)[<]/);
-      const errorCode = upnpErrorMatch ? upnpErrorMatch[1] : null;
-
-      logger.warn(`Queue failed for "${firstCandidate.name}" by ${firstCandidate.artist}: ${errorDetails}${errorCode ? ` (error code: ${errorCode})` : ''}`);
-
-      if (errorCode === '800') {
-        _slackMessage('🤷 Track not available in your region. Try searching for different songs! 🎵', channel);
-        
-        // Also notify admin channel about region configuration
-        if (global.adminChannel && channel !== global.adminChannel) {
-          const currentMarket = config.get('market') || 'US';
-          const marketOptions = ['US', 'SE', 'GB', 'DE', 'FR', 'CA', 'AU', 'JP', 'NO', 'DK', 'FI'];
-          const marketOptionsList = marketOptions.map(m => m === currentMarket ? `*${m}* (current)` : m).join(', ');
-          
-          _slackMessage(
-            `⚠️ *Spotify Region Warning*\n` +
-            `Track "*${firstCandidate.name}*" by ${firstCandidate.artist} failed due to region availability.\n\n` +
-            `Please verify your Spotify region configuration.\n` +
-            `Current region: *${currentMarket}*\n` +
-            `Available options: ${marketOptionsList}\n` +
-            `Update via setup wizard or admin panel.`,
-            global.adminChannel
-          );
-        }
-      } else {
-        _slackMessage('🤷 Couldn\'t add the track. It may not be available or there was an error. Try a different search! 🎵', channel);
-      }
-      return;
-    }
-    
-    // Respond immediately to user (don't wait for playback to start)
-    _slackMessage(
-      'Added ' + '*' + result.name + '*' + ' by ' + result.artist + ' to the queue! :notes:',
-      channel,
-      { trackName: result.name, addReactions: currentPlatform === 'discord' }
-    );
-
-    // Handle playback state asynchronously (don't block user response)
-    if (state === 'stopped') {
-      // Start playback in background (don't await)
-      (async () => {
-        try {
-          // Ensure queue is the active source before starting playback
-          // Stop any active playback to force Sonos to use queue
-          try {
-            await sonos.stop();
-            await new Promise(resolve => setTimeout(resolve, 500));
-          } catch (stopErr) {
-            // Ignore stop errors (might already be stopped)
-            logger.debug('Stop before play (may already be stopped): ' + stopErr.message);
-          }
-          
-          // Verify queue has items before trying to play (prevents UPnP error 701)
-          let queueReady = false;
-          let retries = 0;
-          while (!queueReady && retries < 5) {
-            try {
-              const queue = await sonos.getQueue();
-              if (queue && queue.items && queue.items.length > 0) {
-                queueReady = true;
-                logger.debug(`Queue verified: ${queue.items.length} items ready`);
-              } else {
-                logger.debug(`Queue not ready yet (attempt ${retries + 1}/5), waiting...`);
-                await new Promise(resolve => setTimeout(resolve, 300));
-                retries++;
-              }
-            } catch (queueErr) {
-              logger.debug(`Queue check failed (attempt ${retries + 1}/5): ${queueErr.message}`);
-              await new Promise(resolve => setTimeout(resolve, 300));
-              retries++;
-            }
-          }
-          
-          if (!queueReady) {
-            logger.warn('Queue not ready after 5 attempts, attempting playback anyway');
-          }
-          
-          // Try to activate queue by seeking to position 1 (alternative to SetAVTransportURI)
-          // This should activate the queue as the transport source
-          try {
-            logger.debug('Attempting to seek to queue position 1 to activate queue');
-            // Seek to track 1 in the queue to activate it
-            await sonos.avTransportService().Seek({
-              InstanceID: 0,
-              Unit: 'TRACK_NR',
-              Target: '1'
-            });
-            logger.debug('Successfully sought to track 1, queue should be active');
-            // Wait for seek to complete
-            await new Promise(resolve => setTimeout(resolve, 500));
-          } catch (seekErr) {
-            // If seek fails, try alternative: use next() to jump to first track
-            logger.debug('Seek failed, trying next() to activate queue: ' + seekErr.message);
-            try {
-              // Jump to first track in queue (this should activate the queue)
-              await sonos.next();
-              logger.debug('Used next() to activate queue');
-              await new Promise(resolve => setTimeout(resolve, 300));
-            } catch (nextErr) {
-              logger.debug('next() also failed: ' + nextErr.message);
-              // Continue anyway - play() might still work
-            }
-          }
-          
-          // Wait a moment to ensure queue is ready
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
-          // Start playback from queue
-          await sonos.play();
-          logger.info('Started playback from queue');
-        } catch (playErr) {
-          logger.warn('Failed to start playback: ' + playErr.message);
-        }
-      })();
-    } else if (state === 'paused') {
-      // Resume playback if paused
-      (async () => {
-        try {
-          await sonos.play();
-          logger.info('Resumed playback');
-        } catch (playErr) {
-          logger.warn('Failed to resume playback: ' + playErr.message);
-        }
-      })();
-    }
-  } catch (err) {
-    logger.error('Error adding track: ' + err.message);
-    _slackMessage('🤷 Couldn\'t find that track or hit an error adding it. Try being more specific with the song name! 🎵', channel);
-  }
-}
-
-async function _addalbum(input, channel, userName) {
-  _logUserAction(userName, 'addalbum');
-  // Add an album to the queue, support Spotify URI or search
-  if (!input || input.length < 2) {
-    _slackMessage('💿 You gotta tell me which album to add! Try `addalbum <album name>` 🎶', channel);
-    return;
-  }
-  const album = input.slice(1).join(' ');
-  logger.info('Album to add: ' + album);
-
-  try {
-    // If it's a Spotify URI, use getAlbum directly
-    if (album.startsWith('spotify:album:') || album.includes('spotify.com/album/')) {
-      const result = await spotify.getAlbum(album);
-      await _queueAlbum(result, album, channel, userName);
-      return;
-    }
-    
-    // Otherwise search and sort by relevance
-    const albums = await spotify.searchAlbumList(album, 3);
-    if (!albums || albums.length === 0) {
-      _slackMessage("🤷 Couldn't find that album. Try including the artist name or checking the spelling! 🎶", channel);
-      return;
-    }
-    
-    // Sort by relevance and take first result
-    const sortedAlbums = _sortAlbumsByRelevance(albums, album);
-    const result = { ...sortedAlbums[0], uri: sortedAlbums[0].uri };
-    logger.info(`Selected album: ${result.name} by ${result.artist}`);
-    
-    await _queueAlbum(result, album, channel, userName);
-  } catch (err) {
-    logger.error('Error adding album: ' + err.message);
-    _slackMessage('🔎 Couldn\'t find that album. Try a Spotify link, or use `searchalbum <name>` to pick one. 🎵', channel);
-  }
-}
-
-// Helper function to queue an album (shared between URI and search flows)
-async function _queueAlbum(result, albumSearchTerm, channel, userName) {
-  try {
-    // Check for blacklisted tracks in the album
-    const albumTracks = await spotify.getAlbumTracks(result.uri);
-    const blacklistedTracks = albumTracks.filter(track => 
-      isTrackBlacklisted(track.name, track.artist)
-    );
-    
-    // If ALL tracks are blacklisted, don't add anything
-    if (blacklistedTracks.length > 0 && blacklistedTracks.length === albumTracks.length) {
-      _slackMessage(
-        `🚫 Cannot add album *${result.name}* - all ${albumTracks.length} tracks are blacklisted!`,
-        channel
-      );
-      return;
-    }
-    
-    let warningMessage = '';
-    if (blacklistedTracks.length > 0) {
-      const bannedList = blacklistedTracks.map(t => `*${t.name}*`).join(', ');
-      warningMessage = `\n⚠️ Skipped ${blacklistedTracks.length} blacklisted track(s): ${bannedList}`;
-      logger.info(`Filtering out ${blacklistedTracks.length} blacklisted tracks from album ${result.name}`);
-    }
-
-    // Get current player state
-    const state = await sonos.getCurrentState();
-    logger.info('Current state for addalbum: ' + state);
-    
-    const isStopped = state === 'stopped';
-
-    // If stopped, ensure queue is active source and flush
-    if (isStopped) {
-      logger.info('Player stopped - ensuring queue is active and flushing');
-      try {
-        // Stop any active playback to force Sonos to use queue
-        try {
-          await sonos.stop();
-          await new Promise(resolve => setTimeout(resolve, 300));
-        } catch (stopErr) {
-          // Ignore stop errors (might already be stopped)
-          logger.debug('Stop command result (may already be stopped): ' + stopErr.message);
-        }
-        
-        // Flush queue to start fresh
-        await sonos.flush();
-        await new Promise(resolve => setTimeout(resolve, 300));
-        logger.info('Queue flushed and ready');
-      } catch (flushErr) {
-        logger.warn('Could not flush queue: ' + flushErr.message);
-      }
-    }
-
-    // Respond to user immediately
-    const trackCountText = blacklistedTracks.length > 0
-      ? `${albumTracks.length - blacklistedTracks.length} tracks from album`
-      : 'album';
-    let text = `Added ${trackCountText} *${result.name}* by ${result.artist} to the queue! :notes:`;
-    text += warningMessage;
-
-    if (result.coverUrl) {
-      _slackMessage(text, channel, {
-        trackName: result.name, // Track album name for reactions
-        blocks: [
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: text
-            },
-            accessory: {
-              type: "image",
-              image_url: result.coverUrl,
-              alt_text: result.name + " cover"
-            }
-          }
-        ]
-      });
-    } else {
-      _slackMessage(text, channel, { trackName: result.name }); // Track album name for reactions
-    }
-
-    // Queue tracks in background (don't block user response)
-    (async () => {
-      try {
-        // If we have blacklisted tracks, add individually in parallel; otherwise use album URI
-        if (blacklistedTracks.length > 0) {
-          const allowedTracks = albumTracks.filter(track =>
-            !isTrackBlacklisted(track.name, track.artist)
-          );
-
-          // Queue all tracks in parallel (much faster!)
-          const queuePromises = allowedTracks.map(track =>
-            sonos.queue(track.uri).catch(err => {
-              logger.warn(`Could not queue track ${track.name}: ${err.message}`);
-              return null;
-            })
-          );
-
-          await Promise.allSettled(queuePromises);
-          logger.info(`Added ${allowedTracks.length} tracks from album (filtered ${blacklistedTracks.length})`);
-        } else {
-          // No blacklisted tracks, add entire album via URI (more efficient)
-          await sonos.queue(result.uri);
-          logger.info('Added album: ' + result.name);
-        }
-
-        // Start playback if needed
-        if (isStopped) {
-          await new Promise(resolve => setTimeout(resolve, 300)); // Reduced from 1000ms
-          await sonos.play();
-          logger.info('Started playback after album add');
-        } else if (state !== 'playing' && state !== 'transitioning') {
-          await sonos.play();
-          logger.info('Player was not playing, started playback.');
-        }
-      } catch (err) {
-        logger.error('Error in background album queueing: ' + err.message);
-      }
-    })();
-  } catch (err) {
-    logger.error('Error adding album: ' + err.message);
-    _slackMessage('🔎 Couldn\'t find that album. Double-check the spelling or try including the artist name! 🎶', channel);
-  }
-}
-
-// Note: _searchplaylist has been moved to lib/command-handlers.js
-
-async function _addplaylist(input, channel, userName) {
-  _logUserAction(userName, 'addplaylist');
-  // Add a playlist to the queue, support Spotify URI or search
-  if (!input || input.length < 2) {
-    _slackMessage('📋 You need to tell me which playlist to add! Use `addplaylist <playlist name>` 🎵', channel);
-    return;
-  }
-  const playlist = input.slice(1).join(' ');
-  logger.info('Playlist to add: ' + playlist);
-
-  try {
-    let result;
-    try {
-      result = await spotify.getPlaylist(playlist);
-    } catch (e1) {
-      logger.warn('Direct playlist lookup failed, falling back to search: ' + e1.message);
-      const candidates = await spotify.searchPlaylistList(playlist, 5);
-      if (candidates && candidates.length > 0) {
-        // Sort by relevance and take first result
-        const sortedCandidates = _sortPlaylistsByRelevance(candidates, playlist);
-        result = sortedCandidates[0];
-        logger.info(`Using playlist candidate: ${result.name} by ${result.owner}`);
-      } else {
-        throw new Error('Playlist not found');
-      }
-    }
-    
-    // Check for blacklisted tracks in the playlist
-    const playlistTracks = await spotify.getPlaylistTracks(result.uri);
-    const blacklistedTracks = playlistTracks.filter(track => 
-      isTrackBlacklisted(track.name, track.artist)
-    );
-    
-    // If ALL tracks are blacklisted, don't add anything
-    if (blacklistedTracks.length > 0 && blacklistedTracks.length === playlistTracks.length) {
-      _slackMessage(
-        `🚫 Cannot add playlist *${result.name}* - all ${playlistTracks.length} tracks are blacklisted!`,
-        channel
-      );
-      return;
-    }
-    
-    let warningMessage = '';
-    if (blacklistedTracks.length > 0) {
-      const bannedList = blacklistedTracks.slice(0, 5).map(t => `*${t.name}*`).join(', ');
-      const moreText = blacklistedTracks.length > 5 ? ` and ${blacklistedTracks.length - 5} more` : '';
-      warningMessage = `\n⚠️ Skipped ${blacklistedTracks.length} blacklisted track(s): ${bannedList}${moreText}`;
-      logger.info(`Filtering out ${blacklistedTracks.length} blacklisted tracks from playlist ${result.name}`);
-    }
-
-    // Get current player state
-    const state = await sonos.getCurrentState();
-    logger.info('Current state for addplaylist: ' + state);
-    
-    const isStopped = state === 'stopped';
-
-    // If stopped, ensure queue is active source and flush
-    if (isStopped) {
-      logger.info('Player stopped - ensuring queue is active and flushing');
-      try {
-        // Stop any active playback to force Sonos to use queue
-        try {
-          await sonos.stop();
-          await new Promise(resolve => setTimeout(resolve, 300));
-        } catch (stopErr) {
-          // Ignore stop errors (might already be stopped)
-          logger.debug('Stop command result (may already be stopped): ' + stopErr.message);
-        }
-        
-        // Flush queue to start fresh
-        await sonos.flush();
-        await new Promise(resolve => setTimeout(resolve, 300));
-        logger.info('Queue flushed and ready');
-      } catch (flushErr) {
-        logger.warn('Could not flush queue: ' + flushErr.message);
-      }
-    }
-
-    // If we have blacklisted tracks, add individually; otherwise use playlist URI
-    if (blacklistedTracks.length > 0) {
-      const allowedTracks = playlistTracks.filter(track => 
-        !isTrackBlacklisted(track.name, track.artist)
-      );
-      
-      // Add allowed tracks individually
-      for (const track of allowedTracks) {
-        await sonos.queue(track.uri);
-      }
-      logger.info(`Added ${allowedTracks.length} tracks from playlist (filtered ${blacklistedTracks.length})`);
-    } else {
-      // No blacklisted tracks, add entire playlist via URI (more efficient)
-      await sonos.queue(result.uri);
-      logger.info('Added playlist: ' + result.name);
-    }
-
-    // Start playback if needed
-    if (isStopped) {
-      // Ensure queue is the active source before starting playback
-      try {
-        // Stop any active playback to force Sonos to use queue
-        try {
-          await sonos.stop();
-          await new Promise(resolve => setTimeout(resolve, 500));
-        } catch (stopErr) {
-          // Ignore stop errors (might already be stopped)
-          logger.debug('Stop before play (may already be stopped): ' + stopErr.message);
-        }
-        
-        // Wait a moment to ensure queue is ready
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Start playback from queue
-        await sonos.play();
-        logger.info('Started playback from queue');
-      } catch (playErr) {
-        logger.warn('Failed to start playback: ' + playErr.message);
-      }
-    } else if (state !== 'playing' && state !== 'transitioning') {
-      try {
-        await sonos.play();
-        logger.info('Player was not playing, started playback.');
-      } catch (playErr) {
-        logger.warn('Failed to auto-play: ' + playErr.message);
-      }
-    }
-
-    // Respond to user immediately
-    const trackCountText = blacklistedTracks.length > 0
-      ? `${playlistTracks.length - blacklistedTracks.length} tracks from playlist`
-      : 'playlist';
-    let text = `Added ${trackCountText} *${result.name}* by ${result.owner} to the queue! :notes:`;
-    text += warningMessage;
-
-    logger.info(`Sending playlist confirmation message: ${text}`);
-    _slackMessage(text, channel, { trackName: result.name }); // Track playlist name for reactions
-
-    // Queue tracks in background (don't block user response)
-    (async () => {
-      try {
-        // If we have blacklisted tracks, add individually in parallel; otherwise use playlist URI
-        if (blacklistedTracks.length > 0) {
-          const allowedTracks = playlistTracks.filter(track =>
-            !isTrackBlacklisted(track.name, track.artist)
-          );
-
-          // Queue all tracks in parallel (much faster for large playlists!)
-          const queuePromises = allowedTracks.map(track =>
-            sonos.queue(track.uri).catch(err => {
-              logger.warn(`Could not queue track ${track.name}: ${err.message}`);
-              return null;
-            })
-          );
-
-          await Promise.allSettled(queuePromises);
-          logger.info(`Added ${allowedTracks.length} tracks from playlist (filtered ${blacklistedTracks.length})`);
-        } else {
-          // No blacklisted tracks, add entire playlist via URI (more efficient)
-          await sonos.queue(result.uri);
-          logger.info('Added playlist: ' + result.name);
-        }
-
-        // Start playback if needed
-        if (isStopped) {
-          await new Promise(resolve => setTimeout(resolve, 300)); // Reduced from 1500ms total
-          await sonos.play();
-          logger.info('Started playback after playlist add');
-        } else if (state !== 'playing' && state !== 'transitioning') {
-          await sonos.play();
-          logger.info('Player was not playing, started playback.');
-        }
-      } catch (err) {
-        logger.error('Error in background playlist queueing: ' + err.message);
-      }
-    })();
-  } catch (err) {
-    logger.error('Error adding playlist: ' + err.message);
-    _slackMessage('🔎 Couldn\'t find that playlist. Try a Spotify link, or use `searchplaylist <name>` to pick one. 🎵', channel);
-  }
-}
-
-/**
- * Sort albums by relevance to search term
- * Prioritizes exact matches of both artist and album name
- * @param {Array} albums - Array of album objects from Spotify
- * @param {string} searchTerm - The search term used
- * @returns {Array} Sorted array of albums
- */
-function _sortAlbumsByRelevance(albums, searchTerm) {
-  const termLower = searchTerm.toLowerCase();
-  
-  // Try to detect "artist - album", "album - artist", "album by artist", or "artist by album" format
-  let separatorIndex = -1;
-  let separatorLength = 0;
-  
-  // Check for " - " separator
-  if (termLower.includes(' - ')) {
-    separatorIndex = termLower.indexOf(' - ');
-    separatorLength = 3;
-  }
-  // Check for " by " separator
-  else if (termLower.includes(' by ')) {
-    separatorIndex = termLower.indexOf(' by ');
-    separatorLength = 4;
-  }
-  
-  let artistWords = [];
-  let albumWords = [];
-  
-  if (separatorIndex > 0) {
-    const part1 = termLower.substring(0, separatorIndex).trim();
-    const part2 = termLower.substring(separatorIndex + separatorLength).trim();
-    
-    // For "by" separator: "album by artist" is most common
-    // For "-" separator: "artist - album" is most common
-    if (termLower.includes(' by ')) {
-      albumWords = part1.split(/\s+/).filter(w => w.length > 1);
-      artistWords = part2.split(/\s+/).filter(w => w.length > 2);
-    } else {
-      artistWords = part1.split(/\s+/).filter(w => w.length > 2);
-      albumWords = part2.split(/\s+/).filter(w => w.length > 1);
-    }
-  } else {
-    albumWords = termLower.split(/\s+/).filter(w => w.length > 1);
-  }
-  
-  return albums.sort((a, b) => {
-    const aName = a.name.toLowerCase();
-    const aArtist = (a.artist || '').toLowerCase();
-    const bName = b.name.toLowerCase();
-    const bArtist = (b.artist || '').toLowerCase();
-    
-    let aScore = 0;
-    let bScore = 0;
-    
-    if (artistWords.length > 0 && albumWords.length > 0) {
-      const aArtistMatch = artistWords.every(word => aArtist.includes(word));
-      const bArtistMatch = artistWords.every(word => bArtist.includes(word));
-      const aAlbumMatch = albumWords.every(word => aName.includes(word));
-      const bAlbumMatch = albumWords.every(word => bName.includes(word));
-      
-      if (aArtistMatch && aAlbumMatch) aScore += 10000;
-      if (bArtistMatch && bAlbumMatch) bScore += 10000;
-      if (aAlbumMatch) aScore += 5000;
-      if (bAlbumMatch) bScore += 5000;
-      if (aArtistMatch) aScore += 2000;
-      if (bArtistMatch) bScore += 2000;
-    } else {
-      const aAlbumMatches = albumWords.filter(w => aName.includes(w)).length;
-      const bAlbumMatches = albumWords.filter(w => bName.includes(w)).length;
-      aScore += aAlbumMatches * 1000;
-      bScore += bAlbumMatches * 1000;
-      
-      const aArtistMatches = albumWords.filter(w => w.length > 3 && aArtist.includes(w)).length;
-      const bArtistMatches = albumWords.filter(w => w.length > 3 && bArtist.includes(w)).length;
-      aScore += aArtistMatches * 500;
-      bScore += bArtistMatches * 500;
-    }
-    
-    if (aScore === bScore) {
-      return (b.popularity || 0) - (a.popularity || 0);
-    }
-    
-    return bScore - aScore;
-  });
-}
-
-/**
- * Sort playlists by relevance to search term
- * Prioritizes exact matches and follower count
- * @param {Array} playlists - Array of playlist objects from Spotify
- * @param {string} searchTerm - The search term used
- * @returns {Array} Sorted array of playlists
- */
-function _sortPlaylistsByRelevance(playlists, searchTerm) {
-  const termLower = searchTerm.toLowerCase();
-  const searchWords = termLower.split(/\s+/).filter(w => w.length > 2);
-  
-  return playlists.sort((a, b) => {
-    const aName = a.name.toLowerCase();
-    const bName = b.name.toLowerCase();
-    
-    let aScore = 0;
-    let bScore = 0;
-    
-    // Exact match in playlist name
-    if (aName.includes(termLower)) aScore += 10000;
-    if (bName.includes(termLower)) bScore += 10000;
-    
-    // Word matches
-    const aMatches = searchWords.filter(w => aName.includes(w)).length;
-    const bMatches = searchWords.filter(w => bName.includes(w)).length;
-    aScore += aMatches * 1000;
-    bScore += bMatches * 1000;
-    
-    // Use followers as tie-breaker (popular playlists are usually better)
-    if (aScore === bScore) {
-      return (b.followers || 0) - (a.followers || 0);
-    }
-    
-    return bScore - aScore;
-  });
-}
-
-/**
- * Sort tracks by relevance to search term
- * Prioritizes exact matches of both artist and track name
- * @param {Array} tracks - Array of track objects from Spotify
- * @param {string} searchTerm - The search term used
- * @returns {Array} Sorted array of tracks
- */
-function _sortTracksByRelevance(tracks, searchTerm) {
-  const termLower = searchTerm.toLowerCase();
-  
-  // Try to detect "artist - track", "track - artist", "track by artist", or "artist by track" format
-  let separatorIndex = -1;
-  let separatorLength = 0;
-  
-  // Check for " - " separator
-  if (termLower.includes(' - ')) {
-    separatorIndex = termLower.indexOf(' - ');
-    separatorLength = 3;
-  }
-  // Check for " by " separator
-  else if (termLower.includes(' by ')) {
-    separatorIndex = termLower.indexOf(' by ');
-    separatorLength = 4;
-  }
-  
-  let artistWords = [];
-  let trackWords = [];
-  
-  if (separatorIndex > 0) {
-    // Split on separator to separate artist and track
-    const part1 = termLower.substring(0, separatorIndex).trim();
-    const part2 = termLower.substring(separatorIndex + separatorLength).trim();
-    
-    // For "by" separator: "track by artist" is most common
-    // For "-" separator: "artist - track" is most common
-    if (termLower.includes(' by ')) {
-      // "Best of You by Foo Fighters" -> track by artist
-      trackWords = part1.split(/\s+/).filter(w => w.length > 1);
-      artistWords = part2.split(/\s+/).filter(w => w.length > 2);
-    } else {
-      // "Foo Fighters - Best of You" -> artist - track
-      artistWords = part1.split(/\s+/).filter(w => w.length > 2);
-      trackWords = part2.split(/\s+/).filter(w => w.length > 1);
-    }
-  } else {
-    // No clear separator, split all words
-    trackWords = termLower.split(/\s+/).filter(w => w.length > 1);
-  }
-  
-  return tracks.sort((a, b) => {
-    const aName = a.name.toLowerCase();
-    const aArtist = (a.artists?.[0]?.name || a.artist || '').toLowerCase();
-    const bName = b.name.toLowerCase();
-    const bArtist = (b.artists?.[0]?.name || b.artist || '').toLowerCase();
-    
-    let aScore = 0;
-    let bScore = 0;
-    
-    // HIGHEST PRIORITY: Both artist AND track match
-    if (artistWords.length > 0 && trackWords.length > 0) {
-      const aArtistMatch = artistWords.every(word => aArtist.includes(word));
-      const bArtistMatch = artistWords.every(word => bArtist.includes(word));
-      const aTrackMatch = trackWords.every(word => aName.includes(word));
-      const bTrackMatch = trackWords.every(word => bName.includes(word));
-      
-      if (aArtistMatch && aTrackMatch) aScore += 10000;
-      if (bArtistMatch && bTrackMatch) bScore += 10000;
-      
-      // High priority: Track name matches even if artist doesn't
-      if (aTrackMatch) aScore += 5000;
-      if (bTrackMatch) bScore += 5000;
-      
-      // Medium priority: Artist matches
-      if (aArtistMatch) aScore += 2000;
-      if (bArtistMatch) bScore += 2000;
-    } else {
-      // No " - " separator: check if words match track name or artist
-      const aTrackMatches = trackWords.filter(w => aName.includes(w)).length;
-      const bTrackMatches = trackWords.filter(w => bName.includes(w)).length;
-      aScore += aTrackMatches * 1000;
-      bScore += bTrackMatches * 1000;
-      
-      // Check artist matches (lower priority)
-      const aArtistMatches = trackWords.filter(w => w.length > 3 && aArtist.includes(w)).length;
-      const bArtistMatches = trackWords.filter(w => w.length > 3 && bArtist.includes(w)).length;
-      aScore += aArtistMatches * 500;
-      bScore += bArtistMatches * 500;
-    }
-    
-    // Use popularity as tie-breaker
-    if (aScore === bScore) {
-      return (b.popularity || 0) - (a.popularity || 0);
-    }
-    
-    return bScore - aScore;
-  });
-}
-
-// Note: Search commands (_search, _searchalbum) have been moved to lib/command-handlers.js
+// Note: _add, _addalbum, _queueAlbum, _addplaylist have been moved to lib/add-handlers.js
+// Note: _searchplaylist, _search, _searchalbum have been moved to lib/command-handlers.js
+// Note: _sortAlbumsByRelevance, _sortPlaylistsByRelevance, _sortTracksByRelevance have been moved to lib/queue-utils.js
 
 function _currentTrackTitle(channel, cb) {
   sonos
@@ -5434,7 +4653,7 @@ async function _sendDirectMessage(userName, text) {
   }
   
   try {
-    const discordModule = require('./discord');
+    const discordModule = require('./lib/discord');
     const discordClient = discordModule.getDiscordClient();
     
     if (!discordClient) {
@@ -5892,77 +5111,7 @@ async function _setconfig(input, channel, userName) {
   }
 }
 
-
-async function _append(input, channel, userName) {
-  _logUserAction(userName, 'append');
-
-  // Append a track to the queue (never flushes existing queue)
-  // Start playing if not already playing
-  if (!input || input.length < 2) {
-    _slackMessage('🎶 Tell me what song to append! Use `append <song name>` 🎵', channel);
-    return;
-  }
-
-  const track = input.slice(1).join(' ');
-  logger.info('Track to append: ' + track);
-
-  try {
-    const result = await spotify.getTrack(track);
-
-    // Check if track is already in queue
-    try {
-      const queue = await sonos.getQueue();
-      if (queue && queue.items) {
-        let duplicatePosition = -1;
-        const isDuplicate = queue.items.some((item, index) => {
-          if (item.uri === result.uri || (item.title === result.name && item.artist === result.artist)) {
-            duplicatePosition = index;
-            return true;
-          }
-          return false;
-        });
-
-        if (isDuplicate) {
-          _slackMessage(
-            `*${result.name}* by _${result.artist}_ is already in the queue at position #${duplicatePosition}! :musical_note:\nWant it to play sooner? Use \`vote ${duplicatePosition}\` to move it up! :arrow_up:`,
-            channel
-          );
-          return;
-        }
-      }
-    } catch (queueErr) {
-      // If we can't get the queue, just log and continue with adding
-      logger.warn('Could not check queue for duplicates: ' + queueErr.message);
-    }
-
-    // Always add to queue (preserving existing tracks)
-    await sonos.queue(result.uri);
-    logger.info('Appended track: ' + result.name);
-
-    let msg = '✅ Added *' + result.name + '* by _' + result.artist + '_ to the queue!';
-
-    // Check if we need to start playback
-    try {
-      const state = await sonos.getCurrentState();
-      logger.info('Current state after append: ' + state);
-
-      if (state !== 'playing' && state !== 'transitioning') {
-        // Wait a moment before starting playback
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        await sonos.play();
-        logger.info('Started playback after append.');
-        msg += ' Playback started! :notes:';
-      }
-    } catch (stateErr) {
-      logger.warn('Could not check/start playback: ' + stateErr.message);
-    }
-
-    _slackMessage(msg, channel);
-  } catch (err) {
-    logger.error('Error appending track: ' + err.message);
-    _slackMessage('🤷 Couldn\'t find that track or something went wrong. Try a different search! 🎶', channel);
-  }
-}
+// Note: _append has been moved to lib/add-handlers.js
 
 function _addToSpotifyPlaylist(input, channel) {
   // Admin check now handled in processInput (platform-aware)

@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { getSeasonalContext } from '../ai-handler.js';
+import { getSeasonalContext } from '../lib/ai-handler.js';
 
 describe('AI Handler', function() {
   describe('#getSeasonalContext', function() {
