@@ -596,14 +596,17 @@ const validators = {
         // Exact match - no output
         if (actualIncrease === exactIncrease) return true;
         
-        // Within tolerance (90-100%) - warning but pass
-        const tolerance = Math.floor(exactIncrease * 0.9);
-        if (actualIncrease >= tolerance && actualIncrease < exactIncrease) {
-            console.log(`   ⚠️  WARNING: Queue increased by ${actualIncrease} (expected ${exactIncrease}, baseline: ${baseline} → ${size})`);
-            return true;
+        // Disable tolerance for very small expected increases (1-2 tracks),
+        // where a "90%" tolerance would allow clearly incorrect results (e.g., 0 of 1).
+        if (exactIncrease >= 3) {
+            const tolerance = Math.floor(exactIncrease * 0.9);
+            if (actualIncrease >= tolerance && actualIncrease < exactIncrease) {
+                console.log(`   ⚠️  WARNING: Queue increased by ${actualIncrease} (expected ${exactIncrease}, baseline: ${baseline} → ${size})`);
+                return true;
+            }
         }
         
-        // Outside tolerance - fail
+        // Outside tolerance or small exact value - fail
         return `❌ FAIL: Queue increased by ${actualIncrease} (expected exactly ${exactIncrease}, baseline: ${baseline} → ${size})`;
     },
 
