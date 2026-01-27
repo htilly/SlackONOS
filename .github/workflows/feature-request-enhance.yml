@@ -88,7 +88,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20.20.0'
           cache: npm
 
       - name: Install dependencies
@@ -157,7 +157,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20.20.0'
           cache: npm
 
       - name: Install dependencies
@@ -267,7 +267,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20.20.0'
           cache: npm
 
       - name: Install agent dependencies
@@ -312,7 +312,7 @@ jobs:
             git add "$IMPL_FILE"
 
             # Create commit with heredoc to handle multiline
-            git commit -m "$(cat <<'EOF'
+            git commit -m "$(cat <<EOF
           Add implementation plan for issue #$ISSUE_NUMBER
 
           This is an AI-generated implementation plan created by Claude.

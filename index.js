@@ -36,7 +36,7 @@ const googleTTS = require('@sefinek/google-tts-api');
 const config = require('nconf');
 const winston = require('winston');
 const Spotify = require('./lib/spotify');
-const utils = require('./lib/utils');
+// const utils = require('./lib/utils'); // Currently unused
 const process = require('process');
 const parseString = require('xml2js').parseString;
 const http = require('http');
@@ -4748,7 +4748,17 @@ async function _featurerequest(input, channel, userName) {
   const githubToken = config.get('githubToken');
   if (!githubToken) {
     logger.warn('[FEATUREREQUEST] githubToken not configured');
-    _slackMessage('❌ Feature request functionality is not configured. Please set `githubToken` in the config to enable this feature.', channel);
+    _slackMessage(
+      '❌ *Feature request not configured*\n\n' +
+      'To enable this feature, you need a GitHub Personal Access Token:\n\n' +
+      '1. Go to: https://github.com/settings/tokens\n' +
+      '2. Click *"Generate new token (classic)"*\n' +
+      '3. Select scope: `repo` (or `public_repo` for public repos only)\n' +
+      '4. Set the token via admin command:\n' +
+      '   `setconfig githubToken ghp_xxxxxxxxxxxx`\n\n' +
+      '📖 More info: https://github.com/htilly/SlackONOS#configuration',
+      channel
+    );
     return;
   }
   
@@ -4930,7 +4940,8 @@ async function _setconfig(input, channel, userName) {
     soundcraftIp: { type: 'string', minLen: 0, maxLen: 50 },
     crossfadeEnabled: { type: 'boolean' },
     slackAlwaysThread: { type: 'boolean' },
-    logLevel: { type: 'string', minLen: 4, maxLen: 5, allowed: ['error', 'warn', 'info', 'debug'] }
+    logLevel: { type: 'string', minLen: 4, maxLen: 5, allowed: ['error', 'warn', 'info', 'debug'] },
+    githubToken: { type: 'string', minLen: 4, maxLen: 100, sensitive: true }
   };
 
   // Make config key case-insensitive
@@ -5056,7 +5067,13 @@ async function _setconfig(input, channel, userName) {
         _slackMessage(`⚠️ Updated \`${actualKey}\` in memory, but failed to save to disk!`, channel);
         return;
       }
-      _slackMessage(`✅ Successfully updated \`${actualKey}\` and saved to config.\nOld: \`${oldValue.slice(0, 80)}${oldValue.length > 80 ? '…' : ''}\`\nNew: \`${newValue.slice(0, 80)}${newValue.length > 80 ? '…' : ''}\``, channel);
+      // Mask sensitive values (like tokens)
+      if (configDef.sensitive) {
+        const maskedValue = newValue.slice(0, 4) + '****' + newValue.slice(-4);
+        _slackMessage(`✅ Successfully updated \`${actualKey}\` and saved to config.\nNew: \`${maskedValue}\` (${newValue.length} chars)`, channel);
+      } else {
+        _slackMessage(`✅ Successfully updated \`${actualKey}\` and saved to config.\nOld: \`${oldValue.slice(0, 80)}${oldValue.length > 80 ? '…' : ''}\`\nNew: \`${newValue.slice(0, 80)}${newValue.length > 80 ? '…' : ''}\``, channel);
+      }
     });
   } else if (configDef.type === 'boolean') {
     const lowerValue = value.toLowerCase();

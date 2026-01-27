@@ -112,7 +112,7 @@ Your task is to analyze the feature request and generate a concrete implementati
 
 Project context:
 - Node.js application
-- Uses Slack RTM API and Discord.js
+- Uses Slack Socket Mode / Events API (via @slack/socket-mode) and Discord.js
 - Controls Sonos speakers
 - Has voting system for democratic music control
 - Uses AI for natural language commands
