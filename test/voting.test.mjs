@@ -635,8 +635,8 @@ describe('Voting Module (voting.js)', function() {
   
   beforeEach(function() {
     // Clear module cache to get fresh module state
-    delete require.cache[require.resolve('../voting.js')];
-    voting = require('../voting.js');
+    delete require.cache[require.resolve('../lib/voting.js')];
+    voting = require('../lib/voting.js');
     
     messages = [];
     userActions = [];
@@ -684,15 +684,15 @@ describe('Voting Module (voting.js)', function() {
 
   describe('initialize', function() {
     it('should throw if logger not provided', function() {
-      delete require.cache[require.resolve('../voting.js')];
-      const freshVoting = require('../voting.js');
+      delete require.cache[require.resolve('../lib/voting.js')];
+      const freshVoting = require('../lib/voting.js');
       
       expect(() => freshVoting.initialize({})).to.throw('Voting module requires a logger');
     });
 
     it('should accept minimal dependencies', function() {
-      delete require.cache[require.resolve('../voting.js')];
-      const freshVoting = require('../voting.js');
+      delete require.cache[require.resolve('../lib/voting.js')];
+      const freshVoting = require('../lib/voting.js');
       
       expect(() => freshVoting.initialize({ logger: mockDeps.logger })).to.not.throw();
     });
@@ -906,8 +906,8 @@ describe('Voting Module (voting.js)', function() {
     });
 
     it('should show no immune tracks message when empty', async function() {
-      delete require.cache[require.resolve('../voting.js')];
-      const freshVoting = require('../voting.js');
+      delete require.cache[require.resolve('../lib/voting.js')];
+      const freshVoting = require('../lib/voting.js');
       freshVoting.initialize(mockDeps);
       
       await freshVoting.listImmune('C123');

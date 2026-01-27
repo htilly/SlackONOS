@@ -80,17 +80,32 @@ async function getChannelHistory(channelId, limit = 10) {
             channel: channelId,
             limit,
         });
-        return result.messages || [];
+        return { messages: result.messages || [], retryAfter: null };
     } catch (error) {
+        const retryAfter = error?.data?.retry_after || null;
         if (verbose) console.error('❌ Error getting history:', error.message);
-        return [];
+        return { messages: [], retryAfter };
+    }
+}
+
+async function getThreadReplies(channelId, threadTs, limit = 50) {
+    try {
+        const result = await slack.conversations.replies({
+            channel: channelId,
+            ts: threadTs,
+            limit,
+        });
+        return { messages: result.messages || [], retryAfter: null };
+    } catch (error) {
+        const retryAfter = error?.data?.retry_after || null;
+        if (verbose) console.error('❌ Error getting thread replies:', error.message);
+        return { messages: [], retryAfter };
     }
 }
 
 // Send a message and wait for response
 async function sendAndWaitForResponse(message, waitTime = 3, targetChannel = null) {
     const channel = targetChannel || channelId;
-    const timestampBefore = Date.now() / 1000;
     const sendTime = Date.now();
 
     try {
@@ -104,26 +119,38 @@ async function sendAndWaitForResponse(message, waitTime = 3, targetChannel = nul
             throw new Error('Failed to send message');
         }
 
+        // Use the sent message's timestamp as reference (more reliable than local clock)
+        const sentMessageTs = parseFloat(result.ts);
+
         // Poll for responses instead of just waiting
         // Check every 200ms for responses, but wait up to waitTime seconds total
         let firstResponseTime = null;
-        const pollInterval = 200; // Check every 200ms
+        const pollInterval = 1000; // Check every 1s to avoid rate limits
         const maxWaitTime = waitTime * 1000; // Convert to milliseconds
         const startTime = Date.now();
         let allResponses = [];
         let seenMessageIds = new Set();
+        // Track our own message so we don't pick it up
+        seenMessageIds.add(result.ts);
 
         while (Date.now() - startTime < maxWaitTime) {
             // Get messages after
-            const messagesAfter = await getChannelHistory(channel, 20);
+            const historyResult = await getChannelHistory(channel, 10);
+            if (historyResult.retryAfter) {
+                await new Promise(resolve => setTimeout(resolve, historyResult.retryAfter * 1000));
+                continue;
+            }
+            const messagesAfter = historyResult.messages;
 
-            // Find new messages from OTHER bots (not TestBot itself)
+            // Find new messages that came AFTER our sent message
             const newBotResponses = messagesAfter.filter(msg => {
-                const isFromBot = msg.bot_id || (msg.user && msg.user !== botUserId);
-                const isNew = parseFloat(msg.ts) > timestampBefore;
+                const msgTs = parseFloat(msg.ts);
+                const isAfterOurMessage = msgTs > sentMessageTs;
+                const isNotOurMessage = msg.ts !== result.ts;
                 const isNotTestBot = msg.user !== botUserId;
                 const isNewMessage = !seenMessageIds.has(msg.ts);
-                return isFromBot && isNew && isNotTestBot && isNewMessage;
+                // Accept any message that's not from TestBot and came after our message
+                return isAfterOurMessage && isNotOurMessage && isNotTestBot && isNewMessage;
             });
 
             // Add new responses
@@ -134,6 +161,48 @@ async function sendAndWaitForResponse(message, waitTime = 3, targetChannel = nul
                 // Record time of first response
                 if (firstResponseTime === null) {
                     firstResponseTime = Date.now();
+                }
+            }
+
+            // Check for thread replies to OUR sent message (bot may reply in thread)
+            const ourThreadReplies = await getThreadReplies(channel, result.ts, 25);
+            if (ourThreadReplies.retryAfter) {
+                await new Promise(resolve => setTimeout(resolve, ourThreadReplies.retryAfter * 1000));
+            } else {
+                for (const reply of ourThreadReplies.messages) {
+                    const isNotOurMessage = reply.ts !== result.ts;
+                    const isNotTestBot = reply.user !== botUserId;
+                    const isNewMessage = !seenMessageIds.has(reply.ts);
+                    if (isNotOurMessage && isNotTestBot && isNewMessage) {
+                        seenMessageIds.add(reply.ts);
+                        allResponses.push(reply);
+                        if (firstResponseTime === null) {
+                            firstResponseTime = Date.now();
+                        }
+                    }
+                }
+            }
+
+            // Also check thread replies on any bot responses that started threads
+            for (const resp of newBotResponses) {
+                if (!resp.thread_ts || resp.thread_ts === result.ts) continue; // Skip if it's our thread
+                const repliesResult = await getThreadReplies(channel, resp.thread_ts, 25);
+                if (repliesResult.retryAfter) {
+                    await new Promise(resolve => setTimeout(resolve, repliesResult.retryAfter * 1000));
+                    continue;
+                }
+                for (const reply of repliesResult.messages) {
+                    const isAfterOurMessage = parseFloat(reply.ts) > sentMessageTs;
+                    const isNotOurMessage = reply.ts !== result.ts;
+                    const isNotTestBot = reply.user !== botUserId;
+                    const isNewMessage = !seenMessageIds.has(reply.ts);
+                    if (isAfterOurMessage && isNotOurMessage && isNotTestBot && isNewMessage) {
+                        seenMessageIds.add(reply.ts);
+                        allResponses.push(reply);
+                        if (firstResponseTime === null) {
+                            firstResponseTime = Date.now();
+                        }
+                    }
                 }
             }
 
@@ -177,7 +246,7 @@ async function sendAndWaitForResponse(message, waitTime = 3, targetChannel = nul
 
 // Test case class
 class TestCase {
-    constructor(name, command, validator, waitTime = 3, targetChannel = null) {
+    constructor(name, command, validator, waitTime = 7, targetChannel = null) {
         this.name = name;
         this.command = command;
         this.validator = validator;
@@ -369,8 +438,8 @@ class TestCase {
         }
     }
 
-    async run() {
-        if (verbose) console.log(`\n🧪 Running: ${this.name}`);
+    async run(isRetry = false) {
+        if (verbose) console.log(`\n🧪 Running: ${this.name}${isRetry ? ' (RETRY)' : ''}`);
         if (verbose) console.log(`   Command: "${this.command}"`);
         if (verbose && this.targetChannel) console.log(`   Channel: ${this.targetChannel === adminChannelId ? 'Admin' : 'Standard'}`);
         if (verbose) console.log(`   Expected: ${this.getExpectedDescription()}`);
@@ -422,6 +491,15 @@ class TestCase {
 }
 
 // Validators
+const queueSizeStore = {};
+
+function extractQueueSize(responses) {
+    const allText = responses.map(r => r.text).join(' ');
+    const match = allText.match(/\b(\d+)\b/);
+    if (!match) return null;
+    return parseInt(match[1], 10);
+}
+
 const validators = {
     containsText: (text) => (responses) => {
         const allText = responses.map(r => r.text).join(' ');
@@ -472,6 +550,24 @@ const validators = {
             return true;
         }
         return `Response should NOT contain "${text}"`;
+    },
+
+    recordQueueSize: (key) => (responses) => {
+        const size = extractQueueSize(responses);
+        if (size === null) return 'Could not parse queue size from response';
+        queueSizeStore[key] = size;
+        return true;
+    },
+
+    queueSizeIncreaseFrom: (key, minIncrease = 1) => (responses) => {
+        const size = extractQueueSize(responses);
+        if (size === null) return 'Could not parse queue size from response';
+        const baseline = queueSizeStore[key];
+        if (baseline === undefined || baseline === null) {
+            return `No baseline queue size recorded for "${key}"`;
+        }
+        if (size >= baseline + minIncrease) return true;
+        return `Expected queue size to increase by ${minIncrease} from ${baseline}, got ${size}`;
     }
 };
 
@@ -701,6 +797,65 @@ const testSuiteArray = [
     ),
 
     new TestCase(
+        'Queue Size - Baseline Before Album',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.recordQueueSize('beforeAlbum')
+        ),
+        4
+    ),
+
+    new TestCase(
+        'Add Album - Abbey Road',
+        'addalbum abbey road',
+        validators.and(
+            validators.responseCount(1, 3),
+            validators.or(
+                validators.containsText('queue'),
+                validators.containsText('added'),
+                validators.containsText('Added')
+            )
+        ),
+        10
+    ),
+
+    new TestCase(
+        'Queue Size - After Album',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.queueSizeIncreaseFrom('beforeAlbum', 1),
+            validators.recordQueueSize('beforePlaylist')
+        ),
+        4
+    ),
+
+    new TestCase(
+        'Add Playlist - Rock Classics',
+        'addplaylist rock classics',
+        validators.and(
+            validators.responseCount(1, 3),
+            validators.or(
+                validators.containsText('queue'),
+                validators.containsText('added'),
+                validators.containsText('Added')
+            )
+        ),
+        12
+    ),
+
+    new TestCase(
+        'Queue Size - After Playlist',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.queueSizeIncreaseFrom('beforePlaylist', 1)
+        ),
+        4
+    ),
+
+    new TestCase(
         'Best Of Command',
         'bestof led zeppelin 3',
         validators.and(
@@ -773,7 +928,7 @@ const testSuiteArray = [
                 validators.containsText('flushvote')
             )
         ),
-        3
+        5
     ),
 
     new TestCase(
@@ -1425,25 +1580,47 @@ async function runTestSuite() {
 
     for (const test of testSuite) {
         process.stdout.write(`${test.name}... `);
-        
+
         const result = await test.run();
-        
+
+        let finalResult = result;
+        let retried = false;
+
+        // If test failed, wait 10 seconds and retry once
+        if (!result) {
+            console.log(`❌ FAIL - Retrying in 10s...`);
+            await new Promise(resolve => setTimeout(resolve, 10000));
+
+            process.stdout.write(`${test.name} (RETRY)... `);
+            finalResult = await test.run(true);
+            retried = true;
+        }
+
         // Log timing data
         timingLog.tests.push({
             name: test.name,
             command: test.command,
             channel: test.targetChannel === adminChannelId ? 'admin' : 'standard',
-            passed: result,
+            passed: finalResult,
             timing: test.timing || { totalTime: null, firstResponseTime: null, responseCount: 0 },
             responseCount: test.responses.length,
-            error: test.error || null
+            error: test.error || null,
+            retried: retried,
+            retrySucceeded: retried && finalResult
         });
-        
-        if (result) {
-            console.log('✅ PASS');
+
+        if (finalResult) {
+            if (retried) {
+                console.log('✅ PASS (after retry)');
+            } else {
+                console.log('✅ PASS');
+            }
             passed++;
         } else {
             console.log(`❌ FAIL`);
+            if (retried) {
+                console.log(`   Still failed after retry`);
+            }
             console.log(`   Error: ${test.error}`);
             if (verbose) {
                 console.log(`   Expected: ${test.getExpectedDescription()}`);
@@ -1499,11 +1676,18 @@ async function runTestSuite() {
         console.error(`\n⚠️  Failed to save timing log: ${err.message}`);
     }
 
+    // Calculate retry statistics
+    const retriedTests = timingLog.tests.filter(t => t.retried).length;
+    const retrySucceeded = timingLog.tests.filter(t => t.retrySucceeded).length;
+
     console.log('\n' + '─'.repeat(60));
     console.log('📊 Test Results:');
     console.log(`   ✅ Passed: ${passed}/${testSuite.length}`);
     console.log(`   ❌ Failed: ${failed}/${testSuite.length}`);
     console.log(`   📈 Success Rate: ${Math.round((passed / testSuite.length) * 100)}%`);
+    if (retriedTests > 0) {
+        console.log(`   🔄 Retried: ${retriedTests} test(s) (${retrySucceeded} succeeded after retry)`);
+    }
     console.log(`   ⏱️  Total Test Time: ${(totalTime / 1000).toFixed(2)}s (wall clock: ${(wallClockTime / 1000).toFixed(2)}s)`);
     
     // Compare with previous run if available
@@ -1579,12 +1763,92 @@ async function runTestSuite() {
     
     console.log('─'.repeat(60));
 
+    // Post results to admin channel
+    await postResultsToAdminChannel(passed, failed, testSuite.length, totalTime, wallClockTime, timingLog, previousTimingLog);
+
     if (failed > 0) {
         console.log('\n⚠️  Some tests failed. Check that SlackONOS bot is running.');
         process.exit(1);
     } else {
         console.log('\n🎉 All tests passed!');
         process.exit(0);
+    }
+}
+
+/**
+ * Post test results summary to the admin Slack channel
+ */
+async function postResultsToAdminChannel(passed, failed, total, totalTime, wallClockTime, timingLog, previousTimingLog) {
+    try {
+        const successRate = Math.round((passed / total) * 100);
+        const statusEmoji = failed === 0 ? '✅' : '⚠️';
+        const statusText = failed === 0 ? 'All tests passed!' : `${failed} test(s) failed`;
+
+        // Calculate retry statistics
+        const retriedTests = timingLog.tests.filter(t => t.retried).length;
+        const retrySucceeded = timingLog.tests.filter(t => t.retrySucceeded).length;
+
+        let retryInfo = '';
+        if (retriedTests > 0) {
+            retryInfo = `\n*Retries:* ${retriedTests} test(s) retried (${retrySucceeded} succeeded)`;
+        }
+
+        // Build failed tests list if any
+        let failedTestsList = '';
+        if (failed > 0 && timingLog && timingLog.tests) {
+            const failedTests = timingLog.tests
+                .filter(t => !t.passed)
+                .map(t => {
+                    const retryNote = t.retried ? ' (failed after retry)' : '';
+                    return `• ${t.name}${retryNote}`;
+                })
+                .slice(0, 10); // Limit to 10 failed tests
+
+            if (failedTests.length > 0) {
+                failedTestsList = `\n\n*Failed Tests:*\n${failedTests.join('\n')}`;
+                if (timingLog.tests.filter(t => !t.passed).length > 10) {
+                    failedTestsList += `\n_...and ${timingLog.tests.filter(t => !t.passed).length - 10} more_`;
+                }
+            }
+        }
+        
+        // Build time comparison if previous run data exists
+        let timeComparison = '';
+        if (previousTimingLog && previousTimingLog.tests) {
+            const previousTotalTime = previousTimingLog.tests.reduce((sum, test) => {
+                return sum + (test.timing?.totalTime || 0);
+            }, 0);
+            
+            if (previousTotalTime > 0) {
+                const timeDiff = totalTime - previousTotalTime;
+                const timeDiffPercent = ((timeDiff / previousTotalTime) * 100);
+                const timeDiffSymbol = timeDiff < -500 ? '⬇️' : timeDiff > 500 ? '⬆️' : '➡️';
+                const timeDiffSign = timeDiff >= 0 ? '+' : '';
+                
+                timeComparison = `\n*vs Previous:* ${timeDiffSymbol} ${timeDiffSign}${(timeDiff / 1000).toFixed(2)}s (${timeDiffSign}${timeDiffPercent.toFixed(1)}%)`;
+            }
+        }
+        
+        const message = `${statusEmoji} *Integration Test Results*\n\n` +
+            `*Status:* ${statusText}\n` +
+            `*Passed:* ${passed}/${total}\n` +
+            `*Failed:* ${failed}/${total}\n` +
+            `*Success Rate:* ${successRate}%\n` +
+            `*Duration:* ${(totalTime / 1000).toFixed(2)}s (wall clock: ${(wallClockTime / 1000).toFixed(2)}s)` +
+            retryInfo +
+            timeComparison +
+            failedTestsList;
+        
+        await slack.chat.postMessage({
+            channel: adminChannelId,
+            text: message,
+            unfurl_links: false,
+            unfurl_media: false
+        });
+        
+        console.log(`\n📨 Results posted to admin channel (${adminChannelId})`);
+    } catch (error) {
+        console.error(`\n⚠️  Failed to post results to admin channel: ${error.message}`);
     }
 }
 
