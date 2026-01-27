@@ -38,6 +38,7 @@ Thumbs.db
 config/*.json
 config/ssl/
 ssl/
+keys/
 
 # ===================================================================
 # Docker
