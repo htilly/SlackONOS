@@ -47,6 +47,7 @@ const voting = require('./lib/voting');
 const musicHelper = require('./lib/music-helper');
 const commandHandlers = require('./lib/command-handlers');
 const addHandlers = require('./lib/add-handlers');
+const githubApp = require('./lib/github-app');
 const gongMessage = fs.readFileSync('templates/messages/gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('templates/messages/vote.txt', 'utf8').split('\n').filter(Boolean);
 const ttsMessage = fs.readFileSync('templates/messages/tts.txt', 'utf8').split('\n').filter(Boolean);
@@ -4744,31 +4745,57 @@ async function _featurerequest(input, channel, userName) {
   
   const featureDescription = input.slice(1).join(' ');
   
-  // Check if githubToken is configured
-  const githubToken = config.get('githubToken');
-  if (!githubToken) {
-    logger.warn('[FEATUREREQUEST] githubToken not configured');
-    _slackMessage(
-      '❌ *Feature request not configured*\n\n' +
-      'To enable this feature, you need a GitHub Personal Access Token:\n\n' +
-      '1. Go to: https://github.com/settings/tokens\n' +
-      '2. Click *"Generate new token (classic)"*\n' +
-      '3. Select scope: `repo` (or `public_repo` for public repos only)\n' +
-      '4. Set the token via admin command:\n' +
-      '   `setconfig githubToken ghp_xxxxxxxxxxxx`\n\n' +
-      '📖 More info: https://github.com/htilly/SlackONOS#configuration',
-      channel
-    );
-    return;
+  // Try GitHub App first, fallback to personal access token
+  let authToken = null;
+  let authMethod = null;
+  
+  try {
+    const appToken = await githubApp.getGitHubAppToken();
+    if (appToken) {
+      authToken = appToken;
+      authMethod = 'GitHub App';
+      logger.info('[FEATUREREQUEST] Using GitHub App authentication');
+    }
+  } catch (error) {
+    logger.warn(`[FEATUREREQUEST] GitHub App auth failed: ${error.message}, falling back to personal token`);
+  }
+  
+  // Fallback to personal access token
+  if (!authToken) {
+    const githubToken = config.get('githubToken');
+    if (!githubToken) {
+      logger.warn('[FEATUREREQUEST] No GitHub authentication configured');
+      _slackMessage(
+        '❌ *Feature request not configured*\n\n' +
+        'To enable this feature, configure either:\n\n' +
+        '*Option 1: GitHub App (Recommended)*\n' +
+        '1. Create GitHub App: https://github.com/settings/apps/new\n' +
+        '2. Set permissions: Issues: Write\n' +
+        '3. Install on repository\n' +
+        '4. Configure via admin commands:\n' +
+        '   `setconfig githubAppId 2741767`\n' +
+        '   `setconfig githubAppPrivateKey /path/to/private-key.pem`\n' +
+        '   `setconfig githubAppInstallationId 106479987`\n\n' +
+        '*Option 2: Personal Access Token*\n' +
+        '1. Go to: https://github.com/settings/tokens\n' +
+        '2. Generate new token (classic) with `repo` scope\n' +
+        '3. `setconfig githubToken ghp_xxxxxxxxxxxx`\n\n' +
+        '📖 More info: https://github.com/htilly/SlackONOS#configuration',
+        channel
+      );
+      return;
+    }
+    authToken = githubToken;
+    authMethod = 'Personal Access Token';
   }
   
   try {
-    logger.info(`[FEATUREREQUEST] Creating GitHub issue: ${featureDescription}`);
+    logger.info(`[FEATUREREQUEST] Creating GitHub issue: ${featureDescription} (using ${authMethod})`);
     // Create GitHub issue with enhancement label
     const response = await fetch(`https://api.github.com/repos/htilly/SlackONOS/issues`, {
       method: 'POST',
       headers: {
-        'Authorization': `token ${githubToken}`,
+        'Authorization': `Bearer ${authToken}`,
         'Accept': 'application/vnd.github+json',
         'Content-Type': 'application/json'
       },
@@ -4786,11 +4813,44 @@ async function _featurerequest(input, channel, userName) {
     } else {
       const errorText = await response.text();
       logger.error(`[FEATUREREQUEST] GitHub API error: ${response.status} - ${errorText}`);
+      
+      // Handle specific error cases
+      if (response.status === 401) {
+        // Bad credentials - token is invalid or expired
+        if (authMethod === 'GitHub App') {
+          _slackMessage(
+            '❌ *GitHub App authentication failed*\n\n' +
+            'The GitHub App configuration is invalid. Please check:\n\n' +
+            '1. App ID is correct\n' +
+            '2. Private key file path is correct and readable\n' +
+            '3. Installation ID is correct\n' +
+            '4. App is installed on the repository\n\n' +
+            'Or use a Personal Access Token as fallback.',
+            channel
+          );
+        } else {
+          _slackMessage(
+            '❌ *GitHub token invalid or expired*\n\n' +
+            'The configured GitHub token is not valid. Please:\n\n' +
+            '1. Go to: https://github.com/settings/tokens\n' +
+            '2. Generate a new token (classic) with `repo` scope\n' +
+            '3. Update the token via admin command:\n' +
+            '   `setconfig githubToken ghp_xxxxxxxxxxxx`\n\n' +
+            '📖 More info: https://github.com/htilly/SlackONOS#configuration',
+            channel
+          );
+        }
+        return;
+      }
+      
       throw new Error(`GitHub API error: ${response.status} - ${errorText}`);
     }
   } catch (err) {
     logger.error(`[FEATUREREQUEST] Failed to create issue: ${err.message}`, err);
-    _slackMessage(`❌ Failed to create feature request: ${err.message}`, channel);
+    // Only show generic error if we haven't already handled it above
+    if (err.message && !err.message.includes('401')) {
+      _slackMessage(`❌ Failed to create feature request: ${err.message}`, channel);
+    }
   }
 }
 
@@ -4941,7 +5001,10 @@ async function _setconfig(input, channel, userName) {
     crossfadeEnabled: { type: 'boolean' },
     slackAlwaysThread: { type: 'boolean' },
     logLevel: { type: 'string', minLen: 4, maxLen: 5, allowed: ['error', 'warn', 'info', 'debug'] },
-    githubToken: { type: 'string', minLen: 4, maxLen: 100, sensitive: true }
+    githubToken: { type: 'string', minLen: 4, maxLen: 100, sensitive: true },
+    githubAppId: { type: 'string', minLen: 1, maxLen: 20 },
+    githubAppPrivateKey: { type: 'string', minLen: 50, maxLen: 5000, sensitive: true },
+    githubAppInstallationId: { type: 'string', minLen: 1, maxLen: 20 }
   };
 
   // Make config key case-insensitive
