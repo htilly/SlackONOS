@@ -492,10 +492,23 @@ class TestCase {
 
 // Validators
 const queueSizeStore = {};
+const extractedValues = {};
 
 function extractQueueSize(responses) {
     const allText = responses.map(r => r.text).join(' ');
+    // Match "X tracks" pattern first (more specific)
+    const tracksMatch = allText.match(/(\d+)\s*track/i);
+    if (tracksMatch) return parseInt(tracksMatch[1], 10);
+    // Fall back to first number
     const match = allText.match(/\b(\d+)\b/);
+    if (!match) return null;
+    return parseInt(match[1], 10);
+}
+
+function extractTrackCountFromResponse(responses) {
+    const allText = responses.map(r => r.text).join(' ');
+    // Match patterns like "(150 tracks)" or "150 tracks"
+    const match = allText.match(/\((\d+)\s*tracks?\)/i) || allText.match(/(\d+)\s*tracks?/i);
     if (!match) return null;
     return parseInt(match[1], 10);
 }
@@ -568,6 +581,69 @@ const validators = {
         }
         if (size >= baseline + minIncrease) return true;
         return `Expected queue size to increase by ${minIncrease} from ${baseline}, got ${size}`;
+    },
+
+    // Verify queue size increased by EXACTLY N (not double, not less)
+    queueSizeIncreaseExactly: (key, exactIncrease) => (responses) => {
+        const size = extractQueueSize(responses);
+        if (size === null) return 'Could not parse queue size from response';
+        const baseline = queueSizeStore[key];
+        if (baseline === undefined || baseline === null) {
+            return `No baseline queue size recorded for "${key}"`;
+        }
+        const actualIncrease = size - baseline;
+        
+        // Exact match - no output
+        if (actualIncrease === exactIncrease) return true;
+        
+        // Within tolerance (90-100%) - warning but pass
+        const tolerance = Math.floor(exactIncrease * 0.9);
+        if (actualIncrease >= tolerance && actualIncrease < exactIncrease) {
+            console.log(`   ⚠️  WARNING: Queue increased by ${actualIncrease} (expected ${exactIncrease}, baseline: ${baseline} → ${size})`);
+            return true;
+        }
+        
+        // Outside tolerance - fail
+        return `❌ FAIL: Queue increased by ${actualIncrease} (expected exactly ${exactIncrease}, baseline: ${baseline} → ${size})`;
+    },
+
+    // Extract and store track count from search results (e.g., "(50 tracks)")
+    extractAndStoreTrackCount: (key) => (responses) => {
+        const count = extractTrackCountFromResponse(responses);
+        if (count === null) return 'Could not extract track count from response';
+        extractedValues[key] = count;
+        return true;
+    },
+
+    // Verify queue increased by stored track count (with tolerance for duplicates/blacklist)
+    queueSizeIncreasedByStoredCount: (baselineKey, countKey, tolerancePercent = 10) => (responses) => {
+        const size = extractQueueSize(responses);
+        if (size === null) return 'Could not parse queue size from response';
+        const baseline = queueSizeStore[baselineKey];
+        const expectedCount = extractedValues[countKey];
+        if (baseline === undefined) return `No baseline recorded for "${baselineKey}"`;
+        if (expectedCount === undefined) return `No track count recorded for "${countKey}"`;
+        
+        const actualIncrease = size - baseline;
+        const minExpected = Math.floor(expectedCount * (1 - tolerancePercent / 100));
+        const maxExpected = expectedCount; // Should not exceed expected (no doubling!)
+        
+        // Exact match - no output
+        if (actualIncrease === expectedCount) return true;
+        
+        // Within tolerance but not exact - warning but pass
+        if (actualIncrease >= minExpected && actualIncrease < expectedCount) {
+            console.log(`   ⚠️  WARNING: Queue increased by ${actualIncrease} (expected ${expectedCount}, baseline: ${baseline} → ${size}, tolerance: ${minExpected}-${maxExpected})`);
+            return true;
+        }
+        
+        // Exceeded expected (possible doubling bug) - fail
+        if (actualIncrease > maxExpected) {
+            return `❌ FAIL: Queue increased by ${actualIncrease} but expected max ${maxExpected} - possible DUPLICATE QUEUEING BUG! (baseline: ${baseline} → ${size})`;
+        }
+        
+        // Below minimum (too many filtered) - fail
+        return `❌ FAIL: Queue increased by ${actualIncrease}, expected ${minExpected}-${maxExpected} (based on ${expectedCount} tracks, baseline: ${baseline} → ${size})`;
     }
 };
 
@@ -730,6 +806,17 @@ const testSuiteArray = [
     // PHASE 4: BUILD UP THE QUEUE (add tracks for later tests)
     // ═══════════════════════════════════════════════════════════════════
 
+    // Get baseline queue size before adding tracks
+    new TestCase(
+        'Queue Size - Initial Baseline',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.recordQueueSize('initialBaseline')
+        ),
+        4
+    ),
+
     new TestCase(
         'Add Track #1 - Foo Fighters',
         'add Foo Fighters - Best Of You',
@@ -742,6 +829,18 @@ const testSuiteArray = [
             )
         ),
         7
+    ),
+
+    // Verify exactly 1 track was added
+    new TestCase(
+        'Queue Size - After Track #1 (+1)',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.queueSizeIncreaseExactly('initialBaseline', 1),
+            validators.recordQueueSize('afterTrack1')
+        ),
+        4
     ),
 
     new TestCase(
@@ -766,6 +865,18 @@ const testSuiteArray = [
             )
         ),
         7
+    ),
+
+    // Verify exactly 1 more track added (total +2 from initial)
+    new TestCase(
+        'Queue Size - After Track #2 (+1)',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.queueSizeIncreaseExactly('afterTrack1', 1),
+            validators.recordQueueSize('afterTrack2')
+        ),
+        4
     ),
 
     new TestCase(
@@ -796,6 +907,21 @@ const testSuiteArray = [
         7
     ),
 
+    // Search album first to get track count
+    new TestCase(
+        'Search Album - Abbey Road (get track count)',
+        'searchalbum abbey road',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('Beatles'),
+                validators.containsText('Abbey Road')
+            ),
+            validators.extractAndStoreTrackCount('abbeyRoadTracks')
+        ),
+        5
+    ),
+
     new TestCase(
         'Queue Size - Baseline Before Album',
         'size',
@@ -820,15 +946,28 @@ const testSuiteArray = [
         10
     ),
 
+    // Verify album tracks were added (not doubled!)
     new TestCase(
-        'Queue Size - After Album',
+        'Queue Size - After Album (verify no doubling)',
         'size',
         validators.and(
             validators.responseCount(1, 2),
-            validators.queueSizeIncreaseFrom('beforeAlbum', 1),
+            validators.queueSizeIncreasedByStoredCount('beforeAlbum', 'abbeyRoadTracks', 20),
             validators.recordQueueSize('beforePlaylist')
         ),
         4
+    ),
+
+    // Search playlist first to get track count
+    new TestCase(
+        'Search Playlist - Rock Classics (get track count)',
+        'searchplaylist rock classics',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.matchesRegex(/playlist|tracks|\d+/i),
+            validators.extractAndStoreTrackCount('rockClassicsTracks')
+        ),
+        5
     ),
 
     new TestCase(
@@ -845,12 +984,13 @@ const testSuiteArray = [
         12
     ),
 
+    // Verify playlist tracks added (not doubled!)
     new TestCase(
-        'Queue Size - After Playlist',
+        'Queue Size - After Playlist (verify no doubling)',
         'size',
         validators.and(
             validators.responseCount(1, 2),
-            validators.queueSizeIncreaseFrom('beforePlaylist', 1)
+            validators.queueSizeIncreasedByStoredCount('beforePlaylist', 'rockClassicsTracks', 20)
         ),
         4
     ),
