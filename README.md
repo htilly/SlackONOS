@@ -161,27 +161,41 @@ After starting the container, access the setup wizard at:
 
 🎛️ **[Soundcraft Ui24R Integration](docs/SOUNDCRAFT.md)** - Control mixer volume directly from Slack/Discord
 
-### 🎮 Discord Invite Link
+### 🎮 Discord Setup
 
-**Add SlackONOS to your Discord server:**
+**Create your Discord bot:**
 
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
-2. Select your application
-3. Get your Client ID from the "OAuth2" section
-4. Use this invite link (replace `YOUR_CLIENT_ID`):
+2. Click **"New Application"** and give it a name
+3. Go to **Bot** → Click **"Add Bot"**
+4. Copy the **Token** (you'll need this for config)
+5. ⚠️ **Important:** Under **Privileged Gateway Intents**, enable **"Message Content Intent"**
+6. Go to **OAuth2** → Copy your **Client ID**
+
+**Invite the bot to your server:**
+
+Use this link (replace `YOUR_CLIENT_ID` with your actual Client ID):
 
 ```
-https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=274878024768&scope=bot%20applications.commands
+https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=330816&integration_type=0&scope=bot
 ```
 
-**Required Permissions:**
-- Read Messages/View Channels
+**Required Permissions (included in link):**
+- View Channels
 - Send Messages  
 - Add Reactions
 - Read Message History
 - Use External Emojis
 
-**💡 Tip:** After setup, use the `debug` command to get your bot's pre-configured invite link!
+**Configure SlackONOS:**
+```json
+{
+  "discordToken": "YOUR_BOT_TOKEN",
+  "discordChannels": ["your-channel-id-or-name"]
+}
+```
+
+📖 **[Complete Discord Setup Guide](docs/discord/SETUP.md)** for detailed instructions
 
 ---
 
