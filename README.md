@@ -161,6 +161,8 @@ After starting the container, access the setup wizard at:
 
 🎛️ **[Soundcraft Ui24R Integration](docs/SOUNDCRAFT.md)** - Control mixer volume directly from Slack/Discord
 
+🔒 **[Security & dependency notes](docs/SECURITY.md)** - Overrides, vulnerabilities, and known npm audit false positives
+
 ### 🎮 Discord Setup
 
 **Create your Discord bot:**

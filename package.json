@@ -56,5 +56,11 @@
   },
   "engines": {
     "node": ">=17.0.0"
+  },
+  "overrides": {
+    "serialize-javascript": "^7.0.4",
+    "undici": "^6.23.0",
+    "diff": "^8.0.3",
+    "ip": "^2.0.1"
   }
 }
