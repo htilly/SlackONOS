@@ -48,7 +48,7 @@
     "openai": "^6.16.0",
     "posthog-node": "^5.24.9",
     "selfsigned": "^5.5.0",
-    "sonos": "^1.14.2",
+    "sonos": "^1.14.3",
     "soundcraft-ui-connection": "^4.1.1",
     "urlencode": "^2.0.0",
     "winston": "^3.18.3",
