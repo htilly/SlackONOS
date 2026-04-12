@@ -22,6 +22,26 @@ describe('Feature Request Integration', function() {
       // Check handler function exists
       expect(content).to.include('async function _featurerequest(input, channel, userName)');
     });
+
+    it('should have "fr" alias registered pointing to the same handler as featurerequest', function() {
+      const indexPath = path.join(process.cwd(), 'index.js');
+      const content = fs.readFileSync(indexPath, 'utf8');
+
+      // Check that 'fr' alias is registered with the same handler
+      expect(content).to.include("['fr', { fn: _featurerequest");
+    });
+
+    it('should register "fr" and "featurerequest" with the same handler function', function() {
+      const indexPath = path.join(process.cwd(), 'index.js');
+      const content = fs.readFileSync(indexPath, 'utf8');
+
+      // Both should reference _featurerequest as their handler
+      const featureRequestMatch = content.includes("['featurerequest', { fn: _featurerequest");
+      const frMatch = content.includes("['fr', { fn: _featurerequest");
+
+      expect(featureRequestMatch).to.be.true;
+      expect(frMatch).to.be.true;
+    });
   });
 
   describe('GitHub Issue Creation', function() {
@@ -55,6 +75,15 @@ describe('Feature Request Integration', function() {
       const content = fs.readFileSync(helpPath, 'utf8');
       
       expect(content).to.include('featurerequest');
+    });
+
+    it('should document the "fr" alias in the standard help text', function() {
+      const helpPath = path.join(process.cwd(), 'templates', 'help', 'helpText.txt');
+      const content = fs.readFileSync(helpPath, 'utf8');
+
+      // The alias notation must appear (e.g. "alias: `fr`")
+      expect(content).to.include('featurerequest');
+      expect(content).to.match(/featurerequest.*alias.*fr/i);
     });
   });
 });
