@@ -2949,6 +2949,7 @@ const commandRegistry = new Map([
   ['configdump', { fn: _configdump, admin: true, aliases: ['cfgdump', 'confdump'] }],
   ['aiunparsed', { fn: _aiUnparsed, admin: true, aliases: ['aiun', 'aiunknown'] }],
   ['featurerequest', { fn: _featurerequest, admin: false, aliases: ['feuturerequest'] }],
+  ['fr', { fn: _featurerequest, admin: false }],
   ['test', { fn: (args, ch, u) => _addToSpotifyPlaylist(args, ch), admin: true }],
   ['diagnostics', { fn: _diagnostics, admin: true, aliases: ['diag', 'checksource'] }]
 ]);
