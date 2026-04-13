@@ -24,6 +24,7 @@
 > `vote [position]` - Move a track to the top. Needs *{{voteLimit}}* votes. ⬆️
 > `votecheck` - Check the current vote counts.
 > `flushvote` - Vote to clear the entire queue. Needs *{{flushVoteLimit}}* votes within *{{voteTimeLimitMinutes}}* min. 🗑️
+> `flush` (or `clear`) - Clear the entire Sonos queue immediately. 🚽
 
 *📝 Feedback:*
 > `featurerequest` (or `fr`) `<feature description>` - Wish for what new feature this bot should have!!! ✨
