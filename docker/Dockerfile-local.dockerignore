@@ -2,7 +2,6 @@ node_modules
 coverage
 .git
 .github
-test/
 doc/
 *.md
 .gitignore
@@ -14,3 +13,5 @@ config/blacklist.json
 config/track-blacklist.json
 config/ai-unparsed.log
 keys/
+test/config/test-config.json
+test/timing-log.json

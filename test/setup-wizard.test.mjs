@@ -5,6 +5,10 @@
 
 import { describe, it } from 'mocha';
 import assert from 'assert';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const setupHandler = require('../lib/setup-handler.js');
 
 describe('Setup Wizard Validation Logic', () => {
   describe('Slack Token Validation', () => {
@@ -50,6 +54,13 @@ describe('Setup Wizard Validation Logic', () => {
       // (actual IP validation would need range checking 0-255)
       assert.strictEqual(ipRegex.test('999.999.999.999'), true); // Regex passes, but invalid IP
       assert.strictEqual(ipRegex.test('0.0.0.0'), true);
+    });
+
+    it('should reject IPv4 octets outside the valid range', () => {
+      assert.strictEqual(setupHandler.isValidIPv4('192.168.1.100'), true);
+      assert.strictEqual(setupHandler.isValidIPv4('999.999.999.999'), false);
+      assert.strictEqual(setupHandler.isValidIPv4('192.168.1.256'), false);
+      assert.strictEqual(setupHandler.isValidIPv4('not-an-ip'), false);
     });
   });
 

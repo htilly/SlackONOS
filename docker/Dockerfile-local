@@ -1,6 +1,6 @@
 # Use the official Node.js image based on Alpine Linux
 # The --platform flag is used here to make sure we use a multi-platform base image
-FROM --platform=$BUILDPLATFORM node:26-slim AS base
+FROM --platform=$BUILDPLATFORM node:22-slim AS base
 
 # System deps needed by startup diagnostics and optional dependencies.
 RUN apt-get update && \
@@ -16,8 +16,8 @@ WORKDIR /app
 # Copy package.json and package-lock.json first to leverage Docker cache
 COPY package*.json ./
 
-# Install application dependencies
-RUN npm install --verbose
+# Install application dependencies reproducibly, including dev dependencies
+RUN npm ci --verbose
 
 # Copy the rest of your application files
 COPY . .

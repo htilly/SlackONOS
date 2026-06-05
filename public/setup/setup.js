@@ -7,7 +7,6 @@ let configData = {};
 let selectedPlatforms = new Set(['slack']); // Default to Slack
 let currentPage = 'welcome';
 let configValues = null; // Cache for config values
-let actualCredentials = null; // Cache for actual credentials to avoid redundant API calls
 
 const pageOrder = [
   'welcome',
@@ -63,12 +62,12 @@ async function checkSetupStatus() {
         requiredNotice.innerHTML = `
           <span class="info-icon">⚠️</span>
           <div>
-            <strong>Authentication Required:</strong> You must set up at least one authentication method (Yubikey or password) before continuing with setup.
+            <strong>Authentication Required:</strong> You must set an admin password before continuing with setup. WebAuthn can be enabled from the admin panel after login.
           </div>
         `;
       }
       if (optionalNotice) optionalNotice.style.display = 'none';
-      if (description) description.textContent = 'Choose your preferred authentication method';
+      if (description) description.textContent = 'Set an admin password before continuing with setup';
       return;
     }
     
@@ -236,11 +235,6 @@ function setupEventListeners() {
     }
   });
   
-  // Yubikey Enrollment
-  document.getElementById('btn-enroll-yubikey')?.addEventListener('click', async () => {
-    await enrollYubikey();
-  });
-  
   document.getElementById('btn-next-password')?.addEventListener('click', async () => {
     // Check if Yubikey is already enrolled - if so, skip password
     const hasYubikey = await checkYubikeyEnrolled();
@@ -334,29 +328,6 @@ async function loadConfigValues() {
     console.warn('Could not load config values:', err);
     configValues = null;
   }
-}
-
-/**
- * Load actual credentials from server (cached to avoid redundant API calls)
- */
-async function loadActualCredentials() {
-  if (actualCredentials) {
-    return actualCredentials; // Return cached credentials
-  }
-
-  try {
-    const credResponse = await fetch(`${API_BASE}/actual-credentials`);
-    const credData = await credResponse.json();
-
-    if (credData.exists && credData.values) {
-      actualCredentials = credData.values; // Cache the result
-      return actualCredentials;
-    }
-  } catch (err) {
-    console.warn('Could not load actual credentials:', err);
-  }
-
-  return null;
 }
 
 /**
@@ -672,102 +643,6 @@ async function checkYubikeyEnrolled() {
   }
 }
 
-// Enroll Yubikey
-async function enrollYubikey() {
-  const btn = document.getElementById('btn-enroll-yubikey');
-  const messageDiv = document.getElementById('yubikey-message');
-  
-  if (!btn || !messageDiv) return;
-  
-  btn.disabled = true;
-  btn.textContent = 'Preparing...';
-  showMessage(messageDiv, 'Preparing registration...', 'info');
-  
-  try {
-    // Ensure WebAuthnClient is available
-    if (!window.WebAuthnClient) {
-      // Wait for script to load
-      await new Promise(resolve => {
-        if (window.WebAuthnClient) {
-          resolve();
-          return;
-        }
-        let attempts = 0;
-        const checkInterval = setInterval(() => {
-          attempts++;
-          if (window.WebAuthnClient || attempts >= 20) {
-            clearInterval(checkInterval);
-            resolve();
-          }
-        }, 50);
-      });
-    }
-    
-    if (!window.WebAuthnClient) {
-      throw new Error('WebAuthn client library failed to load. Please refresh the page.');
-    }
-    
-    // Initialize WebAuthnClient
-    WebAuthnClient.init({ apiBase: '/api/auth' });
-    
-    // WebAuthn will be enabled automatically by the server during setup if needed
-    // Just check status to inform user
-    try {
-      const statusResponse = await fetch('/api/auth/webauthn/status');
-      const statusData = await statusResponse.json();
-      
-      if (!statusData.enabled) {
-        showMessage(messageDiv, 'WebAuthn will be enabled automatically...', 'info');
-      }
-    } catch (err) {
-      // Ignore status check errors, server will handle enabling
-    }
-    
-    // Now register the Yubikey
-    showMessage(messageDiv, 'Touch your security key...', 'info');
-    btn.textContent = 'Touch your key...';
-    
-    const result = await WebAuthnClient.register({ promptDeviceName: true });
-    
-    if (result.verified) {
-      showMessage(messageDiv, '✓ Yubikey enrolled successfully! You can now skip password setup.', 'success');
-      btn.textContent = '✓ Enrolled';
-      btn.style.background = 'linear-gradient(135deg, #4ade80, #22c55e)';
-      
-      // Update UI to show password is optional
-      updatePasswordSectionForYubikey();
-      
-      // Auto-proceed after a short delay
-      setTimeout(() => {
-        const backBtn = document.getElementById('btn-back-password');
-        const isForcedSetup = backBtn && backBtn.style.display === 'none';
-        
-        if (isForcedSetup) {
-          window.location.reload();
-        } else {
-          finishSetup().then(() => {
-            showPage('success');
-          });
-        }
-      }, 2000);
-    } else {
-      throw new Error('Registration verification failed');
-    }
-  } catch (err) {
-    let errorMessage = err.message || 'Failed to enroll Yubikey. Please try again.';
-    
-    if (err.name === 'NotAllowedError') {
-      errorMessage = 'Registration was cancelled or timed out. Please try again.';
-    } else if (err.name === 'NotSupportedError') {
-      errorMessage = 'WebAuthn is not supported in this browser.';
-    }
-    
-    showMessage(messageDiv, errorMessage, 'error');
-    btn.disabled = false;
-    btn.textContent = '🔐 Enroll Yubikey';
-  }
-}
-
 // Update password section to show it's optional when Yubikey is enrolled
 function updatePasswordSectionForYubikey() {
   const passwordRequired = document.getElementById('password-required-indicator');
@@ -786,13 +661,6 @@ function updatePasswordSectionForYubikey() {
     `;
     passwordOptionalNotice.className = 'info-box info-box-info';
   }
-}
-
-// Helper function to show messages
-function showMessage(element, message, type) {
-  if (!element) return;
-  element.textContent = message;
-  element.className = `validation-message ${type} show`;
 }
 
 async function setupPassword() {
@@ -940,34 +808,15 @@ async function validateSlackTokens() {
   let appToken = appTokenInput?.value?.trim();
   let botToken = botTokenInput?.value?.trim();
   
-  // If values are masked or empty, try to get actual values from server
+  // Masked values mean credentials already exist, but the server no longer
+  // exposes unmasked secrets for validation.
   if (!appToken || !botToken || isMaskedValue(appToken) || isMaskedValue(botToken)) {
-    showLoading(resultDiv, 'Fetching credentials for validation...');
-    try {
-      const credResponse = await fetch(`${API_BASE}/actual-credentials`);
-      const credData = await credResponse.json();
-      
-      if (credData.exists && credData.values) {
-        // Use actual values if input is masked/empty
-        if (!appToken || isMaskedValue(appToken)) {
-          appToken = credData.values.slackAppToken || '';
-        }
-        if (!botToken || isMaskedValue(botToken)) {
-          botToken = credData.values.slackBotToken || '';
-        }
-
-  if (!appToken || !botToken) {
-          showError(resultDiv, 'No tokens found to validate. Please enter token values.');
-          return;
-        }
-      } else {
-        showError(resultDiv, 'Please enter token values to validate.');
-        return;
-      }
-    } catch (err) {
-      showError(resultDiv, 'Could not fetch credentials. Please enter token values to validate.');
-    return;
+    if (isMaskedValue(appToken) || isMaskedValue(botToken)) {
+      showError(resultDiv, 'Saved tokens are masked. Enter both token values again to validate them.');
+    } else {
+      showError(resultDiv, 'Please enter token values to validate.');
     }
+    return;
   }
 
   showLoading(resultDiv, 'Validating...');
@@ -997,31 +846,13 @@ async function validateDiscordToken() {
   
   let token = tokenInput?.value?.trim();
   
-  // If value is masked or empty, try to get actual value from server
+  // Masked values mean credentials already exist, but the server no longer
+  // exposes unmasked secrets for validation.
   if (!token || isMaskedValue(token)) {
-    showLoading(resultDiv, 'Fetching credential for validation...');
-    try {
-      const credResponse = await fetch(`${API_BASE}/actual-credentials`);
-      const credData = await credResponse.json();
-      
-      if (credData.exists && credData.values) {
-        // Use actual value if input is masked/empty
-        if (!token || isMaskedValue(token)) {
-          token = credData.values.discordToken || '';
-        }
-        
-        if (!token) {
-          showError(resultDiv, 'No token found to validate. Please enter a token value.');
-          return;
-        }
-      } else {
-        showError(resultDiv, 'Please enter a token value to validate.');
-        return;
-      }
-    } catch (err) {
-      showError(resultDiv, 'Could not fetch credential. Please enter a token value to validate.');
-      return;
-    }
+    showError(resultDiv, isMaskedValue(token)
+      ? 'Saved token is masked. Enter the token value again to validate it.'
+      : 'Please enter a token value to validate.');
+    return;
   }
   
   showLoading(resultDiv, 'Validating...');
@@ -1053,34 +884,15 @@ async function validateSpotifyCredentials() {
   let clientId = clientIdInput?.value?.trim();
   let clientSecret = clientSecretInput?.value?.trim();
   
-  // If values are masked or empty, try to get actual values from server
+  // Masked values mean credentials already exist, but the server no longer
+  // exposes unmasked secrets for validation.
   if (!clientId || !clientSecret || isMaskedValue(clientId) || isMaskedValue(clientSecret)) {
-    showLoading(resultDiv, 'Fetching credentials for validation...');
-    try {
-      const credResponse = await fetch(`${API_BASE}/actual-credentials`);
-      const credData = await credResponse.json();
-      
-      if (credData.exists && credData.values) {
-        // Use actual values if input is masked/empty
-        if (!clientId || isMaskedValue(clientId)) {
-          clientId = credData.values.spotifyClientId || '';
-        }
-        if (!clientSecret || isMaskedValue(clientSecret)) {
-          clientSecret = credData.values.spotifyClientSecret || '';
-        }
-
-  if (!clientId || !clientSecret) {
-          showError(resultDiv, 'No credentials found to validate. Please enter credential values.');
-          return;
-        }
-      } else {
-        showError(resultDiv, 'Please enter credentials to validate.');
-        return;
-      }
-    } catch (err) {
-      showError(resultDiv, 'Could not fetch credentials. Please enter credential values to validate.');
-    return;
+    if (isMaskedValue(clientId) || isMaskedValue(clientSecret)) {
+      showError(resultDiv, 'Saved credentials are masked. Enter both credential values again to validate them.');
+    } else {
+      showError(resultDiv, 'Please enter credentials to validate.');
     }
+    return;
   }
 
   showLoading(resultDiv, 'Validating...');

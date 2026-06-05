@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import numFormatter from '../index.js';  // Ensure the path and extension are correct
+import numFormatter from '../lib/num-formatter.js';
 
 describe('#numFormatter', function() {
 

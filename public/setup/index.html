@@ -332,7 +332,7 @@
       <div class="page" id="page-password">
         <div class="page-header">
           <h2>Set Up Authentication</h2>
-          <p id="password-page-description">Choose your preferred authentication method</p>
+          <p id="password-page-description">Set an admin password to protect setup and admin access</p>
         </div>
         <div class="page-body">
           <div class="info-box info-box-warning" id="password-required-notice" style="display: none;">
@@ -340,27 +340,6 @@
             <div>
               <strong>Authentication Required:</strong> You must set up at least one authentication method before continuing with setup.
             </div>
-          </div>
-          
-          <!-- Yubikey Enrollment Section (Preferred) -->
-          <div id="yubikey-section" style="margin-bottom: 2rem; padding: 1.5rem; background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(8, 145, 178, 0.1)); border: 2px solid rgba(6, 182, 212, 0.3); border-radius: 12px;">
-            <div style="text-align: center; margin-bottom: 1rem;">
-              <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🔐</div>
-              <h3 style="margin: 0 0 0.5rem 0; color: #06b6d4;">Recommended: Enroll Yubikey</h3>
-              <p style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem; margin: 0;">
-                Use a FIDO2 security key for passwordless authentication
-              </p>
-            </div>
-            <button class="btn btn-primary" id="btn-enroll-yubikey" style="width: 100%; background: linear-gradient(135deg, #06b6d4, #0891b2); font-size: 1.1rem; padding: 1rem;">
-              🔐 Enroll Yubikey
-            </button>
-            <div id="yubikey-message" class="validation-message" style="margin-top: 1rem;"></div>
-          </div>
-          
-          <!-- Divider -->
-          <div style="text-align: center; margin: 2rem 0; position: relative;">
-            <div style="position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: rgba(255, 255, 255, 0.1);"></div>
-            <span style="background: rgba(15, 23, 42, 0.8); padding: 0 1rem; color: rgba(255, 255, 255, 0.5); font-size: 0.9rem;">Or set a password</span>
           </div>
           
           <!-- Password Section -->

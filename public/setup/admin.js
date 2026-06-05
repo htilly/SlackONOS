@@ -68,7 +68,7 @@ async function loadStatus() {
   } catch (err) {
     console.error('Error loading status:', err);
     document.getElementById('status-grid').innerHTML = 
-      '<div class="status-card"><h3>❌ Error loading status</h3><p class="error-message">' + err.message + '</p></div>';
+      '<div class="status-card"><h3>❌ Error loading status</h3><p class="error-message">' + escapeHtml(err.message) + '</p></div>';
   }
 }
 
@@ -96,27 +96,32 @@ function createStatusCard(integration, status) {
       </div>
     `;
     if (status.error) {
-      statusHTML += `<p class="error-message" style="margin-top: 1rem;">Error: ${status.error}</p>`;
+      statusHTML += `<p class="error-message" style="margin-top: 1rem;">Error: ${escapeHtml(status.error)}</p>`;
     }
     if (status.deviceInfo) {
       statusHTML += `
         <div style="margin-top: 1rem; font-size: 0.9rem; color: rgba(255,255,255,0.7);">
-          <div><strong>Model:</strong> ${status.deviceInfo.model || 'Unknown'}</div>
-          <div><strong>Room:</strong> ${status.deviceInfo.room || 'Unknown'}</div>
-          <div><strong>IP:</strong> ${status.deviceInfo.ip || 'Unknown'}</div>
+          <div><strong>Model:</strong> ${escapeHtml(status.deviceInfo.model || 'Unknown')}</div>
+          <div><strong>Room:</strong> ${escapeHtml(status.deviceInfo.room || 'Unknown')}</div>
+          <div><strong>IP:</strong> ${escapeHtml(status.deviceInfo.ip || 'Unknown')}</div>
         </div>
       `;
     }
     if (status.channels && status.channels.length > 0) {
       statusHTML += `
         <div style="margin-top: 1rem; font-size: 0.9rem; color: rgba(255,255,255,0.7);">
-          <strong>Channels:</strong> ${status.channels.join(', ')}
+          <strong>Channels:</strong> ${status.channels.map(escapeHtml).join(', ')}
         </div>
       `;
     }
     if (status.details) {
       const detailEntries = Object.entries(status.details)
-        .map(([k,v]) => `<div><strong>${k}:</strong> ${Array.isArray(v) ? v.join(', ') : v}</div>`)
+        .map(([k,v]) => {
+          const displayValue = Array.isArray(v)
+            ? v.map(escapeHtml).join(', ')
+            : escapeHtml(v);
+          return `<div><strong>${escapeHtml(k)}:</strong> ${displayValue}</div>`;
+        })
         .join('');
       statusHTML += `
         <div style="margin-top: 1rem; font-size: 0.9rem; color: rgba(255,255,255,0.7);">
@@ -139,7 +144,7 @@ async function loadNowPlaying() {
     const data = await response.json();
     const content = document.getElementById('now-playing-content');
     if (data.error) {
-      content.innerHTML = `<p class="error-message">Error: ${data.error}</p>`;
+      content.innerHTML = `<p class="error-message">Error: ${escapeHtml(data.error)}</p>`;
       return;
     }
     let html = '';
@@ -182,7 +187,7 @@ async function loadNowPlaying() {
   } catch (err) {
     console.error('Error loading now playing:', err);
     document.getElementById('now-playing-content').innerHTML = 
-      '<p class="error-message">Error loading: ' + err.message + '</p>';
+      '<p class="error-message">Error loading: ' + escapeHtml(err.message) + '</p>';
   }
 }
 
@@ -259,7 +264,7 @@ async function loadConfig() {
   } catch (err) {
     console.error('Error loading config:', err);
     document.getElementById('config-items').innerHTML = 
-      '<p class="error-message">Error loading: ' + err.message + '</p>';
+      '<p class="error-message">Error loading: ' + escapeHtml(err.message) + '</p>';
   }
 }
 
@@ -350,10 +355,10 @@ async function saveConfig(key) {
       messageDiv.innerHTML = '<span class="success-message">✓ Saved!</span>';
       setTimeout(() => { messageDiv.innerHTML = ''; }, 3000);
     } else {
-      messageDiv.innerHTML = `<span class="error-message">Error: ${result.error || 'Unknown error'}</span>`;
+      messageDiv.innerHTML = `<span class="error-message">Error: ${escapeHtml(result.error || 'Unknown error')}</span>`;
     }
   } catch (err) {
-    messageDiv.innerHTML = `<span class="error-message">Error: ${err.message}</span>`;
+    messageDiv.innerHTML = `<span class="error-message">Error: ${escapeHtml(err.message)}</span>`;
   } finally {
     btn.disabled = false;
     btn.textContent = 'Save';
@@ -413,14 +418,16 @@ function updateStatusDisplay(status) {
     const statusData = status[integration.key] || {};
     const isConnected = statusData.connected === true;
     const isConfigured = statusData.configured === true;
+    const statusClass = isConnected ? 'connected' : isConfigured ? 'error' : 'not-configured';
+    const statusText = isConnected ? 'Connected' : isConfigured ? 'Error' : 'Not Configured';
     const card = document.createElement('div');
     card.className = 'status-card';
     card.innerHTML = `
       <div class="status-icon">${integration.icon}</div>
       <div class="status-info">
         <div class="status-name">${integration.name}</div>
-        <div class="status-status ${isConnected ? 'connected' : isConfigured ? 'error' : 'not-configured'}">
-          ${isConnected ? 'Connected' : isConfigured ? 'Error' : 'Not Configured'}
+        <div class="status-status ${statusClass}">
+          ${statusText}
         </div>
       </div>
     `;
@@ -432,14 +439,15 @@ function updateNowPlayingDisplay(data) {
   const nowPlayingDiv = document.getElementById('now-playing');
   if (!nowPlayingDiv) return;
   if (data.track) {
+    const safeStateClass = toCssClass(data.state || 'unknown');
     nowPlayingDiv.innerHTML = `
       <div class="now-playing-track">
         <strong>${escapeHtml(data.track.title)}</strong>
         <span class="now-playing-artist">by ${escapeHtml(data.track.artist)}</span>
       </div>
       <div class="now-playing-state">
-        <span class="state-badge ${data.state}">${data.state}</span>
-        <span class="volume-info">Volume: ${data.volume}%</span>
+        <span class="state-badge ${safeStateClass}">${escapeHtml(data.state || 'unknown')}</span>
+        <span class="volume-info">Volume: ${escapeHtml(data.volume)}%</span>
       </div>
       ${data.nextTracks && data.nextTracks.length > 0 ? `
         <div class="up-next">
@@ -451,10 +459,11 @@ function updateNowPlayingDisplay(data) {
       ` : ''}
     `;
   } else {
+    const safeStateClass = toCssClass(data.state || 'unknown');
     nowPlayingDiv.innerHTML = `
       <div class="now-playing-state">
-        <span class="state-badge ${data.state}">${data.state}</span>
-        <span class="volume-info">Volume: ${data.volume}%</span>
+        <span class="state-badge ${safeStateClass}">${escapeHtml(data.state || 'unknown')}</span>
+        <span class="volume-info">Volume: ${escapeHtml(data.volume)}%</span>
       </div>
       <p>No track currently playing</p>
     `;
@@ -868,12 +877,12 @@ async function setupWebAuthn() {
           credentialsList.innerHTML = data.credentials.map((cred, index) => `
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; margin-bottom: 0.5rem; background: rgba(255,255,255,0.03); border-radius: 6px;">
               <div>
-                <strong>${cred.deviceName || `Security Key ${index + 1}`}</strong>
+                <strong>${escapeHtml(cred.deviceName || `Security Key ${index + 1}`)}</strong>
                 <div style="font-size: 0.85rem; color: rgba(255,255,255,0.6); margin-top: 0.25rem;">
-                  Registered: ${new Date(cred.registeredAt).toLocaleDateString()}
+                  Registered: ${escapeHtml(new Date(cred.registeredAt).toLocaleDateString())}
                 </div>
               </div>
-              <button class="btn btn-secondary" onclick="deleteWebAuthnCredential('${cred.credentialID}')" style="padding: 0.5rem 1rem; font-size: 0.85rem;">Delete</button>
+              <button class="btn btn-secondary" onclick="deleteWebAuthnCredential('${escapeJsString(cred.credentialID)}')" style="padding: 0.5rem 1rem; font-size: 0.85rem;">Delete</button>
             </div>
           `).join('');
         }
@@ -981,4 +990,6 @@ async function handleApiError(response, error) {
   return false;
 }
 
-function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
+function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text === null || text === undefined ? '' : String(text); return div.innerHTML; }
+function escapeJsString(text) { return String(text || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r/g, '\\r').replace(/\n/g, '\\n'); }
+function toCssClass(text) { return String(text || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '-'); }

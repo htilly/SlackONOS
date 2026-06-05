@@ -14,8 +14,8 @@ WORKDIR /app
 # Copy package.json and package-lock.json first to leverage Docker cache
 COPY package*.json ./
 
-# Install application dependencies
-RUN npm install --verbose
+# Install application dependencies reproducibly without dev dependencies
+RUN npm ci --omit=dev --verbose
 
 # Copy the rest of your application files
 COPY . .

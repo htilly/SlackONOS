@@ -48,6 +48,12 @@ const musicHelper = require('./lib/music-helper');
 const commandHandlers = require('./lib/command-handlers');
 const addHandlers = require('./lib/add-handlers');
 const githubApp = require('./lib/github-app');
+const {
+  readRequestBody,
+  setSameOriginCorsHeaders,
+  handleCorsPreflight,
+  isSameOriginRequest
+} = require('./lib/http-utils');
 const gongMessage = fs.readFileSync('templates/messages/gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('templates/messages/vote.txt', 'utf8').split('\n').filter(Boolean);
 const ttsMessage = fs.readFileSync('templates/messages/tts.txt', 'utf8').split('\n').filter(Boolean);
@@ -895,16 +901,18 @@ try {
         logger.warn('Could not check setup status:', err.message);
         // Fallback: check config directly
         const hasSlack = !!(config.get('slackAppToken') && config.get('token'));
+        const hasDiscord = !!config.get('discordToken');
         const hasSpotify = !!(config.get('spotifyClientId') && config.get('spotifyClientSecret'));
         const hasSonos = !!(config.get('sonos') && config.get('sonos') !== 'IP_TO_SONOS');
-        setupStatus = { needed: !(hasSlack && hasSpotify && hasSonos) };
+        setupStatus = { needed: !((hasSlack || hasDiscord) && hasSpotify && hasSonos) };
       }
     } else {
       // Fallback: check config directly if setupHandler not available
       const hasSlack = !!(config.get('slackAppToken') && config.get('token'));
+      const hasDiscord = !!config.get('discordToken');
       const hasSpotify = !!(config.get('spotifyClientId') && config.get('spotifyClientSecret'));
       const hasSonos = !!(config.get('sonos') && config.get('sonos') !== 'IP_TO_SONOS');
-      setupStatus = { needed: !(hasSlack && hasSpotify && hasSonos) };
+      setupStatus = { needed: !((hasSlack || hasDiscord) && hasSpotify && hasSonos) };
     }
     const hasSlack = slackBotToken && slackAppToken;
     const hasDiscord = config.get('discordToken');
@@ -1431,12 +1439,7 @@ async function handleHttpRequest(req, res) {
     // Handle auth endpoints (login, logout) - no auth required, handle before other routes
     if (urlPath === '/api/auth/login' && req.method === 'POST') {
       if (authHandler) {
-        let body = '';
-        const chunks = [];
-        for await (const chunk of req) {
-          chunks.push(chunk);
-        }
-        body = Buffer.concat(chunks).toString();
+        const body = await readRequestBody(req);
         await authHandler.handleLogin(req, res, body);
       } else {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -1465,12 +1468,7 @@ async function handleHttpRequest(req, res) {
           return;
         }
         
-        let body = '';
-        const chunks = [];
-        for await (const chunk of req) {
-          chunks.push(chunk);
-        }
-        body = Buffer.concat(chunks).toString();
+        const body = await readRequestBody(req);
         await authHandler.handlePasswordChange(req, res, body);
       } else {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -1483,10 +1481,6 @@ async function handleHttpRequest(req, res) {
     if (urlPath === '/api/auth/webauthn/register/options' && req.method === 'POST') {
       try {
         const webauthnHandler = require('./lib/webauthn-handler');
-        // Allow registration during setup (when no password is set) OR when authenticated
-        const passwordSet = authHandler ? authHandler.isPasswordSet() : false;
-        if (passwordSet) {
-          // Password is set, require authentication
         if (authHandler) {
           const authResult = authHandler.verifyAuth(req);
           if (!authResult.authenticated) {
@@ -1494,15 +1488,18 @@ async function handleHttpRequest(req, res) {
             res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
             return;
           }
-          }
+        } else {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Auth handler not available' }));
+          return;
         }
-        // During setup (no password), allow registration without authentication
-        // First, ensure WebAuthn is enabled
+
         if (!webauthnHandler.isWebAuthnEnabled()) {
-          // Enable WebAuthn automatically during setup
-          config.set('webauthnEnabled', true);
-          config.save();
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'WebAuthn is not enabled' }));
+          return;
         }
+
         const options = await webauthnHandler.generateRegistrationOptions(req);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(options));
@@ -1516,10 +1513,6 @@ async function handleHttpRequest(req, res) {
     if (urlPath === '/api/auth/webauthn/register/verify' && req.method === 'POST') {
       try {
         const webauthnHandler = require('./lib/webauthn-handler');
-        // Allow registration during setup (when no password is set) OR when authenticated
-        const passwordSet = authHandler ? authHandler.isPasswordSet() : false;
-        if (passwordSet) {
-          // Password is set, require authentication
         if (authHandler) {
           const authResult = authHandler.verifyAuth(req);
           if (!authResult.authenticated) {
@@ -1527,15 +1520,13 @@ async function handleHttpRequest(req, res) {
             res.end(JSON.stringify({ success: false, error: 'Authentication required' }));
             return;
           }
+        } else {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Auth handler not available' }));
+          return;
         }
-        }
-        // During setup (no password), allow registration without authentication
-        let body = '';
-        const chunks = [];
-        for await (const chunk of req) {
-          chunks.push(chunk);
-        }
-        body = Buffer.concat(chunks).toString();
+
+        const body = await readRequestBody(req);
         const result = await webauthnHandler.verifyRegistrationResponse(req, body);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
@@ -1562,12 +1553,7 @@ async function handleHttpRequest(req, res) {
     if (urlPath === '/api/auth/webauthn/authenticate/verify' && req.method === 'POST') {
       try {
         const webauthnHandler = require('./lib/webauthn-handler');
-        let body = '';
-        const chunks = [];
-        for await (const chunk of req) {
-          chunks.push(chunk);
-        }
-        body = Buffer.concat(chunks).toString();
+        const body = await readRequestBody(req);
         const result = await webauthnHandler.verifyAuthenticationResponse(req, body);
         
         if (result.verified) {
@@ -1749,12 +1735,7 @@ async function handleHttpRequest(req, res) {
     // Password setup endpoint is public (used during initial setup)
     if (urlPath === '/api/setup/password-setup' && req.method === 'POST') {
       if (authHandler) {
-        let body = '';
-        const chunks = [];
-        for await (const chunk of req) {
-          chunks.push(chunk);
-        }
-        body = Buffer.concat(chunks).toString();
+        const body = await readRequestBody(req);
         await authHandler.handlePasswordSetup(req, res, body);
       } else {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -1882,15 +1863,16 @@ async function handleHttpRequest(req, res) {
   // Serve setup static files (CSS, JS, images)
   if (urlPath.startsWith('/setup/')) {
     const relativePath = urlPath.replace('/setup/', '').split('?')[0]; // Remove query string
-    const filePath = path.join(__dirname, 'public', 'setup', relativePath);
     // Security check: ensure path is within public/setup directory
     const publicSetupDir = path.join(__dirname, 'public', 'setup');
-    
-    // Normalize paths for comparison
-    const normalizedFilePath = path.normalize(filePath);
-    const normalizedPublicDir = path.normalize(publicSetupDir);
-    
-    if (fs.existsSync(normalizedFilePath) && normalizedFilePath.startsWith(normalizedPublicDir)) {
+    const normalizedPublicDir = path.resolve(publicSetupDir);
+    const normalizedFilePath = path.resolve(normalizedPublicDir, relativePath);
+    const relativeToPublicDir = path.relative(normalizedPublicDir, normalizedFilePath);
+    const isWithinPublicDir = relativeToPublicDir &&
+      !relativeToPublicDir.startsWith('..') &&
+      !path.isAbsolute(relativeToPublicDir);
+
+    if (isWithinPublicDir && fs.existsSync(normalizedFilePath)) {
       const ext = path.extname(normalizedFilePath).toLowerCase();
       const contentTypes = {
         '.css': 'text/css; charset=utf-8',
@@ -2004,8 +1986,8 @@ async function handleHttpRequest(req, res) {
   } catch (err) {
     logger.error('HTTP server error:', err);
     if (!res.headersSent) {
-      res.writeHead(500);
-      res.end('Internal server error');
+      res.writeHead(err.statusCode || 500, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(err.statusCode ? err.message : 'Internal server error');
     }
   }
 }
@@ -2048,25 +2030,23 @@ if (useHttps && sslOptions && !httpsServer) {
 async function handleAdminAPI(req, res, url) {
   const urlPath = url.pathname;
   
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  setSameOriginCorsHeaders(req, res);
   
   if (req.method === 'OPTIONS') {
-    res.writeHead(200);
-    res.end();
+    handleCorsPreflight(req, res);
+    return;
+  }
+
+  if (!isSameOriginRequest(req)) {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: 'Cross-origin requests are not allowed' }));
     return;
   }
   
   // Parse request body for POST requests
   let body = '';
   if (req.method === 'POST') {
-    const chunks = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    body = Buffer.concat(chunks).toString();
+    body = await readRequestBody(req);
   }
   
   try {
@@ -2213,7 +2193,7 @@ async function handleAdminAPI(req, res, url) {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
   } catch (err) {
-    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.writeHead(err.statusCode || 500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: err.message }));
   }
 }
@@ -5339,8 +5319,5 @@ function _moveTrackAdmin(input, channel, userName) {
 
 
 if (process.env.NODE_ENV === 'test') {
-  module.exports = function numFormatter(num) {
-    if (num === null || num === undefined) return '';
-    return Number(num).toLocaleString('en-US');
-  };
+  module.exports = require('./lib/num-formatter');
 }

@@ -450,6 +450,13 @@ describe('Command Handlers', function() {
         expect(messages.some(m => m.msg.includes('louder'))).to.be.true;
       });
 
+      it('should reject negative volume', function() {
+        commandHandlers.setVolume(['setvolume', '-1'], 'C123', 'user1');
+
+        expect(mockSonos.setVolume.called).to.be.false;
+        expect(messages.some(m => m.msg.includes('Volume must be between'))).to.be.true;
+      });
+
       it('should set valid volume', function(done) {
         commandHandlers.setVolume(['setvolume', '50'], 'C123', 'user1');
         

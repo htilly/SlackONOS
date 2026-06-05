@@ -379,6 +379,39 @@ describe('Add Handlers', function() {
       
       expect(messages.some(m => m.message.includes('Cannot add album') && m.message.includes('blacklisted'))).to.be.true;
     });
+
+    it('should queue filtered album tracks sequentially in album order', async function() {
+      delete require.cache[require.resolve('../lib/add-handlers.js')];
+      const freshHandlers = require('../lib/add-handlers.js');
+
+      mockSpotify.getAlbumTracks.resolves([
+        { name: 'Track 1', artist: 'Test Artist', uri: 'spotify:track:1' },
+        { name: 'Blocked Track', artist: 'Test Artist', uri: 'spotify:track:blocked' },
+        { name: 'Track 3', artist: 'Test Artist', uri: 'spotify:track:3' }
+      ]);
+
+      freshHandlers.initialize({
+        logger: mockLogger,
+        sonos: mockSonos,
+        spotify: mockSpotify,
+        sendMessage: async (msg, ch, opts) => {
+          messages.push({ message: msg, channel: ch, options: opts });
+        },
+        logUserAction: async () => {},
+        isTrackBlacklisted: (name) => name === 'Blocked Track',
+        musicHelper: mockMusicHelper,
+        getConfig: () => ({ get: () => 'US' }),
+        getAdminChannel: () => null,
+        getCurrentPlatform: () => 'slack'
+      });
+
+      await freshHandlers.addalbum(['addalbum', 'test', 'album'], 'channel1', 'user1');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockSonos.queue.getCall(0).args[0]).to.equal('spotify:track:1');
+      expect(mockSonos.queue.getCall(1).args[0]).to.equal('spotify:track:3');
+      expect(mockSonos.queue.calledWith('spotify:track:blocked')).to.be.false;
+    });
   });
 
   // ==========================================
