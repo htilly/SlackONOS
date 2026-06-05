@@ -120,7 +120,7 @@ const track = await spotify.getTrack('search term or spotify:track:ID');
 
 - **Test command:** `npm test` (runs Mocha tests in `test/test.mjs`)
 - Tests verify `numFormatter` utility function
-- **Docker:** Multi-platform Dockerfile targets Node 24-slim, volume-mount `config/` at runtime
+- **Docker:** Multi-platform Dockerfile targets Node 22-slim, volume-mount `config/` at runtime
 - **Docker Compose:** See `docker-compose-example.yml`
 
 ## Argument Parsing
