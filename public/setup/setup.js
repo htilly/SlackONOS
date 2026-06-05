@@ -151,7 +151,7 @@ function setupEventListeners() {
 
   // Platform selection
   document.querySelectorAll('.platform-card').forEach(card => {
-    card.addEventListener('click', () => {
+    const selectCard = () => {
       const platform = card.dataset.platform;
       if (platform === 'both') {
         selectedPlatforms = new Set(['slack', 'discord']);
@@ -161,6 +161,14 @@ function setupEventListeners() {
         selectedPlatforms = new Set(['discord']);
       }
       updatePlatformSelection();
+    };
+
+    card.addEventListener('click', selectCard);
+    card.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        selectCard();
+      }
     });
   });
 
@@ -315,6 +323,15 @@ async function showPage(pageId) {
   if (targetPage) {
     targetPage.classList.add('active');
   }
+
+  if (pageId === 'platform') {
+    updatePlatformSelection();
+  }
+
+  requestAnimationFrame(() => {
+    document.querySelector('.wizard')?.scrollTo({ top: 0, behavior: 'auto' });
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  });
   
   // Populate form fields with existing config values when showing config pages
   if (['slack', 'discord', 'sonos', 'spotify'].includes(pageId)) {
@@ -336,6 +353,7 @@ function updatePlatformSelection() {
     }
     
     card.classList.toggle('selected', isSelected);
+    card.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
   });
 }
 
@@ -370,18 +388,22 @@ function createCredentialToggle(inputId, originalValue) {
   if (!input || !originalValue || !isMaskedValue(originalValue)) {
     return; // No toggle needed for non-masked or empty values
   }
+
+  if (input.dataset.hasCredentialToggle === 'true') {
+    return;
+  }
   
   // Store original masked value
   input.dataset.maskedValue = originalValue;
   input.dataset.isMasked = 'true';
+  input.dataset.hasCredentialToggle = 'true';
   input.type = 'password'; // Start as password type for masked values
   
   // Create toggle button
   const toggleBtn = document.createElement('button');
   toggleBtn.type = 'button';
-  toggleBtn.className = 'btn-credential-toggle';
+  toggleBtn.className = 'btn btn-ghost btn-credential-toggle';
   toggleBtn.innerHTML = '👁️ Show';
-  toggleBtn.style.cssText = 'margin-left: 0.5rem; padding: 0.25rem 0.75rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.85rem;';
   
   let isShowing = false;
   toggleBtn.addEventListener('click', () => {
@@ -405,7 +427,7 @@ function createCredentialToggle(inputId, originalValue) {
   const formGroup = input.closest('.form-group');
   if (formGroup) {
     const inputWrapper = document.createElement('div');
-    inputWrapper.style.cssText = 'display: flex; align-items: center;';
+    inputWrapper.className = 'input-with-action';
     input.parentNode.insertBefore(inputWrapper, input);
     inputWrapper.appendChild(input);
     inputWrapper.appendChild(toggleBtn);

@@ -4,48 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SlackONOS Setup</title>
-  <link rel="stylesheet" href="/setup/setup.css?v=5.0">
-  <style>
-    /* Critical CSS - Fallback if external CSS doesn't load */
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #0f172a;
-      color: #e2e8f0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-    .wizard-container { width: 100%; max-width: 700px; }
-    .wizard {
-      background: rgba(15, 23, 42, 0.8);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 24px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-      overflow: hidden;
-    }
-    .page { display: none; padding: 40px; }
-    .page.active { display: block; }
-    .welcome-content { text-align: center; padding: 40px 20px; }
-    .welcome-logo { width: 180px; height: 180px; border-radius: 20px; margin-bottom: 30px; }
-    h1 { font-size: 36px; margin-bottom: 12px; }
-    .btn {
-      padding: 12px 24px;
-      border: none;
-      border-radius: 12px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.3s ease;
-    }
-    .btn-primary {
-      background: linear-gradient(135deg, #8b5cf6, #a78bfa);
-      color: white;
-      box-shadow: 0 4px 15px rgba(139, 92, 246, 0.4);
-    }
-  </style>
+  <link rel="stylesheet" href="/setup/setup.css?v=6.0">
 </head>
 <body>
   <div class="background-animation">
@@ -59,7 +18,7 @@
       <!-- Welcome Page -->
       <div class="page active" id="page-welcome">
         <div class="welcome-content">
-          <img src="/setup/SlackONOS.png?v=5.0" alt="SlackONOS" class="welcome-logo">
+          <img src="/setup/SlackONOS-256.png?v=6.0" srcset="/setup/SlackONOS-256.png?v=6.0 1x, /setup/SlackONOS-512.png?v=6.0 2x" alt="SlackONOS" class="welcome-logo" width="180" height="180">
           <h1>Welcome to SlackONOS</h1>
           <p class="welcome-text">Let's get started with setup</p>
           <button class="btn btn-primary btn-large" id="btn-start">Start</button>
@@ -74,19 +33,19 @@
         </div>
         <div class="page-body">
           <div class="platform-options">
-            <div class="platform-card" data-platform="slack">
+            <div class="platform-card" data-platform="slack" role="button" tabindex="0" aria-pressed="false">
               <div class="platform-icon">💬</div>
               <h3>Slack</h3>
               <p>Socket Mode and bot token</p>
               <div class="check-icon">✓</div>
             </div>
-            <div class="platform-card" data-platform="discord">
+            <div class="platform-card" data-platform="discord" role="button" tabindex="0" aria-pressed="false">
               <div class="platform-icon">🎮</div>
               <h3>Discord</h3>
               <p>Bot token and channels</p>
               <div class="check-icon">✓</div>
             </div>
-            <div class="platform-card" data-platform="both">
+            <div class="platform-card" data-platform="both" role="button" tabindex="0" aria-pressed="false">
               <div class="platform-icon">🚀</div>
               <h3>Both</h3>
               <p>Slack and Discord together</p>
@@ -399,6 +358,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@9.0.0/dist/bundle/index.umd.min.js"></script>
   <script src="/setup/webauthn-client.js"></script>
-  <script src="/setup/setup.js?v=5.0"></script>
+  <script src="/setup/setup.js?v=6.0"></script>
 </body>
 </html>

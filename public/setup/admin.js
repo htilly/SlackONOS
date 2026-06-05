@@ -16,6 +16,14 @@ let refreshInterval = null;
 // SSE connection for real-time updates
 let eventSource = null;
 
+const ADMIN_INTEGRATIONS = [
+  { key: 'slack', name: 'Slack', icon: '💬' },
+  { key: 'discord', name: 'Discord', icon: '🎮' },
+  { key: 'spotify', name: 'Spotify', icon: '🎵' },
+  { key: 'sonos', name: 'Sonos', icon: '🔊' },
+  { key: 'soundcraft', name: 'Soundcraft', icon: '🎚️' }
+];
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
   setupLogout();
@@ -53,14 +61,7 @@ async function loadStatus() {
     const status = await response.json();
     const statusGrid = document.getElementById('status-grid');
     statusGrid.innerHTML = '';
-    const integrations = [
-      { key: 'slack', name: 'Slack', icon: '💬' },
-      { key: 'discord', name: 'Discord', icon: '🎮' },
-      { key: 'spotify', name: 'Spotify', icon: '🎵' },
-      { key: 'sonos', name: 'Sonos', icon: '🔊' },
-      { key: 'soundcraft', name: 'Soundcraft', icon: '🎚️' }
-    ];
-    integrations.forEach(integration => {
+    ADMIN_INTEGRATIONS.forEach(integration => {
       const integrationStatus = status[integration.key];
       const card = createStatusCard(integration, integrationStatus);
       statusGrid.appendChild(card);
@@ -81,8 +82,8 @@ function createStatusCard(integration, status) {
       <div>
         <span class="status-badge disconnected">Not configured</span>
       </div>
-      <p style="margin-top: 1rem; color: rgba(255,255,255,0.6);">
-        <a href="/setup?force=true" style="color: #1e90ff;">Configure here</a>
+      <p class="status-details">
+        <a href="/setup?force=true">Configure here</a>
       </p>
     `;
   } else {
@@ -96,11 +97,11 @@ function createStatusCard(integration, status) {
       </div>
     `;
     if (status.error) {
-      statusHTML += `<p class="error-message" style="margin-top: 1rem;">Error: ${escapeHtml(status.error)}</p>`;
+      statusHTML += `<p class="error-message status-message">Error: ${escapeHtml(status.error)}</p>`;
     }
     if (status.deviceInfo) {
       statusHTML += `
-        <div style="margin-top: 1rem; font-size: 0.9rem; color: rgba(255,255,255,0.7);">
+        <div class="status-details">
           <div><strong>Model:</strong> ${escapeHtml(status.deviceInfo.model || 'Unknown')}</div>
           <div><strong>Room:</strong> ${escapeHtml(status.deviceInfo.room || 'Unknown')}</div>
           <div><strong>IP:</strong> ${escapeHtml(status.deviceInfo.ip || 'Unknown')}</div>
@@ -109,7 +110,7 @@ function createStatusCard(integration, status) {
     }
     if (status.channels && status.channels.length > 0) {
       statusHTML += `
-        <div style="margin-top: 1rem; font-size: 0.9rem; color: rgba(255,255,255,0.7);">
+        <div class="status-details">
           <strong>Channels:</strong> ${status.channels.map(escapeHtml).join(', ')}
         </div>
       `;
@@ -124,7 +125,7 @@ function createStatusCard(integration, status) {
         })
         .join('');
       statusHTML += `
-        <div style="margin-top: 1rem; font-size: 0.9rem; color: rgba(255,255,255,0.7);">
+        <div class="status-details">
           ${detailEntries}
         </div>
       `;
@@ -153,14 +154,14 @@ async function loadNowPlaying() {
         <div class="track-info">
           <div class="track-title">${escapeHtml(data.track.title)}</div>
           <div class="track-artist">by ${escapeHtml(data.track.artist)}</div>
-          ${data.track.album ? `<div style="color: rgba(255,255,255,0.6); font-size: 1rem; margin-top: 0.5rem;">${escapeHtml(data.track.album)}</div>` : ''}
+          ${data.track.album ? `<div class="track-album">${escapeHtml(data.track.album)}</div>` : ''}
         </div>
       `;
     } else {
       const stateEmoji = data.state === 'paused' ? '⏸️' : '⏹️';
       html = `
         <div class="track-info">
-          <div style="font-size: 1.5rem;">${stateEmoji} ${data.state === 'paused' ? 'Paused' : 'Stopped'}</div>
+          <div class="track-state">${stateEmoji} ${data.state === 'paused' ? 'Paused' : 'Stopped'}</div>
         </div>
       `;
     }
@@ -175,10 +176,10 @@ async function loadNowPlaying() {
     const upNext = (data.nextTracks || []).slice(1, 6);
     if (upNext.length > 0) {
       html += `
-        <div style="margin-top: 1.5rem; text-align: left;">
-          <h4 style="margin: 0 0 0.5rem 0;">Up next (5):</h4>
-          <ol style="padding-left: 1.25rem; color: rgba(255,255,255,0.85);">
-            ${upNext.map(t => `<li><strong>${escapeHtml(t.title)}</strong> <span style="color: rgba(255,255,255,0.7);">— ${escapeHtml(t.artist)}</span></li>`).join('')}
+        <div class="queue-preview">
+          <h4>Up next (5):</h4>
+          <ol>
+            ${upNext.map(t => `<li><strong>${escapeHtml(t.title)}</strong> <span>${escapeHtml(t.artist)}</span></li>`).join('')}
           </ol>
         </div>
       `;
@@ -305,7 +306,7 @@ function createConfigItem(item, value) {
     }
     inputHTML = `<input type="${finalInputType}" id="config-${item.key}" value="${escapeHtml(finalDisplayValue)}" ${attrs.join(' ')}>`;
   }
-  const description = item.description ? `<div style="font-size: 0.85rem; color: rgba(255,255,255,0.6); margin-top: 0.25rem;">${item.description}</div>` : '';
+  const description = item.description ? `<div class="config-description">${item.description}</div>` : '';
   div.innerHTML = `
     <label for="config-${item.key}">${item.label}:</label>
     ${inputHTML}
@@ -408,35 +409,13 @@ function updateStatusDisplay(status) {
   const statusGrid = document.getElementById('status-grid');
   if (!statusGrid) return;
   statusGrid.innerHTML = '';
-  const integrations = [
-    { key: 'slack', name: 'Slack', icon: '💬' },
-    { key: 'discord', name: 'Discord', icon: '🎮' },
-    { key: 'spotify', name: 'Spotify', icon: '🎵' },
-    { key: 'sonos', name: 'Sonos', icon: '🔊' }
-  ];
-  integrations.forEach(integration => {
-    const statusData = status[integration.key] || {};
-    const isConnected = statusData.connected === true;
-    const isConfigured = statusData.configured === true;
-    const statusClass = isConnected ? 'connected' : isConfigured ? 'error' : 'not-configured';
-    const statusText = isConnected ? 'Connected' : isConfigured ? 'Error' : 'Not Configured';
-    const card = document.createElement('div');
-    card.className = 'status-card';
-    card.innerHTML = `
-      <div class="status-icon">${integration.icon}</div>
-      <div class="status-info">
-        <div class="status-name">${integration.name}</div>
-        <div class="status-status ${statusClass}">
-          ${statusText}
-        </div>
-      </div>
-    `;
-    statusGrid.appendChild(card);
+  ADMIN_INTEGRATIONS.forEach(integration => {
+    statusGrid.appendChild(createStatusCard(integration, status[integration.key]));
   });
 }
 
 function updateNowPlayingDisplay(data) {
-  const nowPlayingDiv = document.getElementById('now-playing');
+  const nowPlayingDiv = document.getElementById('now-playing-content');
   if (!nowPlayingDiv) return;
   if (data.track) {
     const safeStateClass = toCssClass(data.state || 'unknown');
@@ -453,7 +432,7 @@ function updateNowPlayingDisplay(data) {
         <div class="up-next">
           <strong>Up Next:</strong>
           <ul>
-            ${data.nextTracks.map(t => `<li><strong>${escapeHtml(t.title)}</strong> <span style="color: rgba(255,255,255,0.7);">— ${escapeHtml(t.artist)}</span></li>`).join('')}
+            ${data.nextTracks.map(t => `<li><strong>${escapeHtml(t.title)}</strong> <span>${escapeHtml(t.artist)}</span></li>`).join('')}
           </ul>
         </div>
       ` : ''}
@@ -872,17 +851,17 @@ async function setupWebAuthn() {
       const data = await response.json();
       if (credentialsList && data.credentials) {
         if (data.credentials.length === 0) {
-          credentialsList.innerHTML = '<p style="color: rgba(255,255,255,0.6);">No security keys registered. Click "Register New Security Key" to add one.</p>';
+          credentialsList.innerHTML = '<p class="empty-state">No security keys registered. Click "Register New Security Key" to add one.</p>';
         } else {
           credentialsList.innerHTML = data.credentials.map((cred, index) => `
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; margin-bottom: 0.5rem; background: rgba(255,255,255,0.03); border-radius: 6px;">
+            <div class="credential-item">
               <div>
                 <strong>${escapeHtml(cred.deviceName || `Security Key ${index + 1}`)}</strong>
-                <div style="font-size: 0.85rem; color: rgba(255,255,255,0.6); margin-top: 0.25rem;">
+                <div class="credential-meta">
                   Registered: ${escapeHtml(new Date(cred.registeredAt).toLocaleDateString())}
                 </div>
               </div>
-              <button class="btn btn-secondary" onclick="deleteWebAuthnCredential('${escapeJsString(cred.credentialID)}')" style="padding: 0.5rem 1rem; font-size: 0.85rem;">Delete</button>
+              <button class="btn btn-secondary btn-small" onclick="deleteWebAuthnCredential('${escapeJsString(cred.credentialID)}')">Delete</button>
             </div>
           `).join('');
         }

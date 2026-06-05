@@ -4,141 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SlackONOS - Login</title>
-  <link rel="stylesheet" href="/setup/setup.css">
-  <style>
-    .login-container {
-      max-width: 450px;
-      margin: 0 auto;
-    }
-    
-    .login-card {
-      background: rgba(15, 23, 42, 0.8);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 24px;
-      padding: 3rem;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-      backdrop-filter: blur(10px);
-    }
-    
-    .login-header {
-      text-align: center;
-      margin-bottom: 2rem;
-    }
-    
-    .login-header img {
-      max-width: 150px;
-      margin-bottom: 1.5rem;
-    }
-    
-    .login-header h1 {
-      font-size: 2rem;
-      margin-bottom: 0.5rem;
-    }
-    
-    .login-header p {
-      color: rgba(255, 255, 255, 0.7);
-      font-size: 0.95rem;
-    }
-    
-    .form-group {
-      margin-bottom: 1.5rem;
-    }
-    
-    .form-group label {
-      display: block;
-      margin-bottom: 0.5rem;
-      font-weight: 600;
-      color: var(--text);
-    }
-    
-    .form-group input {
-      width: 100%;
-      padding: 0.75rem 1rem;
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 8px;
-      color: var(--text);
-      font-size: 1rem;
-      transition: all 0.3s ease;
-    }
-    
-    .form-group input:focus {
-      outline: none;
-      border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
-      background: rgba(255, 255, 255, 0.15);
-    }
-    
-    .error-message {
-      background: rgba(239, 68, 68, 0.2);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      color: #f87171;
-      padding: 0.75rem 1rem;
-      border-radius: 8px;
-      margin-bottom: 1rem;
-      font-size: 0.9rem;
-      display: none;
-    }
-    
-    .error-message.show {
-      display: block;
-      animation: fadeInSlide 0.3s ease;
-    }
-    
-    .btn-login {
-      width: 100%;
-      padding: 0.875rem;
-      background: linear-gradient(135deg, #8b5cf6, #a78bfa);
-      border: none;
-      border-radius: 8px;
-      color: white;
-      font-size: 1rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      margin-top: 0.5rem;
-    }
-    
-    .btn-login:hover:not(:disabled) {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 20px rgba(139, 92, 246, 0.4);
-    }
-    
-    .btn-login:active:not(:disabled) {
-      transform: translateY(0);
-    }
-    
-    .btn-login:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-    
-    .loading {
-      display: inline-block;
-      width: 14px;
-      height: 14px;
-      border: 2px solid rgba(255, 255, 255, 0.3);
-      border-top-color: white;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin-left: 8px;
-    }
-    
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    
-    @keyframes fadeInSlide {
-      from {
-        opacity: 0;
-        transform: translateY(-10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="/setup/setup.css?v=6.0">
 </head>
 <body>
   <div class="background-animation">
@@ -150,7 +16,7 @@
   <div class="wizard-container login-container">
     <div class="wizard login-card">
       <div class="login-header">
-        <img src="/setup/SlackONOS.png" alt="SlackONOS Logo">
+        <img src="/setup/SlackONOS-256.png?v=6.0" srcset="/setup/SlackONOS-256.png?v=6.0 1x, /setup/SlackONOS-512.png?v=6.0 2x" alt="SlackONOS Logo" class="app-logo" width="128" height="128">
         <h1>Admin Login</h1>
         <p>Enter your credentials to access the admin panel</p>
       </div>
@@ -158,15 +24,15 @@
       <div id="error-message" class="error-message"></div>
       
       <!-- WebAuthn Login Section (Primary - Passwordless) -->
-      <div id="webauthn-section" style="display: none; margin-bottom: 2rem;">
-        <div style="text-align: center; margin-bottom: 1.5rem;">
-          <div style="font-size: 3rem; margin-bottom: 0.5rem;">🔐</div>
-          <h3 style="margin: 0 0 0.5rem 0; color: #06b6d4; font-size: 1.3rem;">Passwordless Login</h3>
-          <p style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem; margin: 0;">
+      <div id="webauthn-section" class="auth-option" style="display: none;">
+        <div class="auth-option-header">
+          <div class="auth-icon">🔐</div>
+          <h3>Passwordless Login</h3>
+          <p>
           Use your FIDO2 security key or biometric
           </p>
         </div>
-        <button type="button" class="btn-login" id="btn-webauthn" style="width: 100%; background: linear-gradient(135deg, #06b6d4, #0891b2); font-size: 1.1rem; padding: 1rem; font-weight: 600;">
+        <button type="button" class="btn-login btn-webauthn" id="btn-webauthn">
           🔐 Login with Yubikey!
         </button>
       </div>
@@ -174,9 +40,8 @@
       <!-- Password Login Section (Secondary) -->
       <div id="password-section" style="display: none;">
         <!-- Divider -->
-        <div style="text-align: center; margin: 2rem 0; position: relative;">
-          <div style="position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: rgba(255, 255, 255, 0.1);"></div>
-          <span style="background: rgba(15, 23, 42, 0.8); padding: 0 1rem; color: rgba(255, 255, 255, 0.5); font-size: 0.9rem;">Or use password</span>
+        <div class="login-divider">
+          <span>Or use password</span>
         </div>
         <form id="login-form">
           <div class="form-group">
@@ -189,7 +54,7 @@
             <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="Enter your password">
           </div>
           
-          <button type="submit" class="btn-login" id="btn-login" style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.6), rgba(167, 139, 250, 0.6));">
+          <button type="submit" class="btn-login" id="btn-login">
             Login with Password
           </button>
         </form>

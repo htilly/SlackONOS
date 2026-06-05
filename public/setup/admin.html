@@ -6,7 +6,7 @@
   <title>SlackONOS Admin</title>
   <!-- Preload CDN scripts for faster loading -->
   <link rel="preload" as="script" href="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@9.0.0/dist/bundle/index.umd.min.js">
-  <link rel="stylesheet" href="/setup/setup.css">
+  <link rel="stylesheet" href="/setup/setup.css?v=6.0">
   <style>
     .admin-container {
       max-width: 1200px;
@@ -333,173 +333,165 @@
     }
   </style>
 </head>
-<body>
+<body class="admin-page">
   <div class="admin-container">
-    <div class="admin-header">
-      <img src="/setup/SlackONOS.png" alt="SlackONOS Logo" style="max-width: 200px; margin-bottom: 1rem;">
-      <h1>SlackONOS Admin</h1>
-      <p>Manage your bot and monitor status</p>
-      <div style="margin-top: 1rem; display: flex; gap: 1rem; justify-content: center;">
+    <header class="admin-header">
+      <img src="/setup/SlackONOS-256.png?v=6.0" srcset="/setup/SlackONOS-256.png?v=6.0 1x, /setup/SlackONOS-512.png?v=6.0 2x" alt="SlackONOS Logo" class="app-logo" width="88" height="88">
+      <div>
+        <h1>SlackONOS Admin</h1>
+        <p>Manage your bot and monitor status</p>
+      </div>
+      <div class="admin-actions">
         <button class="btn btn-secondary" id="btn-logout">Logout</button>
       </div>
-    </div>
+    </header>
 
-    <!-- Config Section (collapsed by default) -->
-    <div class="config-section" id="config-section">
-      <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" id="config-toggle">
-        <h2 style="margin: 0;">⚙️ Configuration</h2>
-        <button class="btn btn-ghost" id="btn-toggle-config">Show</button>
-      </div>
-      <div id="config-body" style="display: none; margin-top: 1rem;">
-        <div id="config-items">
-          <div class="loading"></div>
-          <p>Loading configuration...</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Now Playing Card -->
-    <div class="now-playing-card" id="now-playing-card">
-      <h2>🎵 Now Playing</h2>
-      <div id="now-playing-content">
-        <div class="loading"></div>
-        <p>Loading...</p>
-      </div>
-      <div id="player-controls" style="margin-top: 1.5rem; display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
-        <button class="btn btn-secondary" id="btn-play">▶️ Start</button>
-        <button class="btn btn-secondary" id="btn-pause">⏸️ Pause</button>
-        <button class="btn btn-secondary" id="btn-stop">⏹️ Stop</button>
-      </div>
-      <div id="up-next" style="margin-top: 1.5rem; text-align: left;"></div>
-    </div>
-
-    <!-- Status Grid -->
-    <div class="status-grid" id="status-grid">
-      <div class="status-card">
-        <h3>⏳ Loading status...</h3>
-      </div>
-    </div>
-
-    <!-- Security Section (collapsed by default) -->
-    <div class="config-section" id="security-section">
-      <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" id="security-toggle">
-        <h2 style="margin: 0;">🔐 Security</h2>
-        <button class="btn btn-ghost" id="btn-toggle-security">Show</button>
-      </div>
-      <div id="security-body" style="display: none; margin-top: 1rem;">
-        <!-- Change Password Section -->
-        <div style="margin-bottom: 2rem; padding: 1rem; background: rgba(255, 255, 255, 0.03); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
-          <h3 style="margin-top: 0; margin-bottom: 1rem;">Change Admin Password</h3>
-          <button class="btn btn-secondary" id="btn-change-password">Change Password</button>
-    </div>
-
-    <!-- WebAuthn Section -->
-        <div style="margin-bottom: 1rem;">
-          <h3 style="margin-bottom: 1rem;">WebAuthn / FIDO2 Security Keys</h3>
-      <div id="webauthn-status" style="margin-bottom: 1rem; padding: 1rem; background: rgba(255, 255, 255, 0.05); border-radius: 8px;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <div>
-            <strong>Status:</strong> <span id="webauthn-status-text">Checking...</span>
+    <main class="admin-main">
+      <div class="admin-primary">
+        <section class="now-playing-card" id="now-playing-card" aria-labelledby="now-playing-title">
+          <h2 id="now-playing-title">🎵 Now Playing</h2>
+          <div id="now-playing-content">
+            <div class="loading"></div>
+            <p>Loading...</p>
           </div>
-          <button class="btn btn-secondary" id="btn-enable-webauthn" style="display: none;">Enable WebAuthn</button>
-        </div>
-      </div>
-      
-      <!-- WebAuthn Settings Toggle -->
-      <div id="webauthn-settings" style="margin-bottom: 1rem; padding: 1rem; background: rgba(255, 255, 255, 0.03); border-radius: 8px; display: none;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-          <div style="flex: 1;">
-            <strong style="display: block; margin-bottom: 0.25rem;">Require User Verification (PIN/Biometric)</strong>
-            <small style="color: rgba(255,255,255,0.6); font-size: 0.85rem;">
-              When enabled: requires PIN entry for Yubikey or biometric for Touch ID/Face ID<br>
-              When disabled: allows touch-only authentication (no PIN required)
-            </small>
+          <div id="player-controls" class="player-controls">
+            <button class="btn btn-secondary" id="btn-play">▶️ Start</button>
+            <button class="btn btn-secondary" id="btn-pause">⏸️ Pause</button>
+            <button class="btn btn-secondary" id="btn-stop">⏹️ Stop</button>
           </div>
-          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-            <input type="checkbox" id="webauthn-require-uv" style="width: 18px; height: 18px; cursor: pointer;">
-            <span id="webauthn-uv-status" style="font-size: 0.9rem; font-weight: 600;"></span>
-          </label>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1);">
-          <div style="flex: 1;">
-            <strong style="display: block; margin-bottom: 0.25rem;">Prefer Platform Only (Touch ID/Face ID)</strong>
-            <small style="color: rgba(255,255,255,0.6); font-size: 0.85rem;">
-              When enabled: <strong style="color: #fbbf24;">ONLY</strong> allows Touch ID/Face ID (blocks Yubikey, may reduce QR prompts)<br>
-              When disabled: allows both platform (Touch ID) and cross-platform (Yubikey) authenticators<br>
-              <em style="color: rgba(255,255,255,0.5);">Note: QR code prompts on macOS/iOS are a system feature and may still appear</em>
-            </small>
+          <div id="up-next" class="up-next"></div>
+        </section>
+
+        <section class="status-grid" id="status-grid" aria-label="Integration status">
+          <div class="status-card">
+            <h3>⏳ Loading status...</h3>
           </div>
-          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-            <input type="checkbox" id="webauthn-prefer-platform-only" style="width: 18px; height: 18px; cursor: pointer;">
-            <span id="webauthn-platform-only-status" style="font-size: 0.9rem; font-weight: 600;"></span>
-          </label>
-        </div>
-        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1);">
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-            <div>
-              <label for="webauthn-timeout" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Timeout (seconds)</label>
-              <input type="number" id="webauthn-timeout" min="10" max="300" step="10" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
-              <small style="color: rgba(255,255,255,0.6); font-size: 0.8rem;">Registration/authentication timeout (10-300s, default: 60s)</small>
-            </div>
-            <div>
-              <label for="webauthn-challenge-expiration" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Challenge Expiration (seconds)</label>
-              <input type="number" id="webauthn-challenge-expiration" min="30" max="300" step="10" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
-              <small style="color: rgba(255,255,255,0.6); font-size: 0.8rem;">How long challenges remain valid (30-300s, default: 60s)</small>
-            </div>
-            <div>
-              <label for="webauthn-resident-key" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Resident Key Preference</label>
-              <select id="webauthn-resident-key" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
-                <option value="discouraged">Discouraged (No Passkeys)</option>
-                <option value="preferred">Preferred (Allow Passkeys)</option>
-                <option value="required">Required (Force Passkeys)</option>
+        </section>
+
+        <section class="config-section">
+          <h2>📋 Console Logs</h2>
+          <div class="logs-controls">
+            <button class="btn btn-secondary" id="btn-toggle-logs">Show Logs</button>
+            <button class="btn btn-ghost" id="btn-clear-logs">Clear</button>
+            <div class="logs-filter">
+              <label for="log-level-select">Log Level:</label>
+              <select id="log-level-select">
+                <option value="debug">Debug</option>
+                <option value="info" selected>Info</option>
+                <option value="warn">Warn</option>
+                <option value="error">Error</option>
               </select>
-              <small style="color: rgba(255,255,255,0.6); font-size: 0.8rem;">Controls passkey support (default: discouraged)</small>
-            </div>
-            <div>
-              <label for="webauthn-max-credentials" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Max Credentials</label>
-              <input type="number" id="webauthn-max-credentials" min="0" max="50" step="1" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
-              <small style="color: rgba(255,255,255,0.6); font-size: 0.8rem;">Max credentials per user (0 = unlimited, default: 0)</small>
             </div>
           </div>
-            <button class="btn btn-secondary" id="btn-save-webauthn-advanced" style="margin-top: 1rem; width: 100%;">Save Advanced Settings</button>
+          <div id="logs-container" class="logs-container" style="display: none;">
+            <div id="logs-content" class="logs-content"></div>
+          </div>
+        </section>
       </div>
 
-      <div id="webauthn-credentials-list" style="margin-bottom: 1rem;">
-        <!-- Credentials will be loaded here -->
-      </div>
-      <div style="margin-top: 1rem;">
-        <button class="btn btn-primary" id="btn-register-webauthn" style="display: none;">Register New Security Key</button>
-      </div>
-      <div id="webauthn-message" class="validation-message" style="margin-top: 1rem;"></div>
+      <div class="admin-secondary">
+        <section class="config-section" id="config-section">
+          <div class="section-toggle" id="config-toggle">
+            <h2>⚙️ Configuration</h2>
+            <button class="btn btn-ghost" id="btn-toggle-config">Show</button>
+          </div>
+          <div id="config-body" class="collapsible-body">
+            <div id="config-items">
+              <div class="loading"></div>
+              <p>Loading configuration...</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="config-section" id="security-section">
+          <div class="section-toggle" id="security-toggle">
+            <h2>🔐 Security</h2>
+            <button class="btn btn-ghost" id="btn-toggle-security">Show</button>
+          </div>
+          <div id="security-body" class="collapsible-body">
+            <div class="webauthn-stack">
+              <div class="security-card">
+                <h3>Change Admin Password</h3>
+                <button class="btn btn-secondary" id="btn-change-password">Change Password</button>
+              </div>
+
+              <div class="webauthn-panel">
+                <h3>WebAuthn / FIDO2 Security Keys</h3>
+                <div id="webauthn-status" class="webauthn-row">
+                  <div>
+                    <strong>Status:</strong> <span id="webauthn-status-text">Checking...</span>
+                  </div>
+                  <button class="btn btn-secondary" id="btn-enable-webauthn" style="display: none;">Enable WebAuthn</button>
+                </div>
+              </div>
+
+              <div id="webauthn-settings" class="webauthn-panel" style="display: none;">
+                <div class="webauthn-stack">
+                  <div class="webauthn-row">
+                    <div>
+                      <strong>Require User Verification (PIN/Biometric)</strong>
+                      <small>When enabled, authentication requires PIN entry for Yubikey or biometric verification for Touch ID/Face ID.</small>
+                    </div>
+                    <label>
+                      <input type="checkbox" id="webauthn-require-uv">
+                      <span id="webauthn-uv-status"></span>
+                    </label>
+                  </div>
+
+                  <div class="webauthn-row">
+                    <div>
+                      <strong>Prefer Platform Only (Touch ID/Face ID)</strong>
+                      <small>When enabled, only platform authenticators are allowed. When disabled, both platform authenticators and Yubikey are allowed.</small>
+                    </div>
+                    <label>
+                      <input type="checkbox" id="webauthn-prefer-platform-only">
+                      <span id="webauthn-platform-only-status"></span>
+                    </label>
+                  </div>
+
+                  <div class="webauthn-grid">
+                    <div>
+                      <label for="webauthn-timeout">Timeout (seconds)</label>
+                      <input type="number" id="webauthn-timeout" min="10" max="300" step="10">
+                      <small>Registration/authentication timeout (10-300s, default: 60s)</small>
+                    </div>
+                    <div>
+                      <label for="webauthn-challenge-expiration">Challenge Expiration (seconds)</label>
+                      <input type="number" id="webauthn-challenge-expiration" min="30" max="300" step="10">
+                      <small>How long challenges remain valid (30-300s, default: 60s)</small>
+                    </div>
+                    <div>
+                      <label for="webauthn-resident-key">Resident Key Preference</label>
+                      <select id="webauthn-resident-key">
+                        <option value="discouraged">Discouraged (No Passkeys)</option>
+                        <option value="preferred">Preferred (Allow Passkeys)</option>
+                        <option value="required">Required (Force Passkeys)</option>
+                      </select>
+                      <small>Controls passkey support (default: discouraged)</small>
+                    </div>
+                    <div>
+                      <label for="webauthn-max-credentials">Max Credentials</label>
+                      <input type="number" id="webauthn-max-credentials" min="0" max="50" step="1">
+                      <small>Max credentials per user (0 = unlimited, default: 0)</small>
+                    </div>
+                  </div>
+
+                  <button class="btn btn-secondary btn-block" id="btn-save-webauthn-advanced">Save Advanced Settings</button>
+                </div>
+              </div>
+
+              <div id="webauthn-credentials-list"></div>
+              <button class="btn btn-primary" id="btn-register-webauthn" style="display: none;">Register New Security Key</button>
+              <div id="webauthn-message" class="validation-message"></div>
+            </div>
+          </div>
+        </section>
+
+        <div class="setup-link">
+          <a href="/setup?force=true">Go to setup wizard to configure new integrations</a>
         </div>
       </div>
-    </div>
-
-    <!-- Logs Section -->
-    <div class="config-section">
-      <h2>📋 Console Logs</h2>
-      <div class="logs-controls" style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem;">
-        <button class="btn btn-secondary" id="btn-toggle-logs">Show Logs</button>
-        <button class="btn btn-ghost" id="btn-clear-logs">Clear</button>
-        <div style="margin-left: auto; display: flex; align-items: center; gap: 0.5rem;">
-          <label for="log-level-select" style="font-size: 0.9rem; color: rgba(255,255,255,0.8);">Log Level:</label>
-          <select id="log-level-select" style="padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 0.9rem;">
-            <option value="debug">Debug</option>
-            <option value="info" selected>Info</option>
-            <option value="warn">Warn</option>
-            <option value="error">Error</option>
-          </select>
-        </div>
-      </div>
-      <div id="logs-container" class="logs-container" style="display: none;">
-        <div id="logs-content" class="logs-content"></div>
-      </div>
-    </div>
-
-    <!-- Setup Link -->
-    <div class="setup-link">
-      <a href="/setup?force=true">Go to setup wizard to configure new integrations</a>
-    </div>
+    </main>
   </div>
 
   <button class="refresh-btn" id="refresh-btn" title="Refresh">🔄</button>
@@ -706,4 +698,3 @@
   <script src="/setup/admin.js"></script>
 </body>
 </html>
-
