@@ -1,4 +1,8 @@
 import { expect } from 'chai';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const { cleanCommandText: cleanText } = require('../lib/command-router.js');
 
 /**
  * Test text cleaning/sanitization logic
@@ -6,28 +10,6 @@ import { expect } from 'chai';
  */
 
 describe('Text Cleaning', function() {
-  
-  // Replicate the text cleaning logic from routeCommand
-  function cleanText(text) {
-    // Trim whitespace first
-    text = text.trim();
-    // Remove leading quote marker ("> " or "&gt; ")
-    text = text.replace(/^(&gt;|>)\s*/, '');
-    // Decode HTML entities (including &quot; for quotes)
-    text = text.replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&').replace(/&quot;/g, '"');
-    // Remove Slack formatting markers (* for bold, _ for italic, ` for code)
-    text = text.replace(/\*([^*]+)\*/g, '$1').replace(/_([^_]+)_/g, '$1').replace(/`([^`]+)`/g, '$1');
-    // Also remove standalone backticks and underscores (from broken formatting)
-    text = text.replace(/[`_]/g, '');
-    // Remove leading numbers from search results (e.g., "1. " -> "")
-    text = text.replace(/^\d+\.\s*/, '');
-    // Remove any remaining leading > or &gt; after number removal
-    text = text.replace(/^(&gt;|>)\s*/, '');
-    // Final trim
-    text = text.trim();
-    return text;
-  }
-
   describe('HTML entity decoding', function() {
     it('should decode &gt; to >', function() {
       const result = cleanText('&gt; trackblacklist');

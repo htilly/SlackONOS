@@ -12,15 +12,19 @@ import path from 'path';
 
 describe('Feature Request Integration', function() {
   describe('Command Registration', function() {
-    it('should have featurerequest command registered in index.js', function() {
-      const indexPath = path.join(process.cwd(), 'index.js');
-      const content = fs.readFileSync(indexPath, 'utf8');
+    it('should have featurerequest command registered in command registry', function() {
+      const registryPath = path.join(process.cwd(), 'lib', 'command-registry.js');
+      const content = fs.readFileSync(registryPath, 'utf8');
       
       // Check command is registered
-      expect(content).to.include("['featurerequest', { fn: _featurerequest");
+      expect(content).to.include("['featurerequest', { fn: featurerequest");
+      expect(content).to.include("['fr', { fn: featurerequest");
+
+      const indexPath = path.join(process.cwd(), 'index.js');
+      const indexContent = fs.readFileSync(indexPath, 'utf8');
       
       // Check handler function exists
-      expect(content).to.include('async function _featurerequest(input, channel, userName)');
+      expect(indexContent).to.include('async function _featurerequest(input, channel, userName)');
     });
   });
 
