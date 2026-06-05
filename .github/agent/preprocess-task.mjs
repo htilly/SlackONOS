@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-import fetch from "node-fetch";
 
 /**
  * Preprocess Task - Convert one-liner task descriptions to structured user stories

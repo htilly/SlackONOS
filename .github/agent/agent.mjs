@@ -493,12 +493,12 @@ async function handleError(error, errorType = "Unknown error", context = {}) {
 console.log(`[AGENT] Starting AI code agent for task: ${task}`);
 console.log(`[AGENT] Requested by: ${requester}`);
 
-// Verify we're on the develop branch
+// Verify we're on the repository's default branch
 try {
   const currentBranch = sh("git branch --show-current 2>&1").trim();
   console.log(`[AGENT] Current branch: ${currentBranch}`);
-  if (currentBranch !== 'develop') {
-    console.warn(`[AGENT] WARNING: Not on develop branch (current: ${currentBranch}). Workflow should checkout develop.`);
+  if (currentBranch !== 'master') {
+    console.warn(`[AGENT] WARNING: Not on master branch (current: ${currentBranch}). Workflow should checkout master.`);
   }
 } catch (e) {
   console.warn(`[AGENT] Could not determine current branch: ${e.message}`);
@@ -1604,4 +1604,3 @@ sh('git config user.email "aicode@slackonos.bot"');
 sh(`git commit -m "AI: ${task}"`);
 
 console.log("[AGENT] Changes committed, ready for testing");
-

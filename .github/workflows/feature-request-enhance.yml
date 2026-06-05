@@ -113,14 +113,15 @@ jobs:
       issue_body: ${{ steps.fetch.outputs.issue_body }}
       issue_created: ${{ steps.fetch.outputs.issue_created }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
-          ref: develop
+          ref: master
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: '20.20.0'
+          node-version: '22.x'
           cache: npm
+          cache-dependency-path: .github/agent/package-lock.json
 
       - name: Install dependencies
         working-directory: .github/agent
@@ -182,14 +183,15 @@ jobs:
     outputs:
       confluence_url: ${{ steps.confluence.outputs.confluence_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
-          ref: develop
+          ref: master
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: '20.20.0'
+          node-version: '22.x'
           cache: npm
+          cache-dependency-path: .github/agent/package-lock.json
 
       - name: Install dependencies
         working-directory: .github/agent
@@ -293,17 +295,18 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - name: Checkout develop
-        uses: actions/checkout@v4
+      - name: Checkout master
+        uses: actions/checkout@v6
         with:
-          ref: develop
+          ref: master
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20.20.0'
+          node-version: '22.x'
           cache: npm
+          cache-dependency-path: .github/agent/package-lock.json
 
       - name: Install agent dependencies
         working-directory: .github/agent
@@ -480,7 +483,7 @@ jobs:
             PR_URL=$(gh pr create \
               --title "feat: Implementation plan for issue #$ISSUE_NUMBER" \
               --body "$PR_BODY" \
-              --base develop \
+              --base master \
               --head "$BRANCH_NAME" \
               --label "enhancement")
 

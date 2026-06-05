@@ -1,14 +1,14 @@
 # GitHub Actions for SlackONOS
 
-This repo has two GitHub Actions workflows that automatically run on code changes.
+This repo has GitHub Actions workflows that automatically run tests, coverage, release publishing, and feature-request automation.
 
 ## 🔍 Workflows
 
 ### 1. `test.yml` - Run Tests
-**Runs on:** Push or Pull Request to `master`, `main`, or `develop`
+**Runs on:** Push or Pull Request to `master` or `main`
 
 **What it does:**
-- ✅ Tests against Node.js 18.x, 20.x, and 22.x
+- ✅ Tests against Node.js 22.x, 24.x, and 26.x
 - ✅ Installs dependencies
 - ✅ Creates config file from example
 - ✅ Runs all tests with `npm test`
@@ -96,8 +96,8 @@ npm run test:record
 ## 🔄 Workflow Triggers
 
 **Automatic triggers:**
-- `git push` to master/main/develop
-- Pull Request against master/main/develop
+- `git push` to master/main
+- Pull Request against master/main
 - Manual trigger via GitHub Actions UI
 
 **Skip tests:**

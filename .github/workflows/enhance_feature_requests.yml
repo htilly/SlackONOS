@@ -55,16 +55,17 @@ jobs:
       task_json: ${{ steps.preprocess.outputs.task_json }}
       confluence_url: ${{ steps.preprocess.outputs.confluence_url }}
     steps:
-      - name: Checkout develop
-        uses: actions/checkout@v4
+      - name: Checkout master
+        uses: actions/checkout@v6
         with:
-          ref: develop
+          ref: master
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22.x
           cache: 'npm'
+          cache-dependency-path: .github/agent/package-lock.json
 
       - name: Install agent dependencies
         working-directory: .github/agent
@@ -115,16 +116,17 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout develop
-        uses: actions/checkout@v4
+      - name: Checkout master
+        uses: actions/checkout@v6
         with:
-          ref: develop
+          ref: master
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22.x
           cache: 'npm'
+          cache-dependency-path: .github/agent/package-lock.json
 
       - name: Install agent dependencies
         working-directory: .github/agent
@@ -269,25 +271,12 @@ jobs:
           
           # Build enhanced body with proper escaping using jq
           # Start with base content (without Confluence link for now)
-          BASE_BODY=$(jq -n \
+          BASE_BODY=$(jq -nr \
             --arg enhanced "$ENHANCED_TASK" \
             --arg original "$ORIGINAL_BODY" \
             --arg requester "${{ github.event.issue.user.login }}" \
             --arg created "${{ github.event.issue.created_at }}" \
-            '## 📝 Enhanced Feature Request
-
-\($enhanced)
-
----
-
-## 📋 Original Request
-
-\($original)
-
----
-
-**Requested by:** \($requester)  
-**Created:** \($created)')
+            '"## 📝 Enhanced Feature Request\n\n" + $enhanced + "\n\n---\n\n## 📋 Original Request\n\n" + $original + "\n\n---\n\n**Requested by:** " + $requester + "  \n**Created:** " + $created')
           
           ENHANCED_BODY="$BASE_BODY"
 
@@ -329,12 +318,10 @@ jobs:
             -H "Accept: application/vnd.github+json" | jq -r '.body')
           
           # Add Confluence link to the end
-          UPDATED_BODY=$(jq -n \
+          UPDATED_BODY=$(jq -nr \
             --arg current "$CURRENT_BODY" \
             --arg confluence "$CONFLUENCE_URL" \
-            '\($current)
-
-📄 **Requirements documented:** \($confluence)')
+            '$current + "\n\n📄 **Requirements documented:** " + $confluence')
           
           # Update issue with Confluence link
           PAYLOAD=$(jq -n \
@@ -364,22 +351,12 @@ jobs:
           
           # Build comment with proper escaping using jq
           if [ "$CONFLUENCE_URL" != "N/A" ] && [ -n "$CONFLUENCE_URL" ]; then
-            COMMENT=$(jq -n \
+            COMMENT=$(jq -nr \
               --arg confluence "$CONFLUENCE_URL" \
-              '🤖 **Feature request enhanced!**
-
-This feature request has been automatically enhanced with a structured user story format.
-
-📄 Requirements documented: \($confluence)
-
-The issue description has been updated with acceptance criteria and technical notes.')
+              '"🤖 **Feature request enhanced!**\n\nThis feature request has been automatically enhanced with a structured user story format.\n\n📄 Requirements documented: " + $confluence + "\n\nThe issue description has been updated with acceptance criteria and technical notes."')
           else
-            COMMENT=$(jq -n \
-              '🤖 **Feature request enhanced!**
-
-This feature request has been automatically enhanced with a structured user story format.
-
-The issue description has been updated with acceptance criteria and technical notes.')
+            COMMENT=$(jq -nr \
+              '"🤖 **Feature request enhanced!**\n\nThis feature request has been automatically enhanced with a structured user story format.\n\nThe issue description has been updated with acceptance criteria and technical notes."')
           fi
 
           # Use jq to properly construct JSON payload

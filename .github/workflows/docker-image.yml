@@ -5,10 +5,10 @@ on:
   release:
     types: [published]
   
-  # Also allow develop branch for testing
+  # Also allow master branch for testing
   push:
     branches:
-      - develop # Dev builds → :develop
+      - master # Main builds -> :master
     paths-ignore:
       - 'CHANGELOG.md'
       - '*.md'
@@ -32,10 +32,10 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
         node-version: '22.x'
     
@@ -59,13 +59,13 @@ jobs:
 
     steps:
     - name: Checkout the repository
-      uses: actions/checkout@v4.1.7
+      uses: actions/checkout@v6
       
     - name: Docker Setup QEMU
-      uses: docker/setup-qemu-action@v3.2.0
+      uses: docker/setup-qemu-action@v4.1.0
             
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3.6.1
+      uses: docker/setup-buildx-action@v4.1.0
 
     - name: Log in to Docker Hub
       run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
@@ -97,14 +97,14 @@ jobs:
             echo "github_ref=" >> $GITHUB_OUTPUT
           fi
         else
-          # Develop branch
-          echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:develop,${{ secrets.DOCKERHUB_USERNAME }}/slackonos:develop-${SHORT_SHA}" >> $GITHUB_OUTPUT
+          # Master branch
+          echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:master,${{ secrets.DOCKERHUB_USERNAME }}/slackonos:master-${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "is_release=false" >> $GITHUB_OUTPUT
           echo "github_ref=" >> $GITHUB_OUTPUT
         fi
 
     - name: Build and push multi-platform Docker image
-      uses: docker/build-push-action@v6.7.0
+      uses: docker/build-push-action@v7.2.0
       with:
         context: .
         file: ./docker/Dockerfile

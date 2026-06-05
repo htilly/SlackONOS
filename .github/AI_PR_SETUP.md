@@ -9,7 +9,7 @@ When an issue is created with the `enhancement` label, the workflow will:
 1. **Enhance the issue description** - Convert to structured user story format
 2. **Create Confluence page** (optional) - Document requirements
 3. **Generate implementation with Claude AI** - Analyze codebase and create implementation plan
-4. **Create automatic PR** - Commit implementation plan and create PR against `develop` branch
+4. **Create automatic PR** - Commit implementation plan and create PR against `master` branch
 
 ## Configuration
 
@@ -67,7 +67,7 @@ The workflow will:
 4. 📝 Generate an implementation plan
 5. 🌿 Create a new branch: `feature/issue-{number}-implementation`
 6. 📤 Commit the file `implementation-{number}.md`
-7. 🔀 Create a PR against `develop` branch
+7. 🔀 Create a PR against `master` branch
 8. 💬 Comment on original issue with PR link
 
 ### PR Content
@@ -130,10 +130,10 @@ Edit [.github/agent/generate-implementation.mjs](.github/agent/generate-implemen
 
 ## Branch Strategy
 
-**Important**: All PRs are automatically created against the `develop` branch. This is configured in the workflow at line 354:
+**Important**: All PRs are automatically created against the `master` branch. This is configured in the feature-request workflow:
 
 ```yaml
---base develop \
+--base master \
 ```
 
 If you need to change the target branch, modify this line in [.github/workflows/feature-request-enhance.yml](.github/workflows/feature-request-enhance.yml).
