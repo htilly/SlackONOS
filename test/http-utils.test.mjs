@@ -2,7 +2,7 @@ import { expect } from 'chai';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
-const { readRequestBody, isSameOriginRequest } = require('../lib/http-utils.js');
+const { readRequestBody, isSameOriginRequest, isLocalRequest } = require('../lib/http-utils.js');
 
 function createRequest(chunks, headers = {}) {
   return {
@@ -47,6 +47,25 @@ describe('HTTP utilities', function() {
         host: 'localhost:8181',
         origin: 'http://evil.example'
       }
+    })).to.equal(false);
+  });
+
+  it('identifies localhost requests from socket addresses', function() {
+    expect(isLocalRequest({
+      headers: {},
+      socket: { remoteAddress: '127.0.0.1' }
+    })).to.equal(true);
+
+    expect(isLocalRequest({
+      headers: {},
+      socket: { remoteAddress: '::ffff:127.0.0.1' }
+    })).to.equal(true);
+  });
+
+  it('does not trust forwarded headers for localhost bootstrap checks', function() {
+    expect(isLocalRequest({
+      headers: { 'x-forwarded-for': '127.0.0.1' },
+      socket: { remoteAddress: '192.168.1.50' }
     })).to.equal(false);
   });
 });

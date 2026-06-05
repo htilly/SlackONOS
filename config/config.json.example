@@ -22,6 +22,8 @@
     "sslCertPath": "",
     "sslKeyPath": "",
     "_comment_ssl": "SSL Configuration: Set sslAutoGenerate to true (default) to auto-generate self-signed certificates. Set to false and provide sslCertPath/sslKeyPath to use your own certificates. Leave paths empty to use default location (config/ssl/cert.pem and config/ssl/key.pem). httpsPort defaults to 8443 if not specified. For production, consider using port 443 (requires root/admin) or a reverse proxy (nginx/Apache) on port 443 that forwards to these ports.",
+    "setupBootstrapToken": "",
+    "_comment_setupBootstrapToken": "Initial setup from remote clients requires SETUP_BOOTSTRAP_TOKEN or this config value. Localhost setup works without a token. Open /setup?setupToken=<token> when using remote bootstrap.",
     "aiPrompt": "You are a funny, upbeat DJ for a Slack music bot controlling Sonos. Reply with a super short, playful one-liner that confirms what you'll do, using casual humor and emojis when appropriate.",
     "aiModel": "gpt-4o",
     "defaultTheme": "lounge",

@@ -28,5 +28,8 @@ RUN chmod -R 755 /app
 ARG GITHUB_REF
 ENV GITHUB_REF=${GITHUB_REF}
 
+# SlackONOS serves HTTP redirects/TTS on 8080 and HTTPS UI/API on 8443.
+EXPOSE 8080 8443
+
 # Command to run the application
 CMD ["node", "index.js"]

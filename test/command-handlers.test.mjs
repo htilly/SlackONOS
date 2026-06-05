@@ -21,6 +21,7 @@ describe('Command Handlers', function() {
 
   beforeEach(function() {
     // Clear module cache to get fresh module state
+    delete require.cache[require.resolve('../lib/queue-cache.js')];
     delete require.cache[require.resolve('../lib/command-handlers.js')];
     commandHandlers = require('../lib/command-handlers.js');
 
@@ -184,6 +185,20 @@ describe('Command Handlers', function() {
           expect(messages[0].msg).to.include('gooo');
           done();
         }, 50);
+      });
+
+      it('should acknowledge before Sonos playback completes', function() {
+        let resolvePlay;
+        mockSonos.play.returns(new Promise(resolve => {
+          resolvePlay = resolve;
+        }));
+
+        commandHandlers.play(['play'], 'C123', 'user1');
+
+        expect(messages.length).to.equal(1);
+        expect(messages[0].msg).to.include('Starting playback');
+        expect(mockSonos.play.called).to.be.false;
+        resolvePlay();
       });
     });
 
@@ -413,6 +428,18 @@ describe('Command Handlers', function() {
           expect(result).to.equal(3);
           done();
         }, 50);
+      });
+
+      it('should use cached count when Sonos queue count times out', async function() {
+        const queueCache = require('../lib/queue-cache.js');
+        queueCache.setTotal(42, 'test');
+        mockSonos.getQueue.returns(new Promise(() => {}));
+
+        await commandHandlers.countQueue('C123', null, { timeoutMs: 5 });
+
+        expect(messages).to.have.length(1);
+        expect(messages[0].msg).to.include('*42*');
+        expect(messages[0].msg).to.include('last checked');
       });
     });
   });

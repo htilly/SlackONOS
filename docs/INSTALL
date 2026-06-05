@@ -6,7 +6,7 @@
 
 1. Install dependencies: `npm install`
 2. Start SlackONOS: `node index.js`
-3. Open your browser: `http://localhost:8181/setup`
+3. Open your browser: `http://localhost:8080/setup`
 4. Follow the interactive wizard to configure all integrations
 5. Save and restart SlackONOS
 

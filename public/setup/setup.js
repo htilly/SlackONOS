@@ -3,10 +3,35 @@
  */
 
 const API_BASE = '/api/setup';
+const setupBootstrapToken = (() => {
+  const params = new URLSearchParams(window.location.search);
+  const tokenFromUrl = params.get('setupToken') || '';
+  if (tokenFromUrl) {
+    sessionStorage.setItem('setupBootstrapToken', tokenFromUrl);
+    params.delete('setupToken');
+    const cleanQuery = params.toString();
+    const cleanUrl = `${window.location.pathname}${cleanQuery ? `?${cleanQuery}` : ''}${window.location.hash}`;
+    window.history.replaceState(null, '', cleanUrl);
+    return tokenFromUrl;
+  }
+  return sessionStorage.getItem('setupBootstrapToken') || '';
+})();
 let configData = {};
 let selectedPlatforms = new Set(['slack']); // Default to Slack
 let currentPage = 'welcome';
 let configValues = null; // Cache for config values
+
+function setupFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (setupBootstrapToken) {
+    headers.set('X-Setup-Token', setupBootstrapToken);
+  }
+
+  return fetch(url, {
+    ...options,
+    headers
+  });
+}
 
 const pageOrder = [
   'welcome',
@@ -31,7 +56,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function checkSetupStatus() {
   try {
     // FIRST: Always check if password or WebAuthn credentials are set
-    const response = await fetch(`${API_BASE}/status`);
+    const response = await setupFetch(`${API_BASE}/status`);
     const data = await response.json();
     
     // Check WebAuthn status
@@ -319,7 +344,7 @@ function updatePlatformSelection() {
  */
 async function loadConfigValues() {
   try {
-    const response = await fetch(`${API_BASE}/config-values`);
+    const response = await setupFetch(`${API_BASE}/config-values`);
     const data = await response.json();
     if (data.exists && data.values) {
       configValues = data.values;
@@ -616,7 +641,7 @@ function saveOpenAIData() {
 async function checkPasswordAndContinue() {
   // Check if password is already set - if so, skip password step
   try {
-    const statusResponse = await fetch(`${API_BASE}/status`);
+    const statusResponse = await setupFetch(`${API_BASE}/status`);
     const statusData = await statusResponse.json();
     if (statusData.passwordSet) {
       // Password already set, skip to success
@@ -710,7 +735,7 @@ async function setupPassword() {
   showLoading(validationDiv, 'Setting up password...');
   
   try {
-    const response = await fetch(`${API_BASE}/password-setup`, {
+    const response = await setupFetch(`${API_BASE}/password-setup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password, confirmPassword: passwordConfirm })
@@ -752,7 +777,7 @@ async function discoverSonos() {
     const timeout = setTimeout(() => controller.abort(), 15000);
 
     try {
-      const response = await fetch(`${API_BASE}/discover-sonos`, {
+      const response = await setupFetch(`${API_BASE}/discover-sonos`, {
         signal: controller.signal
       });
       clearTimeout(timeout);
@@ -822,7 +847,7 @@ async function validateSlackTokens() {
   showLoading(resultDiv, 'Validating...');
 
   try {
-    const response = await fetch(`${API_BASE}/validate-slack`, {
+    const response = await setupFetch(`${API_BASE}/validate-slack`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ appToken, botToken })
@@ -858,7 +883,7 @@ async function validateDiscordToken() {
   showLoading(resultDiv, 'Validating...');
   
   try {
-    const response = await fetch(`${API_BASE}/validate-discord`, {
+    const response = await setupFetch(`${API_BASE}/validate-discord`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token })
@@ -898,7 +923,7 @@ async function validateSpotifyCredentials() {
   showLoading(resultDiv, 'Validating...');
 
   try {
-    const response = await fetch(`${API_BASE}/validate-spotify`, {
+    const response = await setupFetch(`${API_BASE}/validate-spotify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ clientId, clientSecret })
@@ -937,7 +962,7 @@ async function validateSonosConnection() {
   showLoading(resultDiv, 'Validating connection...');
 
   try {
-    const response = await fetch(`${API_BASE}/validate-sonos`, {
+    const response = await setupFetch(`${API_BASE}/validate-sonos`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ipAddress: ipToValidate })
@@ -969,7 +994,7 @@ async function finishSetup() {
   }
 
   try {
-    const response = await fetch(`${API_BASE}/save-config`, {
+    const response = await setupFetch(`${API_BASE}/save-config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ config: configData })
@@ -1014,7 +1039,7 @@ async function restartApp() {
   }
 
   try {
-    const response = await fetch(`${API_BASE}/restart`, {
+    const response = await setupFetch(`${API_BASE}/restart`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     });

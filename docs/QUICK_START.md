@@ -17,15 +17,15 @@ node index.js
 You'll see output like:
 ```
 [info] Starting SlackONOS...
-[info] 📻 HTTP server listening on port 8181
-[info]    Setup wizard: http://YOUR_IP:8181/setup
+[info] 📻 HTTP server listening on port 8080
+[info]    Setup wizard: http://YOUR_IP:8080/setup
 ```
 
 ## Step 3: Open Setup Wizard
 
 Open your browser and navigate to:
-- **Local:** `http://localhost:8181/setup`
-- **Remote:** `http://YOUR_SERVER_IP:8181/setup`
+- **Local:** `http://localhost:8080/setup`
+- **Remote:** `http://YOUR_SERVER_IP:8080/setup`
 
 ## Step 4: Follow the Wizard
 
@@ -86,11 +86,10 @@ Try these commands in Slack:
 
 ```bash
 docker run -d \
-  -p 8181:8181 \  # HTTP (redirectar)
+  -p 8080:8080 \  # HTTP (redirectar)
   -p 8443:8443 \  # HTTPS (faktiska förfrågningar)
   -v /path/to/config:/app/config \
   htilly/slackonos:latest
 ```
 
-Then open `http://localhost:8181/setup` in your browser (will redirect to HTTPS if SSL is enabled).
-
+Then open `http://localhost:8080/setup` in your browser (will redirect to HTTPS if SSL is enabled).

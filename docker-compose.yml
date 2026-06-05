@@ -12,5 +12,5 @@ services:
     volumes:
       - ./config:/app/config
     ports:
-      - 8181:8181
+      - 8080:8080
       - 8443:8443

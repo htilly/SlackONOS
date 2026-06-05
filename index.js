@@ -48,12 +48,17 @@ const musicHelper = require('./lib/music-helper');
 const commandHandlers = require('./lib/command-handlers');
 const addHandlers = require('./lib/add-handlers');
 const githubApp = require('./lib/github-app');
+const createAdminApi = require('./lib/admin-api');
 const {
   readRequestBody,
   setSameOriginCorsHeaders,
   handleCorsPreflight,
   isSameOriginRequest
 } = require('./lib/http-utils');
+const {
+  isAuthorizedSetupBootstrapRequest,
+  rejectUnauthorizedSetupBootstrap
+} = require('./lib/setup-bootstrap');
 const gongMessage = fs.readFileSync('templates/messages/gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('templates/messages/vote.txt', 'utf8').split('\n').filter(Boolean);
 const ttsMessage = fs.readFileSync('templates/messages/tts.txt', 'utf8').split('\n').filter(Boolean);
@@ -194,7 +199,7 @@ config.argv()
     market: 'US',
     blacklist: [],
     searchLimit: 7,
-    webPort: 8181,
+    webPort: 8080,
     logLevel: 'info',
     telemetryEnabled: true,
     telemetryApiKey: 'phc_dkh7jm9oxMh7lLKr8TRBY0eKQ5Jn708pXk9McRC0qlO',
@@ -251,15 +256,7 @@ Initialize early so it's available for all startup code. */
 // In-memory log buffer for real-time log viewing (last 1000 entries)
 const logBuffer = [];
 const MAX_LOG_BUFFER_SIZE = 1000;
-
-// Global status update SSE clients
-if (!global.statusStreamClients) {
-  global.statusStreamClients = new Set();
-}
-
-// Track current track for change detection
-let lastTrackInfo = null;
-let statusPollInterval = null;
+let adminApi = null;
 
 
 // Custom transport to capture logs in memory
@@ -312,6 +309,18 @@ function shouldBroadcastLog(level) {
   const currentPriority = levelPriority[currentLevel] !== undefined ? levelPriority[currentLevel] : 2; // Default to 'info'
   const logPriority = levelPriority[level] !== undefined ? levelPriority[level] : 2;
   return logPriority <= currentPriority;
+}
+
+function broadcastLog(logEntry) {
+  if (adminApi && typeof adminApi.broadcastLog === 'function') {
+    adminApi.broadcastLog(logEntry);
+    return;
+  }
+
+  logBuffer.push(logEntry);
+  if (logBuffer.length > MAX_LOG_BUFFER_SIZE) {
+    logBuffer.shift();
+  }
 }
 
 // Override logger methods to broadcast to SSE clients (respecting log level)
@@ -610,6 +619,59 @@ async function _sendMessage(message, channel_id, platform = 'slack') {
 // Global web client for other functions that might need it (like _checkUser)
 const web = slack ? slack.web : null;
 let botUserId; // This is handled internally in slack.js now, but kept if referenced elsewhere (though it shouldn't be)
+
+function setRuntimeConfigValue(key, value) {
+  switch (key) {
+    case 'gongLimit':
+      gongLimit = value;
+      break;
+    case 'voteLimit':
+      voteLimit = value;
+      break;
+    case 'voteImmuneLimit':
+      voteImmuneLimit = value;
+      break;
+    case 'flushVoteLimit':
+      flushVoteLimit = value;
+      break;
+    case 'voteTimeLimitMinutes':
+      voteTimeLimitMinutes = value;
+      break;
+    case 'maxVolume':
+      maxVolume = value;
+      break;
+  }
+}
+
+function getVotingConfigSnapshot() {
+  return {
+    gongLimit,
+    voteLimit,
+    voteImmuneLimit,
+    flushVoteLimit,
+    voteTimeLimitMinutes,
+  };
+}
+
+function syncVotingConfig() {
+  voting.setConfig(getVotingConfigSnapshot());
+}
+
+adminApi = createAdminApi({
+  config,
+  logger,
+  sonos,
+  spotify,
+  soundcraft,
+  slack,
+  slackAppToken,
+  slackBotToken,
+  DiscordSystem,
+  logBuffer,
+  maxLogBufferSize: MAX_LOG_BUFFER_SIZE,
+  setRuntimeConfigValue,
+  syncVotingConfig
+});
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -950,13 +1012,7 @@ try {
     });
 
     // Update voting config
-    voting.setConfig({
-      gongLimit,
-      voteLimit,
-      voteImmuneLimit,
-      flushVoteLimit,
-      voteTimeLimitMinutes,
-    });
+    voting.setConfig(getVotingConfigSnapshot());
 
     // Initialize Command Handlers
     commandHandlers.initialize({
@@ -1178,17 +1234,14 @@ try {
     logger.info('🚀 System startup complete.');
     
     // Start polling for track changes to broadcast to admin UI
-    startStatusPolling();
+    adminApi.startStatusPolling();
     
     // Register shutdown handlers for graceful telemetry tracking
     const gracefulShutdown = async (signal) => {
       logger.info(`${signal} received. Sending shutdown telemetry...`);
       
       // Stop status polling
-      if (statusPollInterval) {
-        clearInterval(statusPollInterval);
-        statusPollInterval = null;
-      }
+      adminApi.stopStatusPolling();
       
       if (telemetry) {
         await telemetry.trackShutdown(require('./package.json').version, releaseVersion);
@@ -1732,7 +1785,12 @@ async function handleHttpRequest(req, res) {
 
   // Handle setup API endpoints
   if (urlPath.startsWith('/api/setup/')) {
-    // Password setup endpoint is public (used during initial setup)
+    if (!hasAuthMethod && !isAuthorizedSetupBootstrapRequest(req, url, { config })) {
+      rejectUnauthorizedSetupBootstrap(res);
+      return;
+    }
+
+    // Password setup endpoint is available during initial setup after bootstrap validation.
     if (urlPath === '/api/setup/password-setup' && req.method === 'POST') {
       if (authHandler) {
         const body = await readRequestBody(req);
@@ -2028,774 +2086,7 @@ if (useHttps && sslOptions && !httpsServer) {
  * Handle admin API requests
  */
 async function handleAdminAPI(req, res, url) {
-  const urlPath = url.pathname;
-  
-  setSameOriginCorsHeaders(req, res);
-  
-  if (req.method === 'OPTIONS') {
-    handleCorsPreflight(req, res);
-    return;
-  }
-
-  if (!isSameOriginRequest(req)) {
-    res.writeHead(403, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: false, error: 'Cross-origin requests are not allowed' }));
-    return;
-  }
-  
-  // Parse request body for POST requests
-  let body = '';
-  if (req.method === 'POST') {
-    body = await readRequestBody(req);
-  }
-  
-  try {
-    // Get system status
-    if (urlPath === '/api/admin/status') {
-      const status = await getAdminStatus();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(status));
-      return;
-    }
-    
-    // Get current track and volume
-    if (urlPath === '/api/admin/now-playing') {
-      const nowPlaying = await getNowPlaying();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(nowPlaying));
-      return;
-    }
-
-    // Playback controls
-    if (urlPath === '/api/admin/play' && req.method === 'POST') {
-      try {
-        await sonos.play();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
-      } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: err.message }));
-      }
-      return;
-    }
-
-    if (urlPath === '/api/admin/pause' && req.method === 'POST') {
-      try {
-        await sonos.pause();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
-      } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: err.message }));
-      }
-      return;
-    }
-
-    if (urlPath === '/api/admin/stop' && req.method === 'POST') {
-      try {
-        await sonos.stop();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
-      } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: err.message }));
-      }
-      return;
-    }
-    
-    // Get config values
-    if (urlPath === '/api/admin/config') {
-      const configData = getConfigForAdmin();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(configData));
-      return;
-    }
-
-    // Get config values for specific keys (used by WebAuthn settings)
-    if (urlPath === '/api/admin/config-values' && req.method === 'GET') {
-      try {
-        // Get WebAuthn settings directly from config
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ 
-          exists: true, 
-          values: {
-            webauthnRequireUserVerification: config.get('webauthnRequireUserVerification') === true,
-            webauthnPreferPlatformOnly: config.get('webauthnPreferPlatformOnly') === true,
-            webauthnTimeout: parseInt(config.get('webauthnTimeout') || '60', 10),
-            webauthnResidentKey: config.get('webauthnResidentKey') || 'discouraged',
-            webauthnChallengeExpiration: parseInt(config.get('webauthnChallengeExpiration') || '60', 10),
-            webauthnMaxCredentials: parseInt(config.get('webauthnMaxCredentials') || '0', 10)
-          }
-        }));
-      } catch (err) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ exists: false, values: null }));
-      }
-      return;
-    }
-    
-    // Update config value
-    if (urlPath === '/api/admin/config/update') {
-      try {
-      const data = JSON.parse(body);
-      const result = await updateConfigValue(data.key, data.value);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(result));
-      } catch (err) {
-        logger.error('Error updating config:', err);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: err.message || 'Failed to update config' }));
-      }
-      return;
-    }
-    
-    // Get status/now playing updates (SSE stream for real-time updates)
-    if (urlPath === '/api/admin/events') {
-      handleStatusStream(req, res);
-      return;
-    }
-
-    // Get logs (SSE stream for real-time logs)
-    if (urlPath === '/api/admin/logs') {
-      handleLogStream(req, res);
-      return;
-    }
-
-    // Client-side WebAuthn log relay
-    if (urlPath === '/api/admin/webauthn-log' && req.method === 'POST') {
-      try {
-        const payload = JSON.parse(body || '{}');
-        const msg = payload.message || 'WebAuthn client log';
-        const meta = payload.meta || {};
-        if (logger && typeof logger.info === 'function') {
-          logger.info(`[WEBAUTHN_CLIENT] ${msg} ${JSON.stringify(meta)}`);
-        } else {
-          console.log('[WEBAUTHN_CLIENT]', msg, meta);
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
-      } catch (err) {
-        if (logger) logger.error('Failed to record WebAuthn client log: ' + err.message);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: err.message }));
-      }
-      return;
-    }
-    
-    // Get log buffer (for initial load)
-    if (urlPath === '/api/admin/logs/buffer') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ logs: logBuffer }));
-      return;
-    }
-    
-    // Unknown endpoint
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Not found' }));
-  } catch (err) {
-    res.writeHead(err.statusCode || 500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: err.message }));
-  }
-}
-
-/**
- * Get admin status for all integrations
- */
-// Cache Spotify status to avoid hitting API too frequently
-let spotifyStatusCache = null;
-let spotifyStatusCacheTime = 0;
-const SPOTIFY_STATUS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
-async function getAdminStatus() {
-  const status = {
-    slack: { configured: false, connected: false },
-    discord: { configured: false, connected: false },
-    spotify: { configured: false, connected: false },
-    sonos: { configured: false, connected: false },
-    soundcraft: { configured: false, connected: false }
-  };
-  
-  // Check Slack
-  if (slackAppToken && slackBotToken) {
-    status.slack.configured = true;
-    try {
-      if (slack && typeof slack.isConnected === 'function') {
-        status.slack.connected = slack.isConnected();
-      } else if (slack && slack.socket) {
-        // Fallback: try to check socket state
-        status.slack.connected = false;
-      }
-      status.slack.details = {
-        adminChannel: config.get('adminChannel') || 'N/A',
-        standardChannel: config.get('standardChannel') || 'N/A'
-      };
-    } catch (err) {
-      status.slack.error = err.message;
-    }
-  }
-  
-  // Check Discord
-  if (config.get('discordToken')) {
-    status.discord.configured = true;
-    try {
-      const discordClient = DiscordSystem.getDiscordClient();
-      if (discordClient) {
-        status.discord.connected = discordClient.isReady() || false;
-        
-        const channels = config.get('discordChannels') || [];
-        const adminRoles = config.get('discordAdminRoles') || [];
-        const botUserId = discordClient.user?.id || 'Unknown';
-        
-        status.discord.details = {
-          botUserId: botUserId,
-          guilds: discordClient.guilds?.cache?.size || 0,
-          channels: Array.isArray(channels) ? channels.join(', ') : (channels || 'All channels'),
-          adminRoles: Array.isArray(adminRoles) ? adminRoles.join(', ') : (adminRoles || 'None configured')
-        };
-      }
-    } catch (err) {
-      status.discord.error = err.message;
-    }
-  }
-  
-  // Check Spotify (with caching to avoid excessive API calls)
-  const spotifyClientId = config.get('spotifyClientId');
-  const spotifyClientSecret = config.get('spotifyClientSecret');
-  if (spotifyClientId && spotifyClientSecret) {
-    status.spotify.configured = true;
-    
-    // Use cached status if available and fresh (< 5 minutes old)
-    const now = Date.now();
-    if (spotifyStatusCache && (now - spotifyStatusCacheTime) < SPOTIFY_STATUS_CACHE_TTL) {
-      status.spotify = { ...spotifyStatusCache };
-    } else {
-      // Cache expired or not available, check Spotify API
-      try {
-        await spotify.searchTrackList('test', 1);
-        status.spotify.connected = true;
-        status.spotify.details = {
-          market: config.get('market') || 'N/A',
-          clientId: spotifyClientId ? spotifyClientId.slice(0,6) + '…' : 'N/A'
-        };
-        // Update cache
-        spotifyStatusCache = { ...status.spotify };
-        spotifyStatusCacheTime = now;
-      } catch (err) {
-        status.spotify.connected = false;
-        status.spotify.error = err.message;
-        // Cache error state too
-        spotifyStatusCache = { ...status.spotify };
-        spotifyStatusCacheTime = now;
-      }
-    }
-  }
-  
-  // Check Sonos
-  const sonosIp = config.get('sonos');
-  if (sonosIp && sonosIp !== 'IP_TO_SONOS') {
-    status.sonos.configured = true;
-    try {
-      const deviceInfo = await sonos.deviceDescription();
-      status.sonos.connected = true;
-      status.sonos.deviceInfo = {
-        model: deviceInfo.modelDescription || 'Unknown',
-        room: deviceInfo.roomName || 'Unknown',
-        ip: sonosIp
-      };
-      status.sonos.details = {
-        softwareVersion: deviceInfo.softwareVersion || 'Unknown',
-        hardwareVersion: deviceInfo.hardwareVersion || 'Unknown'
-      };
-    } catch (err) {
-      status.sonos.connected = false;
-      status.sonos.error = err.message;
-    }
-  }
-  
-  // Check Soundcraft
-  if (config.get('soundcraftEnabled')) {
-    status.soundcraft.configured = true;
-    try {
-      if (soundcraft && soundcraft.isEnabled()) {
-        status.soundcraft.connected = true;
-        status.soundcraft.channels = soundcraft.getChannelNames();
-        status.soundcraft.details = {
-          ip: config.get('soundcraftIp') || 'N/A',
-          channels: soundcraft.getChannelNames()
-        };
-      } else {
-        status.soundcraft.connected = false;
-      }
-    } catch (err) {
-      status.soundcraft.connected = false;
-      status.soundcraft.error = err.message;
-    }
-  }
-  
-  return status;
-}
-
-/**
- * Get current playing track and volume
- * @param {Object} options - Options for fetching now playing info
- * @param {boolean} options.skipQueue - If true, skip fetching the queue (faster, but no nextTracks)
- */
-async function getNowPlaying(options = {}) {
-  try {
-    const { skipQueue = false } = options;
-    
-    // Parallelize all Sonos API calls for better performance
-    const promises = [
-      sonos.getCurrentState(),
-      sonos.getVolume()
-    ];
-    
-    // Only fetch queue if explicitly needed (skip for status polling to avoid choppy playback)
-    if (!skipQueue) {
-      promises.push(
-      sonos.getQueue().catch(err => {
-        // Ignore queue errors for now-playing
-        return null;
-      })
-      );
-    } else {
-      promises.push(Promise.resolve(null));
-    }
-
-    const [state, volume, queue] = await Promise.all(promises);
-
-    // Fetch queue (next tracks) - only if we have queue data
-    let nextTracks = [];
-    if (queue && queue.items) {
-      nextTracks = queue.items.slice(0, 5).map(item => ({
-        title: item.title || 'Unknown',
-        artist: item.artist || item.creator || 'Unknown'
-      }));
-    }
-
-    // Fetch current track in parallel if playing
-    let track = null;
-    if (state === 'playing') {
-      track = await sonos.currentTrack().catch(err => {
-        // Return null if track fetch fails
-        return null;
-      });
-    }
-    
-    return {
-      state: state,
-      volume: volume,
-      maxVolume: config.get('maxVolume') || 75,
-      nextTracks,
-      track: track ? {
-        title: track.title || 'Unknown',
-        artist: track.artist || 'Unknown',
-        album: track.album || 'Unknown',
-        position: track.position || 0,
-        duration: track.duration || 0
-      } : null
-    };
-  } catch (err) {
-    return {
-      error: err.message,
-      state: 'unknown',
-      volume: null,
-      track: null
-    };
-  }
-}
-
-/**
- * Get config values for admin (safe values only)
- */
-function getConfigForAdmin() {
-  // Helper to mask sensitive values - return masked value if exists, empty string if not
-  const maskSensitive = (value) => {
-    if (!value) return '';
-    // Return masked value (first 3 chars + ... + last 3 chars) for display
-    if (typeof value === 'string' && value.length > 6) {
-      return value.slice(0, 3) + '…' + value.slice(-3);
-    }
-    return '••••••';
-  };
-  
-  const openaiApiKey = config.get('openaiApiKey');
-  const telemetryInstanceId = config.get('telemetryInstanceId');
-  const adminPasswordHash = config.get('adminPasswordHash');
-  const discordToken = config.get('discordToken');
-  
-  return {
-    // Discord Settings
-    discordToken: discordToken ? maskSensitive(discordToken) : '',
-    discordChannels: config.get('discordChannels') || [],
-    discordAdminRoles: config.get('discordAdminRoles') || [],
-    
-    // Slack Settings
-    adminChannel: config.get('adminChannel') || 'music-admin',
-    standardChannel: config.get('standardChannel') || 'music',
-    
-    // General Settings
-    maxVolume: config.get('maxVolume') || 75,
-    market: config.get('market') || 'US',
-    gongLimit: config.get('gongLimit') || 3,
-    voteLimit: config.get('voteLimit') || 6,
-    voteImmuneLimit: config.get('voteImmuneLimit') || 6,
-    flushVoteLimit: config.get('flushVoteLimit') || 6,
-    voteTimeLimitMinutes: config.get('voteTimeLimitMinutes') || 2,
-    ttsEnabled: config.get('ttsEnabled') !== false,
-    logLevel: config.get('logLevel') || 'info',
-    ipAddress: config.get('ipAddress') || '',
-    webPort: config.get('webPort') || 8181,
-    httpsPort: config.get('httpsPort') || 8443,
-    sonos: config.get('sonos') || '',
-    defaultTheme: config.get('defaultTheme') || '',
-    themePercentage: config.get('themePercentage') || 0,
-    openaiApiKey: openaiApiKey ? maskSensitive(openaiApiKey) : '',
-    aiModel: config.get('aiModel') || 'gpt-4o',
-    soundcraftEnabled: config.get('soundcraftEnabled') || false,
-    soundcraftIp: config.get('soundcraftIp') || '',
-    soundcraftChannels: config.get('soundcraftChannels') || [],
-    crossfadeEnabled: config.get('crossfadeEnabled') === true,
-    slackAlwaysThread: config.get('slackAlwaysThread') === true, // Default: false
-    webauthnRequireUserVerification: config.get('webauthnRequireUserVerification') === true, // Default: false for maximum compatibility
-    webauthnPreferPlatformOnly: config.get('webauthnPreferPlatformOnly') === true, // Default: false to allow both platform and cross-platform
-    webauthnTimeout: parseInt(config.get('webauthnTimeout') || '60', 10), // Default: 60 seconds
-    webauthnResidentKey: config.get('webauthnResidentKey') || 'discouraged', // Default: 'discouraged'
-    webauthnChallengeExpiration: parseInt(config.get('webauthnChallengeExpiration') || '60', 10), // Default: 60 seconds
-    webauthnMaxCredentials: parseInt(config.get('webauthnMaxCredentials') || '0', 10), // Default: 0 (unlimited)
-    // Don't expose sensitive values
-    telemetryInstanceId: telemetryInstanceId ? maskSensitive(telemetryInstanceId) : '',
-    adminPasswordHash: adminPasswordHash ? '[REDACTED]' : ''
-  };
-}
-
-/**
- * Broadcast new logs to all connected SSE clients
- */
-function broadcastLog(logEntry) {
-  // Add to buffer
-  logBuffer.push(logEntry);
-  
-  // Keep buffer size limited
-  if (logBuffer.length > MAX_LOG_BUFFER_SIZE) {
-    logBuffer.shift(); // Remove oldest entry
-  }
-  
-  // Broadcast to all connected SSE clients
-  if (global.logStreamClients && global.logStreamClients.size > 0) {
-    const message = `data: ${JSON.stringify({ type: 'log', ...logEntry })}\n\n`;
-    global.logStreamClients.forEach(client => {
-      try {
-        client.write(message);
-      } catch (err) {
-        // Client disconnected, remove it
-        global.logStreamClients.delete(client);
-      }
-    });
-  }
-}
-
-/**
- * Broadcast status/now playing updates to all connected SSE clients
- */
-function broadcastStatusUpdate(type, data) {
-  if (global.statusStreamClients && global.statusStreamClients.size > 0) {
-    const message = `data: ${JSON.stringify({ type, ...data })}\n\n`;
-    global.statusStreamClients.forEach(client => {
-      try {
-        client.write(message);
-      } catch (err) {
-        // Client disconnected, remove it
-        global.statusStreamClients.delete(client);
-      }
-    });
-  }
-}
-
-/**
- * Start polling for track changes and status updates
- */
-function startStatusPolling() {
-  if (statusPollInterval) {
-    clearInterval(statusPollInterval);
-  }
-  
-  // Check if Sonos is configured before starting polling
-  const sonosIp = config.get('sonos');
-  if (!sonosIp || sonosIp === 'IP_TO_SONOS') {
-    logger.debug('Status polling not started - Sonos not configured');
-    return;
-  }
-  
-  // Poll every 2 seconds for track changes
-  statusPollInterval = setInterval(async () => {
-    try {
-      // Skip queue fetch for status polling - we only need current track info
-      // This prevents choppy playback with large queues (400+ tracks)
-      // The queue is only needed for admin UI "next tracks", not for detecting track changes
-      const nowPlaying = await getNowPlaying({ skipQueue: true });
-      const currentTrackId = nowPlaying.track 
-        ? `${nowPlaying.track.title}|${nowPlaying.track.artist}|${nowPlaying.track.queuePosition || 0}`
-        : null;
-      
-      // Check if track changed
-      if (currentTrackId !== lastTrackInfo) {
-        lastTrackInfo = currentTrackId;
-        broadcastStatusUpdate('nowPlaying', { data: nowPlaying });
-      }
-      
-      // Also check for status changes (every 30 seconds)
-      if (!global.lastStatusCheck || Date.now() - global.lastStatusCheck > 30000) {
-        global.lastStatusCheck = Date.now();
-        const status = await getAdminStatus();
-        broadcastStatusUpdate('status', { data: status });
-      }
-    } catch (err) {
-      // Silently ignore polling errors (Sonos might be disconnected)
-      if (logger && logger.debug) {
-        logger.debug('Status polling error (non-critical):', err.message);
-      }
-    }
-  }, 2000); // Poll every 2 seconds
-  
-  // Don't prevent Node.js shutdown
-  if (statusPollInterval && statusPollInterval.unref) {
-    statusPollInterval.unref();
-  }
-}
-
-/**
- * Handle Server-Sent Events stream for real-time status/now playing updates
- */
-function handleStatusStream(req, res) {
-  // Set headers for SSE
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*'
-  });
-  
-  // Send initial connection message
-  res.write('data: {"type":"connected"}\n\n');
-  
-  // Send initial status and now playing data
-  (async () => {
-    try {
-      const status = await getAdminStatus();
-      res.write(`data: ${JSON.stringify({ type: 'status', data: status })}\n\n`);
-      
-      const nowPlaying = await getNowPlaying();
-      res.write(`data: ${JSON.stringify({ type: 'nowPlaying', data: nowPlaying })}\n\n`);
-    } catch (err) {
-      logger.error('Error sending initial status data:', err);
-    }
-  })();
-  
-  // Store reference to this client
-  if (!global.statusStreamClients) {
-    global.statusStreamClients = new Set();
-  }
-  global.statusStreamClients.add(res);
-  
-  // Keep connection alive with heartbeat
-  const heartbeatInterval = setInterval(() => {
-    try {
-      res.write(': heartbeat\n\n');
-    } catch (err) {
-      // Client disconnected
-      clearInterval(heartbeatInterval);
-      if (global.statusStreamClients) global.statusStreamClients.delete(res);
-    }
-  }, 30000); // Every 30 seconds
-  
-  // Clean up on client disconnect
-  req.on('close', () => {
-    clearInterval(heartbeatInterval);
-    if (global.statusStreamClients) global.statusStreamClients.delete(res);
-  });
-}
-
-/**
- * Handle Server-Sent Events stream for real-time logs
- */
-function handleLogStream(req, res) {
-  // Set headers for SSE
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*'
-  });
-  
-  // Send initial connection message
-  res.write('data: {"type":"connected"}\n\n');
-  
-  // Send existing logs from buffer
-  logBuffer.forEach(log => {
-    res.write(`data: ${JSON.stringify({ type: 'log', ...log })}\n\n`);
-  });
-  
-  // Store reference to this client
-  if (!global.logStreamClients) {
-    global.logStreamClients = new Set();
-  }
-  global.logStreamClients.add(res);
-  
-  // Keep connection alive with heartbeat
-  const heartbeatInterval = setInterval(() => {
-    try {
-      res.write(': heartbeat\n\n');
-    } catch (err) {
-      // Client disconnected
-      clearInterval(heartbeatInterval);
-      if (global.logStreamClients) global.logStreamClients.delete(res);
-    }
-  }, 30000); // Every 30 seconds
-  
-  // Clean up on client disconnect
-  req.on('close', () => {
-    clearInterval(heartbeatInterval);
-    if (global.logStreamClients) global.logStreamClients.delete(res);
-  });
-}
-
-/**
- * Update a config value
- */
-async function updateConfigValue(key, value) {
-  try {
-    // Validate key is allowed to be updated
-    const allowedKeys = [
-      'adminChannel', 'standardChannel', 'maxVolume', 'market',
-      'gongLimit', 'voteLimit', 'voteImmuneLimit', 'flushVoteLimit',
-      'voteTimeLimitMinutes', 'ttsEnabled', 'logLevel', 'ipAddress',
-      'webPort', 'httpsPort', 'sonos', 'defaultTheme', 'themePercentage',
-      'openaiApiKey', 'aiModel', 'soundcraftEnabled', 'soundcraftIp', 'soundcraftChannels', 'crossfadeEnabled',
-      'webauthnEnabled', 'webauthnRpName', 'webauthnRpId', 'webauthnOrigin', 'webauthnRequireUserVerification', 'webauthnPreferPlatformOnly',
-      'webauthnTimeout', 'webauthnResidentKey', 'webauthnChallengeExpiration', 'webauthnMaxCredentials'
-    ];
-    
-    if (!allowedKeys.includes(key)) {
-      return { success: false, error: 'Key not allowed to be updated via admin' };
-    }
-    
-    // Special handling for logLevel - update logger immediately
-    if (key === 'logLevel') {
-      const validLevels = ['error', 'warn', 'info', 'debug'];
-      if (!validLevels.includes(value)) {
-        return { success: false, error: `Invalid log level. Must be one of: ${validLevels.join(', ')}` };
-      }
-      // Update logger level immediately
-      if (logger && typeof logger.setLevel === 'function') {
-        logger.setLevel(value);
-        // Use warn instead of info to ensure it's always shown regardless of level
-        logger.warn(`Log level changed to: ${value}`);
-      }
-    }
-
-    // Apply some config changes to runtime immediately (so restart isn't required)
-    // NOTE: values from the web UI may arrive as strings
-    const numericKeys = new Set([
-      'gongLimit',
-      'voteLimit',
-      'voteImmuneLimit',
-      'flushVoteLimit',
-      'voteTimeLimitMinutes',
-      'maxVolume',
-      'webPort',
-      'httpsPort',
-      'themePercentage',
-      'webauthnTimeout',
-      'webauthnChallengeExpiration',
-      'webauthnMaxCredentials'
-    ]);
-
-    let coercedValue = value;
-    if (numericKeys.has(key)) {
-      const numValue = Number(value);
-      if (Number.isNaN(numValue)) {
-        return { success: false, error: `Invalid value for "${key}". Must be a number.` };
-      }
-      coercedValue = numValue;
-    }
-
-    const booleanKeys = new Set([
-      'ttsEnabled',
-      'telemetryEnabled',
-      'soundcraftEnabled',
-      'webauthnEnabled',
-      'webauthnRequireUserVerification',
-      'webauthnPreferPlatformOnly',
-      'crossfadeEnabled',
-      'useHttps',
-      'sslAutoGenerate'
-    ]);
-
-    if (booleanKeys.has(key)) {
-      if (typeof value === 'string') {
-        const v = value.trim().toLowerCase();
-        coercedValue = (v === 'true' || v === '1' || v === 'yes' || v === 'on');
-      } else {
-        coercedValue = Boolean(value);
-      }
-    }
-
-    // Update runtime variables for common settings
-    if (numericKeys.has(key)) {
-      switch (key) {
-        case 'gongLimit':
-          gongLimit = coercedValue;
-          break;
-        case 'voteLimit':
-          voteLimit = coercedValue;
-          break;
-        case 'voteImmuneLimit':
-          voteImmuneLimit = coercedValue;
-          break;
-        case 'flushVoteLimit':
-          flushVoteLimit = coercedValue;
-          break;
-        case 'voteTimeLimitMinutes':
-          voteTimeLimitMinutes = coercedValue;
-          break;
-        case 'maxVolume':
-          maxVolume = coercedValue;
-          break;
-      }
-
-      // Sync voting module config when any vote-related limits change
-      if (['gongLimit', 'voteLimit', 'voteImmuneLimit', 'flushVoteLimit', 'voteTimeLimitMinutes'].includes(key)) {
-        try {
-          voting.setConfig({
-            gongLimit,
-            voteLimit,
-            voteImmuneLimit,
-            flushVoteLimit,
-            voteTimeLimitMinutes,
-          });
-        } catch (e) {
-          logger.warn('Failed to sync voting config after admin update: ' + (e && e.message ? e.message : e));
-        }
-      }
-    }
-    
-    // Update in memory
-    config.set(key, coercedValue);
-    
-    // Save to file
-    config.save((err) => {
-      if (err) {
-        logger.error('Failed to save config:', err);
-      } else {
-        logger.info(`Config updated via admin: ${key} = ${coercedValue}`);
-      }
-    });
-    
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
+  return adminApi.handleAdminAPI(req, res, url);
 }
 
 // Start HTTP server immediately (before platform initialization)
@@ -4141,7 +3432,7 @@ async function _debug(channel, userName) {
       `> HTTP Port: \`${webPort}\`\n` +
       (useHttps ? `> HTTPS Port: \`${httpsPort}\`\n` : '') +
       (webServerListening ?
-        `> Admin Panel: <${adminUrl}|${adminUrl}>\n` +
+        `> Web UI: <${adminUrl}|${adminUrl}>\n` +
         `> Setup Wizard: <${setupUrl}|${setupUrl}>\n`
         : '') +
       `> TTS Enabled: \`${ttsEnabled ? 'true' : 'false'}\`\n` +

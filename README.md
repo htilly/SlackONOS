@@ -110,7 +110,7 @@ Use the `telemetry` admin command in Slack (admin channel) to view current statu
 **The easiest way to set up SlackONOS!**
 
 1. Start SlackONOS: `npm install && node index.js`
-2. Open your browser: `http://localhost:8181/setup` (or `http://YOUR_SERVER_IP:8181/setup`)
+2. Open your browser: `http://localhost:8080/setup` (or `http://YOUR_SERVER_IP:8080/setup`)
 3. Follow the interactive wizard to configure:
    - **Platform Selection** - Choose Slack, Discord, or both
    - **Slack Configuration** - Tokens with auto-validation
@@ -145,14 +145,14 @@ services:
     volumes:
       - /PATH_TO_CONFIG_FOLDER:/app/config
     ports:
-      - "8181:8181"  # HTTP (redirectar)
+      - "8080:8080"  # HTTP (redirectar)
       - "8443:8443"  # HTTPS (faktiska förfrågningar)
     # Optional: Use host network for better Sonos discovery
     # network_mode: "host"
 ```
 
 After starting the container, access the setup wizard at:
-- HTTP: `http://localhost:8181/setup` (redirects to HTTPS if SSL is enabled)
+- HTTP: `http://localhost:8080/setup` (redirects to HTTPS if SSL is enabled)
 - HTTPS: `https://localhost:8443/setup` (if SSL certificates are configured)
 
 📖 **[Complete Discord Setup Guide](docs/discord/SETUP.md)** - Step-by-step Discord bot configuration
@@ -513,7 +513,7 @@ The bot queues song requests and plays them in order. If enough people dislike t
 
 **Modern web interface for managing your bot!**
 
-Access the admin panel at `http://localhost:8181/admin` (or `https://YOUR_SERVER:8443/admin` with HTTPS).
+Access the admin panel at `http://localhost:8080/admin` (or `https://YOUR_SERVER:8443/admin` with HTTPS).
 
 **Features:**
 - 📊 **Real-Time Status** - Live monitoring of bot status, Sonos connection, and platform integrations
@@ -657,4 +657,3 @@ Please drop a comment or send a PM if you use this bot! Contributions and improv
 * Admin commands from i.e."swe-music-admin".
 * Vote - If +1 in slack then move in queue. (sort of)
 * Ask "what is playing".
-
