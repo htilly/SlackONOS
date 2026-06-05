@@ -4062,6 +4062,18 @@ async function _debug(channel, userName) {
       })
       .join('\n');
 
+    const webHost = ipAddress || 'localhost';
+    const httpsPort = config.get('httpsPort') || 8443;
+    const webServerListening = Boolean(
+      (httpServer && httpServer.listening) ||
+      (httpsServer && httpsServer.listening)
+    );
+    const adminProtocol = useHttps && httpsServer && httpsServer.listening ? 'https' : 'http';
+    const adminPort = adminProtocol === 'https' ? httpsPort : webPort;
+    const adminUrl = `${adminProtocol}://${webHost}:${adminPort}/admin`;
+    const setupUrl = `${adminProtocol}://${webHost}:${adminPort}/setup`;
+    const ttsUrl = `http://${webHost}:${webPort}/tts.mp3`;
+
     const message =
       `*🛠️ System Debug Report*\n` +
       `------------------------------------------\n` +
@@ -4144,11 +4156,17 @@ async function _debug(channel, userName) {
         );
       })() +
       `\n` +
-      `*📻 TTS HTTP Server:*\n` +
-      `> Enabled: \`${ttsEnabled ? 'true' : 'false'}\`\n` +
-      (ttsEnabled ?
-        `> Port: \`${webPort}\`\n` +
-        `> Endpoint: \`http://${ipAddress}:${webPort}/tts.mp3\`\n`
+      `*🌐 Web Server:*\n` +
+      `> Listening: \`${webServerListening ? 'true' : 'false'}\`\n` +
+      `> HTTP Port: \`${webPort}\`\n` +
+      (useHttps ? `> HTTPS Port: \`${httpsPort}\`\n` : '') +
+      (webServerListening ?
+        `> Admin Panel: <${adminUrl}|${adminUrl}>\n` +
+        `> Setup Wizard: <${setupUrl}|${setupUrl}>\n`
+        : '') +
+      `> TTS Enabled: \`${ttsEnabled ? 'true' : 'false'}\`\n` +
+      (ttsEnabled && webServerListening ?
+        `> TTS Endpoint: \`${ttsUrl}\`\n`
         : '');
 
     _slackMessage(message, channel);
