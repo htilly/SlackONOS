@@ -29,7 +29,7 @@
     "c8": "^11.0.0",
     "chai": "6.2.2",
     "mocha": "^11.7.6",
-    "sinon": "21.0.2"
+    "sinon": "^22.0.0"
   },
   "author": "",
   "license": "ISC",
@@ -49,13 +49,13 @@
     "posthog-node": "^5.36.2",
     "selfsigned": "^5.5.0",
     "sonos": "^1.14.2",
-    "soundcraft-ui-connection": "^5.0.0",
+    "soundcraft-ui-connection": "^6.0.3",
     "urlencode": "^2.0.0",
     "winston": "^3.18.3",
     "xml2js": "^0.6.2"
   },
   "engines": {
-    "node": ">=17.0.0"
+    "node": ">=22.0.0"
   },
   "overrides": {
     "axios": "^1.17.0",
