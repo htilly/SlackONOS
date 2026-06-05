@@ -50,6 +50,7 @@ input,
 select,
 textarea {
   font: inherit;
+  max-width: 100%;
 }
 
 button {
@@ -964,6 +965,18 @@ small,
   background: var(--surface);
 }
 
+.credential-item > div {
+  min-width: 0;
+}
+
+.credential-item strong {
+  overflow-wrap: anywhere;
+}
+
+.credential-item .btn {
+  flex: 0 0 auto;
+}
+
 .config-item {
   display: grid !important;
   grid-template-columns: minmax(150px, 220px) minmax(180px, 1fr) auto !important;
@@ -1006,10 +1019,42 @@ small,
   gap: 16px;
 }
 
+.webauthn-row > *,
+.webauthn-grid > * {
+  min-width: 0;
+}
+
+.webauthn-row label {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.webauthn-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+}
+
 .webauthn-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.webauthn-grid input,
+.webauthn-grid select {
+  width: 100%;
+  min-width: 0;
+}
+
+.webauthn-panel h3,
+.webauthn-row strong,
+.webauthn-grid label {
+  overflow-wrap: anywhere;
 }
 
 .logs-controls {
@@ -1207,6 +1252,15 @@ small,
   .admin-secondary {
     grid-template-columns: 1fr;
   }
+
+  .webauthn-grid,
+  .webauthn-row {
+    grid-template-columns: 1fr;
+  }
+
+  .webauthn-row label {
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 768px) {
@@ -1367,6 +1421,15 @@ small,
 
   .webauthn-row {
     grid-template-columns: 1fr;
+  }
+
+  .credential-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .credential-item .btn {
+    width: 100%;
   }
 
   .logs-filter {
