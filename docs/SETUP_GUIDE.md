@@ -34,15 +34,15 @@ node index.js
 You should see:
 ```
 [info] Starting SlackONOS...
-[info] 📻 HTTP server listening on port 8181
-[info]    Setup wizard: http://YOUR_IP:8181/setup
+[info] 📻 HTTP server listening on port 8080
+[info]    Setup wizard: http://YOUR_IP:8080/setup
 ```
 
 ### 2. Access Setup Wizard
 
 Open your browser and navigate to:
-- **Local setup:** `http://localhost:8181/setup`
-- **Remote server:** `http://YOUR_SERVER_IP:8181/setup`
+- **Local setup:** `http://localhost:8080/setup`
+- **Remote server:** `http://YOUR_SERVER_IP:8080/setup`
 
 The setup wizard will automatically detect if configuration is needed and guide you through the process.
 
@@ -234,7 +234,7 @@ Test that everything works:
 To update your configuration later:
 
 1. Start SlackONOS
-2. Open setup wizard: `http://localhost:8181/setup`
+2. Open setup wizard: `http://localhost:8080/setup`
 3. Make changes
 4. Save and restart
 
@@ -264,14 +264,14 @@ node index.js
 
 ```bash
 docker run -d \
-  -p 8181:8181 \  # HTTP (redirectar)
+  -p 8080:8080 \  # HTTP (redirectar)
   -p 8443:8443 \  # HTTPS (faktiska förfrågningar)
   -v /path/to/config:/app/config \
   htilly/slackonos:latest
 ```
 
 Then access setup wizard at:
-- HTTP: `http://localhost:8181/setup` (redirects to HTTPS if SSL is enabled)
+- HTTP: `http://localhost:8080/setup` (redirects to HTTPS if SSL is enabled)
 - HTTPS: `https://localhost:8443/setup` (if SSL certificates are configured)
 
 ## Support
@@ -279,4 +279,3 @@ Then access setup wizard at:
 - **Documentation:** See other .md files in repository
 - **Issues:** Open an issue on GitHub
 - **Questions:** Check [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
-

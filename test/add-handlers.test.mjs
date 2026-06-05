@@ -247,6 +247,22 @@ describe('Add Handlers', function() {
       expect(messages.some(m => m.message.includes('already in the queue'))).to.be.true;
     });
 
+    it('should detect duplicates before flushing when player reports stopped', async function() {
+      mockSonos.getCurrentState.resolves('stopped');
+      mockSonos.getQueue.resolves({
+        items: [
+          { title: 'Test Track', artist: 'Test Artist', uri: 'spotify:track:abc123' }
+        ],
+        total: 1
+      });
+
+      await addHandlers.add(['add', 'test', 'track'], 'channel1', 'user1');
+
+      expect(messages.some(m => m.message.includes('already in the queue'))).to.be.true;
+      expect(mockSonos.flush.called).to.be.false;
+      expect(mockSonos.queue.called).to.be.false;
+    });
+
     it('should flush queue when player is stopped', async function() {
       mockSonos.getCurrentState.resolves('stopped');
       

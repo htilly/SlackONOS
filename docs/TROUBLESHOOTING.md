@@ -6,14 +6,14 @@ Common issues and solutions for SlackONOS setup and operation.
 
 ### Can't Access Setup Wizard
 
-**Problem:** Browser shows "Connection refused" or can't reach `http://localhost:8181/setup`
+**Problem:** Browser shows "Connection refused" or can't reach `http://localhost:8080/setup`
 
 **Solutions:**
 - Make sure SlackONOS is running (`node index.js`)
-- Check the port in logs - it should show `HTTP server listening on port 8181`
-- If using Docker, ensure port 8181 is exposed: `-p 8181:8181`
-- Try using the server's IP address instead of localhost: `http://YOUR_IP:8181/setup`
-- Check firewall settings - port 8181 must be accessible
+- Check the port in logs - it should show `HTTP server listening on port 8080`
+- If using Docker, ensure port 8080 is exposed: `-p 8080:8080`
+- Try using the server's IP address instead of localhost: `http://YOUR_IP:8080/setup`
+- Check firewall settings - port 8080 must be accessible
 
 ### Setup Wizard Shows "Not Found"
 
@@ -174,12 +174,12 @@ Common issues and solutions for SlackONOS setup and operation.
 
 ### Port Already in Use
 
-**Problem:** "EADDRINUSE: address already in use" on port 8181
+**Problem:** "EADDRINUSE: address already in use" on port 8080
 
 **Solutions:**
 - Change `webPort` in config to different port (e.g., 8182)
-- Or stop other service using port 8181
-- Find what's using port: `lsof -i :8181` (Mac/Linux) or `netstat -ano | findstr :8181` (Windows)
+- Or stop other service using port 8080
+- Find what's using port: `lsof -i :8080` (Mac/Linux) or `netstat -ano | findstr :8080` (Windows)
 
 ## Docker Issues
 
@@ -188,8 +188,8 @@ Common issues and solutions for SlackONOS setup and operation.
 **Problem:** Can't reach setup wizard from host
 
 **Solutions:**
-- Ensure port mappings: `-p 8181:8181` (HTTP) and `-p 8443:8443` (HTTPS)
-- Use host IP instead of localhost: `http://HOST_IP:8181/setup`
+- Ensure port mappings: `-p 8080:8080` (HTTP) and `-p 8443:8443` (HTTPS)
+- Use host IP instead of localhost: `http://HOST_IP:8080/setup`
 - Check Docker network configuration
 - Verify container is running: `docker ps`
 
@@ -214,4 +214,3 @@ Common issues and solutions for SlackONOS setup and operation.
    - Error messages from logs
    - Your configuration (remove sensitive tokens!)
    - Steps to reproduce
-
