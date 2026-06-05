@@ -134,6 +134,15 @@ npm run test:integration
 
 Runs all tests automatically and reports results.
 
+The suite also pings the configured Sonos device in parallel during the run and stores packet loss/latency in `test/timing-log.json`, both overall and per test window. Failed tests print the latest ping samples before the test and the samples that overlapped the test window. The host defaults to `sonosPingHost` in `test/config/test-config.json`, then `sonos` in `config/config.json`. You can override or disable it:
+
+```bash
+SONOS_PING_HOST=192.168.1.50 npm run test:integration
+SONOS_PING_INTERVAL_MS=1000 npm run test:integration
+SONOS_PING=0 npm run test:integration
+SLACK_RESPONSE_GRACE_SECONDS=10 npm run test:integration
+```
+
 ### 2. Interactive Test Helper
 
 ```bash

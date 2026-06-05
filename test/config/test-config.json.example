@@ -3,5 +3,8 @@
   "slackChannel": "CJ51NPNN4",
   "slackAdminChannel": "C01J1TBLCA0",
   "slackONOSBotId": "U123ABC456",
+  "sonosPingHost": "192.168.1.50",
+  "sonosPingIntervalMs": 2000,
+  "slackResponseGraceSeconds": 5,
   "description": "Test configuration for integration tests. slackONOSBotId is the USER ID of the production SlackONOS bot (for @mention tests)."
 }

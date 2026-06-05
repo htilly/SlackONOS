@@ -2,9 +2,10 @@
 # The --platform flag is used here to make sure we use a multi-platform base image
 FROM --platform=$BUILDPLATFORM node:26-slim AS base
 
-# Update and install git (if needed for your application)
-#RUN apk update && \
-#    apk upgrade
+# System deps needed by startup diagnostics and optional dependencies.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
 
 # Clear npm cache to reduce image size and avoid potential issues
 RUN npm cache clean --force

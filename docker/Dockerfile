@@ -5,7 +5,7 @@ FROM --platform=$TARGETPLATFORM node:24-slim AS base
 
 # System deps needed for native builds (e.g., bcrypt) and git optional deps
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3 build-essential && \
+    apt-get install -y --no-install-recommends python3 build-essential git && \
     rm -rf /var/lib/apt/lists/* && \
     npm cache clean --force
 

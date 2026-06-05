@@ -13,6 +13,7 @@
  */
 
 import { WebClient } from '@slack/web-api';
+import { execFile } from 'child_process';
 import { readFileSync, writeFileSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -25,7 +26,9 @@ const sourceCode = readFileSync(__filename, 'utf8');
 
 // Load test config
 const testConfigPath = join(__dirname, '../config/test-config.json');
+const mainConfigPath = join(__dirname, '../../config/config.json');
 let config = {};
+let mainConfig = {};
 
 try {
     config = JSON.parse(readFileSync(testConfigPath, 'utf8'));
@@ -33,6 +36,12 @@ try {
     console.error('❌ Could not load test/config/test-config.json');
     console.error('   Run: cp test/config/test-config.json.example test/config/test-config.json');
     process.exit(1);
+}
+
+try {
+    mainConfig = JSON.parse(readFileSync(mainConfigPath, 'utf8'));
+} catch (error) {
+    mainConfig = {};
 }
 
 const slackToken = process.env.SLACK_BOT_TOKEN || config.slackBotToken;
@@ -48,6 +57,16 @@ const args = process.argv.slice(2);
 let channelId = config.slackChannel || 'C01JS8A0YC9';
 let adminChannelId = config.slackAdminChannel || 'C01J1TBLCA0';
 const slackONOSBotId = config.slackONOSBotId || null;
+const sonosPingHost = process.env.SONOS_PING_HOST || config.sonosPingHost || config.sonos || mainConfig.sonos || null;
+const sonosPingEnabled = process.env.SONOS_PING !== '0' && process.env.SONOS_PING_DISABLED !== '1' && !!sonosPingHost;
+const sonosPingIntervalMs = Math.max(
+    1000,
+    parseInt(process.env.SONOS_PING_INTERVAL_MS || config.sonosPingIntervalMs || '2000', 10) || 2000
+);
+const slackResponseGraceSeconds = Math.max(
+    0,
+    parseInt(process.env.SLACK_RESPONSE_GRACE_SECONDS || config.slackResponseGraceSeconds || '5', 10) || 0
+);
 let verbose = false;
 
 for (let i = 0; i < args.length; i++) {
@@ -57,6 +76,156 @@ for (let i = 0; i < args.length; i++) {
     } else if (args[i] === '--verbose' || args[i] === '-v') {
         verbose = true;
     }
+}
+
+function runPing(host, timeoutMs = 1500) {
+    const startedAt = Date.now();
+
+    return new Promise((resolve) => {
+        execFile('ping', ['-c', '1', '-n', host], { timeout: timeoutMs }, (error, stdout = '', stderr = '') => {
+            const finishedAt = Date.now();
+            const output = `${stdout}\n${stderr}`;
+            const latencyMatch = output.match(/time[=<]([0-9.]+)\s*ms/i);
+            const latencyMs = latencyMatch ? Number.parseFloat(latencyMatch[1]) : null;
+            const timedOut = error && (error.killed || error.signal === 'SIGTERM');
+
+            resolve({
+                timestamp: new Date(startedAt).toISOString(),
+                startedAtMs: startedAt,
+                finishedAtMs: finishedAt,
+                ok: !error && latencyMs !== null,
+                latencyMs,
+                durationMs: finishedAt - startedAt,
+                error: error ? (timedOut ? 'timeout' : error.message) : null
+            });
+        });
+    });
+}
+
+class PingMonitor {
+    constructor(host, intervalMs) {
+        this.host = host;
+        this.intervalMs = intervalMs;
+        this.samples = [];
+        this.timer = null;
+        this.running = false;
+        this.inFlight = false;
+    }
+
+    start() {
+        if (!this.host || this.running) return;
+        this.running = true;
+        this._sample();
+        this.timer = setInterval(() => this._sample(), this.intervalMs);
+    }
+
+    async _sample() {
+        if (!this.running || this.inFlight) return;
+        this.inFlight = true;
+
+        try {
+            const sample = await runPing(this.host);
+            this.samples.push(sample);
+            if (verbose && !sample.ok) {
+                console.log(`\n⚠️  Sonos ping failed (${this.host}): ${sample.error || 'no response'}`);
+            }
+        } finally {
+            this.inFlight = false;
+        }
+    }
+
+    stop() {
+        this.running = false;
+        if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = null;
+        }
+    }
+
+    summary(samples = this.samples) {
+        const total = samples.length;
+        const success = samples.filter(sample => sample.ok);
+        const failed = samples.filter(sample => !sample.ok);
+        const latencies = success
+            .map(sample => sample.latencyMs)
+            .filter(latency => Number.isFinite(latency));
+        const avgLatencyMs = latencies.length
+            ? latencies.reduce((sum, latency) => sum + latency, 0) / latencies.length
+            : null;
+
+        return {
+            host: this.host,
+            intervalMs: this.intervalMs,
+            samples: total,
+            ok: success.length,
+            failed: failed.length,
+            lossPercent: total ? (failed.length / total) * 100 : null,
+            minLatencyMs: latencies.length ? Math.min(...latencies) : null,
+            maxLatencyMs: latencies.length ? Math.max(...latencies) : null,
+            avgLatencyMs,
+            recentFailures: failed.slice(-5)
+        };
+    }
+
+    summaryForRange(startMs, endMs) {
+        if (!startMs || !endMs) {
+            return null;
+        }
+
+        const samples = this.samplesForRange(startMs, endMs);
+
+        return this.summary(samples);
+    }
+
+    samplesForRange(startMs, endMs) {
+        if (!startMs || !endMs) {
+            return [];
+        }
+
+        return this.samples.filter(sample =>
+            sample.startedAtMs <= endMs && sample.finishedAtMs >= startMs
+        );
+    }
+
+    samplesAroundRange(startMs, endMs, beforeCount = 5) {
+        if (!startMs || !endMs) {
+            return { before: [], during: [] };
+        }
+
+        const before = this.samples
+            .filter(sample => sample.finishedAtMs < startMs)
+            .slice(-beforeCount);
+        const during = this.samplesForRange(startMs, endMs);
+
+        return { before, during };
+    }
+}
+
+function formatPingValue(value) {
+    return value === null || value === undefined ? 'n/a' : value.toFixed(1);
+}
+
+function formatRelativeSeconds(ms) {
+    const seconds = ms / 1000;
+    const prefix = seconds >= 0 ? '+' : '';
+    return `${prefix}${seconds.toFixed(1)}s`;
+}
+
+function formatPingSample(sample, referenceMs) {
+    const offset = formatRelativeSeconds(sample.startedAtMs - referenceMs);
+    if (sample.ok) {
+        return `${offset} ok ${formatPingValue(sample.latencyMs)}ms (${sample.durationMs}ms)`;
+    }
+
+    return `${offset} ${sample.error || 'failed'} (${sample.durationMs}ms)`;
+}
+
+function formatPingSamples(samples, referenceMs) {
+    if (!samples || samples.length === 0) {
+        return 'none';
+    }
+
+    return samples.map(sample => formatPingSample(sample, referenceMs)).join(', ');
 }
 
 // Get bot user ID
@@ -123,10 +292,12 @@ async function sendAndWaitForResponse(message, waitTime = 3, targetChannel = nul
         const sentMessageTs = parseFloat(result.ts);
 
         // Poll for responses instead of just waiting
-        // Check every 200ms for responses, but wait up to waitTime seconds total
+        // Poll for bot responses. The grace window only matters when the bot is slow.
         let firstResponseTime = null;
         const pollInterval = 1000; // Check every 1s to avoid rate limits
-        const maxWaitTime = waitTime * 1000; // Convert to milliseconds
+        const baseWaitTime = waitTime * 1000;
+        const graceWaitTime = slackResponseGraceSeconds * 1000;
+        const maxWaitTime = baseWaitTime + graceWaitTime;
         const startTime = Date.now();
         let allResponses = [];
         let seenMessageIds = new Set();
@@ -222,13 +393,18 @@ async function sendAndWaitForResponse(message, waitTime = 3, targetChannel = nul
         // Calculate timing
         const totalTime = Date.now() - sendTime;
         const responseTime = firstResponseTime ? firstResponseTime - sendTime : null;
+        const graceUsed = graceWaitTime > 0 && totalTime > baseWaitTime;
 
         return {
             responses: allResponses,
             timing: {
                 totalTime: totalTime,
                 firstResponseTime: responseTime,
-                responseCount: allResponses.length
+                responseCount: allResponses.length,
+                baseWaitTime,
+                graceWaitTime,
+                graceUsed,
+                responseArrivedDuringGrace: responseTime !== null && responseTime > baseWaitTime
             }
         };
     } catch (error) {
@@ -238,7 +414,11 @@ async function sendAndWaitForResponse(message, waitTime = 3, targetChannel = nul
             timing: {
                 totalTime: Date.now() - sendTime,
                 firstResponseTime: null,
-                responseCount: 0
+                responseCount: 0,
+                baseWaitTime: waitTime * 1000,
+                graceWaitTime: slackResponseGraceSeconds * 1000,
+                graceUsed: false,
+                responseArrivedDuringGrace: false
             }
         };
     }
@@ -257,6 +437,8 @@ class TestCase {
         this.error = null;
         this.responses = [];
         this.timing = null; // Will store { totalTime, firstResponseTime, responseCount }
+        this.startedAt = null;
+        this.endedAt = null;
     }
 
     // Helper to describe what the validator expects
@@ -439,6 +621,19 @@ class TestCase {
     }
 
     async run(isRetry = false) {
+        this.startedAt = Date.now();
+        this.endedAt = null;
+        this.passed = false;
+        this.failed = false;
+        this.error = null;
+        this.responses = [];
+        this.timing = null;
+
+        const finish = (result) => {
+            this.endedAt = Date.now();
+            return result;
+        };
+
         if (verbose) console.log(`\n🧪 Running: ${this.name}${isRetry ? ' (RETRY)' : ''}`);
         if (verbose) console.log(`   Command: "${this.command}"`);
         if (verbose && this.targetChannel) console.log(`   Channel: ${this.targetChannel === adminChannelId ? 'Admin' : 'Standard'}`);
@@ -466,7 +661,7 @@ class TestCase {
             this.failed = true;
             this.error = 'No response from bot';
             if (verbose) console.log(`   ❌ Failed: ${this.error}`);
-            return false;
+            return finish(false);
         }
 
         try {
@@ -474,18 +669,18 @@ class TestCase {
             if (validationResult === true) {
                 this.passed = true;
                 if (verbose) console.log(`   ✅ Validation passed`);
-                return true;
+                return finish(true);
             } else {
                 this.failed = true;
                 this.error = validationResult || 'Validation failed';
                 if (verbose) console.log(`   ❌ Validation failed: ${this.error}`);
-                return false;
+                return finish(false);
             }
         } catch (error) {
             this.failed = true;
             this.error = error.message;
             if (verbose) console.log(`   ❌ Exception: ${this.error}`);
-            return false;
+            return finish(false);
         }
     }
 }
@@ -1684,6 +1879,14 @@ async function runTestSuite() {
     // Get bot user ID
     const testBotId = await getBotUserId();
     console.log(`🤖 TestBot ID: ${testBotId}\n`);
+    console.log(`⏳ Slack response grace: ${slackResponseGraceSeconds.toFixed(1)}s`);
+
+    const pingMonitor = sonosPingEnabled ? new PingMonitor(sonosPingHost, sonosPingIntervalMs) : null;
+    if (pingMonitor) {
+        console.log(`📡 Sonos ping monitor: ${sonosPingHost} every ${(sonosPingIntervalMs / 1000).toFixed(1)}s`);
+    } else {
+        console.log('📡 Sonos ping monitor: disabled (no Sonos host configured)');
+    }
 
     // Assign testSuite so TestCase instances can access it
     testSuite = testSuiteArray;
@@ -1710,9 +1913,21 @@ async function runTestSuite() {
         timestamp: new Date().toISOString(),
         channel: channelId,
         botId: testBotId,
+        sonosPing: {
+            enabled: !!pingMonitor,
+            host: sonosPingHost,
+            intervalMs: pingMonitor ? sonosPingIntervalMs : null,
+            summary: null,
+            samples: []
+        },
+        slackResponseGraceSeconds,
         tests: []
     };
     
+    if (pingMonitor) {
+        pingMonitor.start();
+    }
+
     const startTime = Date.now();
     
     console.log('─'.repeat(60));
@@ -1739,18 +1954,30 @@ async function runTestSuite() {
             retried = true;
         }
 
+        const testPingSummary = pingMonitor ? pingMonitor.summaryForRange(test.startedAt, test.endedAt) : null;
+        const testPingSamples = pingMonitor ? pingMonitor.samplesAroundRange(test.startedAt, test.endedAt) : null;
+
         // Log timing data
-        timingLog.tests.push({
+        const testTimingEntry = {
             name: test.name,
             command: test.command,
             channel: test.targetChannel === adminChannelId ? 'admin' : 'standard',
             passed: finalResult,
             timing: test.timing || { totalTime: null, firstResponseTime: null, responseCount: 0 },
+            startedAt: test.startedAt ? new Date(test.startedAt).toISOString() : null,
+            endedAt: test.endedAt ? new Date(test.endedAt).toISOString() : null,
+            sonosPing: testPingSummary,
             responseCount: test.responses.length,
             error: test.error || null,
             retried: retried,
             retrySucceeded: retried && finalResult
-        });
+        };
+
+        if (!finalResult && testPingSamples) {
+            testTimingEntry.sonosPingSamples = testPingSamples;
+        }
+
+        timingLog.tests.push(testTimingEntry);
 
         if (finalResult) {
             if (retried) {
@@ -1765,6 +1992,18 @@ async function runTestSuite() {
                 console.log(`   Still failed after retry`);
             }
             console.log(`   Error: ${test.error}`);
+            if (testPingSummary && testPingSummary.samples > 0) {
+                console.log(
+                    `   Sonos ping during test: ${testPingSummary.ok}/${testPingSummary.samples} ok, ` +
+                    `${formatPingValue(testPingSummary.lossPercent)}% loss, ` +
+                    `avg ${formatPingValue(testPingSummary.avgLatencyMs)}ms, ` +
+                    `max ${formatPingValue(testPingSummary.maxLatencyMs)}ms`
+                );
+            }
+            if (testPingSamples) {
+                console.log(`   Sonos ping before: ${formatPingSamples(testPingSamples.before, test.startedAt)}`);
+                console.log(`   Sonos ping samples: ${formatPingSamples(testPingSamples.during, test.startedAt)}`);
+            }
             if (verbose) {
                 console.log(`   Expected: ${test.getExpectedDescription()}`);
                 if (test.responses.length > 0) {
@@ -1785,6 +2024,9 @@ async function runTestSuite() {
 
             // ABORT EARLY if pre-flight checks fail - bot needs restart
             if (test.name.startsWith('Pre-flight:')) {
+                if (pingMonitor) {
+                    pingMonitor.stop();
+                }
                 console.log('\n' + '═'.repeat(60));
                 console.log('🛑 PRE-FLIGHT CHECK FAILED - ABORTING TEST SUITE');
                 console.log('');
@@ -1802,6 +2044,13 @@ async function runTestSuite() {
 
         // Delay between tests to avoid rate limits and allow bot to process
         await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+
+    if (pingMonitor) {
+        pingMonitor.stop();
+        const pingSummary = pingMonitor.summary();
+        timingLog.sonosPing.summary = pingSummary;
+        timingLog.sonosPing.samples = pingMonitor.samples;
     }
     
     // Calculate total time as sum of all test timings (excluding delays)
@@ -1832,6 +2081,13 @@ async function runTestSuite() {
         console.log(`   🔄 Retried: ${retriedTests} test(s) (${retrySucceeded} succeeded after retry)`);
     }
     console.log(`   ⏱️  Total Test Time: ${(totalTime / 1000).toFixed(2)}s (wall clock: ${(wallClockTime / 1000).toFixed(2)}s)`);
+    if (timingLog.sonosPing.summary) {
+        const ping = timingLog.sonosPing.summary;
+        console.log(`   📡 Sonos Ping: ${ping.ok}/${ping.samples} ok, ${formatPingValue(ping.lossPercent)}% loss, avg ${formatPingValue(ping.avgLatencyMs)}ms, max ${formatPingValue(ping.maxLatencyMs)}ms`);
+        if (ping.failed > 0) {
+            console.log(`      Recent failures: ${ping.recentFailures.map(f => `${f.timestamp} (${f.error || 'no response'})`).join(', ')}`);
+        }
+    }
     
     // Compare with previous run if available
     if (previousTimingLog && previousTimingLog.tests) {
@@ -1936,6 +2192,16 @@ async function postResultsToAdminChannel(passed, failed, total, totalTime, wallC
             retryInfo = `\n*Retries:* ${retriedTests} test(s) retried (${retrySucceeded} succeeded)`;
         }
 
+        let pingInfo = '';
+        if (timingLog.sonosPing?.summary) {
+            const ping = timingLog.sonosPing.summary;
+            pingInfo =
+                `\n*Sonos Ping:* ${ping.ok}/${ping.samples} ok, ` +
+                `${formatPingValue(ping.lossPercent)}% loss, ` +
+                `avg ${formatPingValue(ping.avgLatencyMs)}ms, ` +
+                `max ${formatPingValue(ping.maxLatencyMs)}ms`;
+        }
+
         // Build failed tests list if any
         let failedTestsList = '';
         if (failed > 0 && timingLog && timingLog.tests) {
@@ -1979,6 +2245,7 @@ async function postResultsToAdminChannel(passed, failed, total, totalTime, wallC
             `*Success Rate:* ${successRate}%\n` +
             `*Duration:* ${(totalTime / 1000).toFixed(2)}s (wall clock: ${(wallClockTime / 1000).toFixed(2)}s)` +
             retryInfo +
+            pingInfo +
             timeComparison +
             failedTestsList;
         

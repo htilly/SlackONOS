@@ -15,7 +15,10 @@ This directory contains configuration for integration tests.
      "slackBotToken": "xoxb-YOUR-TEST-BOT-TOKEN",
      "slackChannel": "C01JS8A0YC9",
      "slackAdminChannel": "C01J1TBLCA0",
-     "slackONOSBotId": "U123ABC456"
+     "slackONOSBotId": "U123ABC456",
+     "sonosPingHost": "192.168.1.50",
+     "sonosPingIntervalMs": 2000,
+     "slackResponseGraceSeconds": 5
    }
    ```
 
@@ -24,6 +27,9 @@ This directory contains configuration for integration tests.
 - `slackChannel` - Channel ID for regular tests (e.g., #music)
 - `slackAdminChannel` - Channel ID for admin command tests (e.g., #music-admin)
 - `slackONOSBotId` - **Production SlackONOS bot** user ID (U...) - needed for @mention tests
+- `sonosPingHost` - Optional Sonos IP/host to ping during the integration suite (defaults to `config/config.json` `sonos`)
+- `sonosPingIntervalMs` - Optional ping interval in milliseconds (default: `2000`)
+- `slackResponseGraceSeconds` - Extra seconds to wait for slow bot responses before failing a test (default: `5`)
 
 ## Using a Separate Test Bot
 
@@ -69,6 +75,15 @@ SLACK_BOT_TOKEN=xoxb-test-bot-token node test/tools/integration-test-helper.mjs 
 
 Priority: ENV var > test-config.json > main config.json
 
+For the full integration suite, Sonos ping monitoring is enabled automatically when a Sonos host is configured. Failed tests print the latest ping samples before the test and the samples that overlapped the test window. Override it with:
+
+```bash
+SONOS_PING_HOST=192.168.1.50 npm run test:integration
+SONOS_PING_INTERVAL_MS=1000 npm run test:integration
+SONOS_PING=0 npm run test:integration
+SLACK_RESPONSE_GRACE_SECONDS=10 npm run test:integration
+```
+
 ## Configuration Fields
 
 | Field | Description | Example |
@@ -76,6 +91,9 @@ Priority: ENV var > test-config.json > main config.json
 | `slackBotToken` | Bot User OAuth Token for test bot | `xoxb-123...` |
 | `slackChannel` | Default channel ID for tests | `CJ51NPNN4` |
 | `slackAdminChannel` | Admin channel ID for admin command tests | `C01J1TBLCA0` |
+| `sonosPingHost` | Optional Sonos IP/host to monitor during E2E runs | `192.168.1.50` |
+| `sonosPingIntervalMs` | Optional ping interval for Sonos monitoring | `2000` |
+| `slackResponseGraceSeconds` | Extra response wait before a test is considered failed | `5` |
 
 ## Security
 

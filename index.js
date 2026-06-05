@@ -72,10 +72,11 @@ const getReleaseVersion = () => {
   
   // 2. Git commit SHA (for native/local development)
   try {
-    const sha = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+    const gitExecOptions = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] };
+    const sha = execSync('git rev-parse --short HEAD', gitExecOptions).trim();
     // Try to get tag from git if available
     try {
-      const tag = execSync('git describe --tags --exact-match HEAD 2>/dev/null', { encoding: 'utf8' }).trim();
+      const tag = execSync('git describe --tags --exact-match HEAD', gitExecOptions).trim();
       if (tag) {
         return tag; // Return exact tag if on tagged commit
       }
