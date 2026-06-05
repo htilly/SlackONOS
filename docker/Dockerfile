@@ -1,5 +1,5 @@
 # Use the official Node.js image based on Debian Slim.
-# Node 22 is the newest LTS line that still publishes linux/arm/v7 images.
+# Keep Node 22 while release builds include linux/arm/v7; node:26-slim does not publish arm/v7.
 FROM node:22-slim AS base
 
 # System deps needed for native builds (e.g., bcrypt) and git optional deps

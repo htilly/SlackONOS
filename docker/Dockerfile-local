@@ -1,5 +1,5 @@
-# Use the official Node.js image based on Alpine Linux
-# The --platform flag is used here to make sure we use a multi-platform base image
+# Use the same Node major as the release image; node:26-slim does not publish linux/arm/v7.
+# The --platform flag is used here to make sure we use a multi-platform base image.
 FROM --platform=$BUILDPLATFORM node:22-slim AS base
 
 # System deps needed by startup diagnostics and optional dependencies.
