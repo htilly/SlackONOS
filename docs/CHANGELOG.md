@@ -5,6 +5,24 @@ All notable changes to SlackONOS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.3] - 2026-06-05
+
+### Added
+- **Personal AI music context** - The bot now keeps per-user music and interaction history so suggestions can reflect what each person has asked for, searched for, and queued.
+- **AI mood mirror setting** - Added `aiMoodMirrorEnabled` so admins can let the bot reflect each user's interaction style in replies.
+- **AI admin commands** - Admin channels can now route AI-understood settings commands such as enabling mood mirror, setting crossfade, and changing volume.
+- **AI timing logs** - Added millisecond log timestamps plus `[AI_TIMING]` and `[TIMING]` breakdowns for OpenAI parsing, music search, queueing, Slack send, and full route handling.
+
+### Changed
+- **DJ reply style** - AI-backed replies now use a playful DJ persona by default, with personalized queue rationale instead of generic `Why:` text.
+- **Batch add confirmations** - Add responses now list the actual tracks that were queued and explain how the request was interpreted.
+- **OpenAI command parsing** - Natural language requests now use stricter structured parsing with scoped context and target typing for better command intent handling.
+
+### Fixed
+- **Artist matching** - Artist requests now lock to the requested artist when Spotify returns weak matches, fixing cases like U2 requests adding unrelated tracks.
+- **Duplicate add summaries** - Batch add requests no longer send a second AI summary after the main add confirmation.
+- **AI summary permissions** - Unauthorized admin-like requests no longer receive normal AI command summaries.
+
 
 ## [2.1.0] - 2025-01-27
 
