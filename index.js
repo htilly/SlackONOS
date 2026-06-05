@@ -276,14 +276,14 @@ class MemoryLogTransport extends winston.transports.Console {
 const logger = new WinstonWrapper({
   level: logLevel,
   format: winston.format.combine(
-    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // Add timestamp
+    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss.SSS' }), // Add timestamp
     winston.format.json()
   ),
   transports: [
     new MemoryLogTransport({
       format: winston.format.combine(
         winston.format.colorize(),
-        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // Add timestamp to console logs
+        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss.SSS' }), // Add timestamp to console logs
         winston.format.printf(({ timestamp, level, message }) => {
           return `[${timestamp}] ${level}: ${message}`;
         })
@@ -291,6 +291,10 @@ const logger = new WinstonWrapper({
     }),
   ],
 });
+
+function elapsedMs(start) {
+  return Math.round(Number(process.hrtime.bigint() - start) / 1000000);
+}
 
 // Helper function to check if a log level should be broadcast based on current logger level
 function shouldBroadcastLog(level) {
@@ -557,7 +561,9 @@ async function _slackMessage(message, channel_id, options = {}) {
   // If current context is Discord: never try Slack first.
   if (platform === 'discord') {
     try {
+      const sendStart = process.hrtime.bigint();
       await DiscordSystem.sendDiscordMessage(targetChannel, message, options);
+      logger.info(`[TIMING] discord_send channel=${targetChannel} chars=${String(message || '').length} ms=${elapsedMs(sendStart)}`);
       return;
     } catch (e) {
       logger.warn(`Discord send failed: ${e.message || e}. Message not delivered.`);
@@ -580,7 +586,9 @@ async function _slackMessage(message, channel_id, options = {}) {
         }
       }
       
+      const sendStart = process.hrtime.bigint();
       await slack.sendMessage(message, targetChannel, options);
+      logger.info(`[TIMING] slack_send channel=${targetChannel} chars=${String(message || '').length} ms=${elapsedMs(sendStart)}`);
     } else {
       logger.warn('Slack not initialized - cannot send message');
     }
@@ -817,7 +825,9 @@ function ensureConfigDefaults() {
     // AI features
     defaultTheme: '',
     themePercentage: 0,
+    aiModel: 'gpt-4o-mini',
     aiPrompt: 'You are a funny, upbeat DJ for a Slack music bot controlling Sonos. Reply with a super short, playful one-liner that confirms what you\'ll do, using casual humor and emojis when appropriate.',
+    aiMoodMirrorEnabled: false,
     // Soundcraft mixer integration
     soundcraftEnabled: false,
     soundcraftIp: '',
@@ -1366,6 +1376,73 @@ async function _appendAIUnparsed(entry) {
   }
 }
 
+async function _getUserMusicProfile(userName) {
+  try {
+    const normalizedUser = String(userName || '').replace(/[<@>]/g, '');
+    if (!normalizedUser) return '';
+
+    const fileContent = await fs.promises.readFile(userActionsFile, 'utf8').catch(() => '{}');
+    const data = JSON.parse(fileContent || '{}');
+    const history = Array.isArray(data[normalizedUser]?._history) ? data[normalizedUser]._history : [];
+    if (history.length === 0) return '';
+
+    const musicActions = new Set(['add', 'append', 'addalbum', 'addplaylist', 'search', 'searchalbum', 'searchplaylist', 'bestof']);
+    const relevant = history
+      .filter(entry => musicActions.has(entry.action) || (entry.action === 'ai_intent' && musicActions.has(entry.type)))
+      .slice(-12);
+
+    if (relevant.length === 0) return '';
+
+    const lines = relevant.map(entry => {
+      const action = entry.action === 'ai_intent' && entry.type ? `asked ${entry.type}` : (entry.action || 'used');
+      const query = entry.query ? `query "${entry.query}"` : '';
+      const resolved = entry.resolvedName
+        ? `resolved "${entry.resolvedName}"${entry.resolvedArtist ? ` by ${entry.resolvedArtist}` : ''}`
+        : '';
+      const count = entry.addedCount ? `added ${entry.addedCount}` : '';
+      return `- ${action}: ${[query, resolved, count].filter(Boolean).join(', ')}`;
+    });
+
+    return lines.join('\n').slice(0, 1200);
+  } catch (err) {
+    logger.debug('Could not read user music profile: ' + err.message);
+    return '';
+  }
+}
+
+async function _getUserInteractionProfile(userName) {
+  try {
+    const normalizedUser = String(userName || '').replace(/[<@>]/g, '');
+    if (!normalizedUser) return '';
+
+    const fileContent = await fs.promises.readFile(userActionsFile, 'utf8').catch(() => '{}');
+    const data = JSON.parse(fileContent || '{}');
+    const history = Array.isArray(data[normalizedUser]?._history) ? data[normalizedUser]._history : [];
+    const toneHistory = history
+      .filter(entry => entry.mood && typeof entry.kindnessScore === 'number')
+      .slice(-20);
+
+    if (toneHistory.length === 0) return '';
+
+    const moodCounts = toneHistory.reduce((acc, entry) => {
+      acc[entry.mood] = (acc[entry.mood] || 0) + 1;
+      return acc;
+    }, {});
+    const dominantMood = Object.entries(moodCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'neutral';
+    const avgScore = toneHistory.reduce((sum, entry) => sum + entry.kindnessScore, 0) / toneHistory.length;
+    const recentMoods = toneHistory.slice(-5).map(entry => entry.mood).join(', ');
+
+    return [
+      `Recent interaction tone: mostly ${dominantMood}`,
+      `Average kindness score: ${avgScore.toFixed(1)} on a -5 to 5 scale`,
+      `Last moods: ${recentMoods}`
+    ].join('\n');
+  } catch (err) {
+    logger.debug('Could not read user interaction profile: ' + err.message);
+    return '';
+  }
+}
+
 const commandRouter = createCommandRouter({
   logger,
   commandRegistry,
@@ -1378,6 +1455,9 @@ const commandRouter = createCommandRouter({
   parseArgs,
   normalizeUser,
   isBlacklisted: (userId) => blacklist.includes(userId),
+  logUserAction: _logUserAction,
+  getUserMusicProfile: _getUserMusicProfile,
+  getUserInteractionProfile: _getUserInteractionProfile,
   setContext: (platform, channel, isAdmin) => {
     currentPlatform = platform;
     currentChannel = channel;
@@ -1628,8 +1708,6 @@ function _upNextDeprecated(channel) {
 }
 
 async function _bestof(input, channel, userName) {
-  _logUserAction(userName, 'bestof');
-
   if (!input || input.length < 2) {
     _slackMessage('🎸 Usage: `bestof <artist name>` - I\'ll queue up their greatest hits! 🎵', channel);
     return;
@@ -1650,6 +1728,7 @@ async function _bestof(input, channel, userName) {
     }
   }
   const artistName = tokens.join(' ');
+  _logUserAction(userName, 'bestof', { query: artistName, type: 'artist' });
   logger.info(`BESTOF request for artist: ${artistName}`);
 
   try {
@@ -1752,9 +1831,40 @@ async function _bestof(input, channel, userName) {
 let userActionQueue = Promise.resolve();
 
 // Function to log user actions to a file
-async function _logUserAction(userName, action) {
+function _sanitizeActionDetails(details) {
+  if (!details || typeof details !== 'object') return null;
+
+  const allowedKeys = [
+    'query',
+    'resolvedName',
+    'resolvedArtist',
+    'type',
+    'source',
+    'requestedCount',
+    'addedCount',
+    'confidence',
+    'mood',
+    'kindnessScore'
+  ];
+  const sanitized = {};
+
+  for (const key of allowedKeys) {
+    if (typeof details[key] === 'undefined' || details[key] === null) continue;
+    if (typeof details[key] === 'string') {
+      sanitized[key] = details[key].replace(/[\r\n`]/g, ' ').slice(0, 160);
+    } else if (typeof details[key] === 'number' && Number.isFinite(details[key])) {
+      sanitized[key] = details[key];
+    }
+  }
+
+  return Object.keys(sanitized).length > 0 ? sanitized : null;
+}
+
+async function _logUserAction(userName, action, details = null) {
   // Normalize userName by stripping angle brackets
-  const normalizedUser = userName.replace(/[<@>]/g, '');
+  const normalizedUser = String(userName || 'unknown').replace(/[<@>]/g, '');
+  const shouldCountStats = !(details && details.countStats === false);
+  const sanitizedDetails = _sanitizeActionDetails(details);
 
   // Queue this write operation to prevent concurrent file access
   userActionQueue = userActionQueue.then(async () => {
@@ -1778,11 +1888,25 @@ async function _logUserAction(userName, action) {
       }
 
       const timestamp = new Date().toISOString();
-      if (!data[normalizedUser][action]) {
-        data[normalizedUser][action] = [];
-      }
+      if (shouldCountStats) {
+        if (!data[normalizedUser][action]) {
+          data[normalizedUser][action] = [];
+        }
 
-      data[normalizedUser][action].push(timestamp);
+        data[normalizedUser][action].push(timestamp);
+      }
+      if (sanitizedDetails) {
+        if (!Array.isArray(data[normalizedUser]._history)) {
+          data[normalizedUser]._history = [];
+        }
+
+        data[normalizedUser]._history.push({
+          timestamp,
+          action,
+          ...sanitizedDetails
+        });
+        data[normalizedUser]._history = data[normalizedUser]._history.slice(-50);
+      }
 
       // Try to write, but don't fail the whole operation if it doesn't work
       try {
@@ -1820,6 +1944,7 @@ async function _stats(input, channel, userName) {
       for (const user in data) {
         let userTotal = 0;
         for (const action in data[user]) {
+          if (action.startsWith('_')) continue;
           const count = data[user][action].length;
           commandStats[action] = (commandStats[action] || 0) + count;
           userTotal += count;
@@ -1882,6 +2007,7 @@ async function _stats(input, channel, userName) {
       // Use targetUser here which now contains the actual key from data
       let message = `Stats for user <@${targetUser}>:\n`;
       for (const action in userStats) {
+        if (action.startsWith('_')) continue;
         message += `  - ${action}: ${userStats[action].length} times\n`;
       }
       _slackMessage(message, channel);
@@ -2850,8 +2976,9 @@ async function _setconfig(input, channel, userName) {
 > \`maxVolume\`: ${maxVolume}
 > \`searchLimit\`: ${searchLimit}
 > \`voteTimeLimitMinutes\`: ${voteTimeLimitMinutes}
-> \`aiModel\`: ${config.get('aiModel') || 'gpt-4o'}
+> \`aiModel\`: ${config.get('aiModel') || 'gpt-4o-mini'}
 > \`aiPrompt\`: ${(config.get('aiPrompt') || '').slice(0, 80)}${(config.get('aiPrompt') || '').length > 80 ? '…' : ''}
+> \`aiMoodMirrorEnabled\`: ${config.get('aiMoodMirrorEnabled') === true}
 > \`defaultTheme\`: ${config.get('defaultTheme') || '(not set)'}
 > \`themePercentage\`: ${config.get('themePercentage') || 0}%
 > \`telemetryEnabled\`: ${config.get('telemetryEnabled')}
@@ -2866,6 +2993,7 @@ async function _setconfig(input, channel, userName) {
 *Example:* \`setconfig gongLimit 5\`
 *Example:* \`setconfig defaultTheme lounge\`
 *Example:* \`setconfig themePercentage 30\`
+*Example:* \`setconfig aiMoodMirrorEnabled true\`
 *Example:* \`setconfig telemetryEnabled false\`
 *Example:* \`setconfig soundcraftEnabled true\`
 *Example:* \`setconfig soundcraftIp 192.168.1.100\`
@@ -2891,8 +3019,9 @@ async function _setconfig(input, channel, userName) {
     voteTimeLimitMinutes: { type: 'number', min: 1, max: 60 },
     themePercentage: { type: 'number', min: 0, max: 100 },
     crossfadeDurationSeconds: { type: 'number', min: 0, max: 30 },
-    aiModel: { type: 'string', minLen: 1, maxLen: 50, allowed: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
+    aiModel: { type: 'string', minLen: 1, maxLen: 50, allowed: ['gpt-4o-mini', 'gpt-4o'] },
     aiPrompt: { type: 'string', minLen: 1, maxLen: 500 },
+    aiMoodMirrorEnabled: { type: 'boolean' },
     defaultTheme: { type: 'string', minLen: 0, maxLen: 100 },
     telemetryEnabled: { type: 'boolean' },
     soundcraftEnabled: { type: 'boolean' },

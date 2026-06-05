@@ -18,8 +18,9 @@ describe('Setconfig Command', function() {
     voteTimeLimitMinutes: { type: 'number', min: 1, max: 60 },
     themePercentage: { type: 'number', min: 0, max: 100 },
     crossfadeDurationSeconds: { type: 'number', min: 0, max: 30 },
-    aiModel: { type: 'string', minLen: 1, maxLen: 50, allowed: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
+    aiModel: { type: 'string', minLen: 1, maxLen: 50, allowed: ['gpt-4o-mini', 'gpt-4o'] },
     aiPrompt: { type: 'string', minLen: 1, maxLen: 500 },
+    aiMoodMirrorEnabled: { type: 'boolean' },
     defaultTheme: { type: 'string', minLen: 0, maxLen: 100 },
     telemetryEnabled: { type: 'boolean' },
     soundcraftEnabled: { type: 'boolean' },
@@ -170,15 +171,15 @@ describe('Setconfig Command', function() {
     const logLevelDef = allowedConfigs.logLevel;
 
     it('should accept allowed aiModel value', function() {
-      const result = validateString('gpt-4o', aiModelDef);
+      const result = validateString('gpt-4o-mini', aiModelDef);
       expect(result.valid).to.be.true;
-      expect(result.value).to.equal('gpt-4o');
+      expect(result.value).to.equal('gpt-4o-mini');
     });
 
     it('should accept allowed value case-insensitively', function() {
-      const result = validateString('GPT-4O', aiModelDef);
+      const result = validateString('GPT-4O-MINI', aiModelDef);
       expect(result.valid).to.be.true;
-      expect(result.value).to.equal('gpt-4o'); // Returns original case from allowed list
+      expect(result.value).to.equal('gpt-4o-mini'); // Returns original case from allowed list
     });
 
     it('should reject non-allowed aiModel value', function() {
@@ -321,7 +322,7 @@ describe('Setconfig Command', function() {
     });
 
     it('should have correct types for all boolean configs', function() {
-      const booleanConfigs = ['telemetryEnabled', 'soundcraftEnabled', 
+      const booleanConfigs = ['telemetryEnabled', 'aiMoodMirrorEnabled', 'soundcraftEnabled', 
                              'crossfadeEnabled', 'slackAlwaysThread'];
       
       for (const key of booleanConfigs) {
@@ -370,7 +371,7 @@ describe('Setconfig Command', function() {
       const allowed = allowedConfigs.aiModel.allowed;
       expect(allowed).to.be.an('array');
       expect(allowed.length).to.be.greaterThan(0);
-      expect(allowed).to.include('gpt-4o');
+      expect(allowed).to.include('gpt-4o-mini');
     });
 
     it('should have valid logLevel options', function() {

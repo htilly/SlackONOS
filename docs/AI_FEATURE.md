@@ -14,7 +14,9 @@ SlackONOS now supports natural language commands powered by OpenAI GPT-4o-mini. 
 - 📊 **Confidence Scoring** - Only executes commands with high confidence (>50%)
 - 🎄 **Seasonal Awareness** - Knows current season and suggests themed music
 - 🏢 **Venue Themes** - Configure default music style for your environment
+- 🪞 **Mood Mirroring** - Optional admin switch for replies that reflect each user's interaction style
 - 💬 **Context Memory** - Remembers suggestions for follow-up responses
+- 🎧 **DJ Persona Replies** - AI-authored replies start with SlackONOS booth energy instead of generic assistant text
 
 ### Examples
 
@@ -111,6 +113,21 @@ The AI remembers recent suggestions for follow-up responses.
 
 Context expires after 5 minutes of inactivity.
 
+## Mood Mirroring
+
+Admins can enable response-tone mirroring:
+
+```
+setconfig aiMoodMirrorEnabled true
+```
+
+When enabled, AI-generated summaries and chat replies use the user's current and recent interaction tone:
+- Warm or playful users get warmer, more playful replies.
+- Neutral users get the normal DJ style.
+- Impatient or rude users get shorter, drier replies.
+
+Mood mirroring never changes command selection, command arguments, authorization, or safety rules.
+
 ## Implementation Details
 
 ### New Files
@@ -118,13 +135,13 @@ Context expires after 5 minutes of inactivity.
 **`ai-handler.js`**
 - OpenAI client initialization
 - Natural language parsing with GPT-4o-mini
-- Confidence scoring and validation
+- Strict command-plan schema, confidence scoring, and validation
 - Comprehensive system prompts with command documentation
 
 ### Modified Files
 
 **`package.json`**
-- Added `openai: ^4.76.1` dependency
+- Added `openai: ^6.42.0` dependency
 
 **`config/config.json.example`**
 - Added `openaiApiKey` configuration field
@@ -176,9 +193,10 @@ The AI feature is completely optional. If no `openaiApiKey` is provided:
 
 The system prompt includes:
 - Complete command list with descriptions
-- Output format specification (JSON)
+- Strict structured output specification
 - Confidence scoring guidelines
 - Multiple examples for accuracy
+- Default DJ persona for `summary` and `response` text
 - Low temperature (0.3) for deterministic parsing
 
 ### Example Parsing
@@ -191,18 +209,22 @@ AI Response:
   "command": "bestof",
   "args": ["U2"],
   "confidence": 0.95,
-  "reasoning": "Clear request for artist's best tracks"
+  "reasoning": "Clear request for artist's best tracks",
+  "summary": "U2 best-of beacon lit; stadium levers are moving.",
+  "followUp": null,
+  "response": null,
+  "suggestedAction": null
 }
 ```
 
-Executed as: `bestof U2`
+Executed as: `bestof U2`, then SlackONOS confirms with the DJ persona, e.g. `🎧 U2 best-of beacon lit; stadium levers are moving.`
 
 ## Cost Considerations
 
 **Per Request:**
 - Model: GPT-4o-mini
-- Input: ~400 tokens (system prompt + user message)
-- Output: ~50 tokens (JSON response)
+- Input: prompt + user message + schema
+- Output: compact command-plan JSON
 - Cost: ~$0.0001 per request
 
 **Monthly Estimate (for typical usage):**

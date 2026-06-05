@@ -516,6 +516,7 @@ async function populateConfigFields(pageId) {
       const openaiApiKeyInput = document.getElementById('openai-api-key');
       const openaiModelSelect = document.getElementById('openai-model');
       const openaiPromptInput = document.getElementById('openai-prompt');
+      const openaiMoodMirrorSelect = document.getElementById('openai-mood-mirror');
       
       if (openaiApiKeyInput && configValues.openaiApiKey) {
         openaiApiKeyInput.value = configValues.openaiApiKey;
@@ -526,6 +527,9 @@ async function populateConfigFields(pageId) {
       }
       if (openaiPromptInput && configValues.aiPrompt) {
         openaiPromptInput.value = configValues.aiPrompt;
+      }
+      if (openaiMoodMirrorSelect && typeof configValues.aiMoodMirrorEnabled !== 'undefined') {
+        openaiMoodMirrorSelect.value = configValues.aiMoodMirrorEnabled ? 'true' : 'false';
       }
       break;
   }
@@ -641,9 +645,10 @@ function saveOpenAIData() {
   const apiKeyInput = document.getElementById('openai-api-key');
   const modelInput = document.getElementById('openai-model');
   const promptInput = document.getElementById('openai-prompt');
+  const moodMirrorInput = document.getElementById('openai-mood-mirror');
   
   const apiKey = apiKeyInput?.value?.trim() || '';
-  const model = modelInput?.value || 'gpt-4o';
+  const model = modelInput?.value || 'gpt-4o-mini';
   const prompt = promptInput?.value?.trim() || '';
   
   // Only save API key if it was entered (not masked/empty)
@@ -653,6 +658,7 @@ function saveOpenAIData() {
   
   // Always save model and prompt (even if empty)
   configData.aiModel = model;
+  configData.aiMoodMirrorEnabled = moodMirrorInput?.value === 'true';
   if (prompt) {
     configData.aiPrompt = prompt;
   }

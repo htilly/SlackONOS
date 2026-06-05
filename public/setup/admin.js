@@ -254,7 +254,8 @@ async function loadConfig() {
       { key: 'defaultTheme', label: 'Default Theme', type: 'text', description: 'Default music theme (e.g., lounge, club, office)' },
       { key: 'themePercentage', label: 'Theme Percentage', type: 'number', min: 0, max: 100, description: 'Percentage of theme tracks to mix in (0-100)' },
       { key: 'openaiApiKey', label: 'OpenAI API Key', type: 'text', description: 'OpenAI API key for natural language parsing (starts with sk-)' },
-      { key: 'aiModel', label: 'AI Model', type: 'select', options: ['gpt-4o', 'gpt-4o-mini', 'gpt-4', 'gpt-3.5-turbo'], description: 'OpenAI model for natural language parsing' },
+      { key: 'aiModel', label: 'AI Model', type: 'select', options: ['gpt-4o-mini', 'gpt-4o'], description: 'OpenAI model for natural language parsing' },
+      { key: 'aiMoodMirrorEnabled', label: 'AI Mood Mirror', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Mirror each user interaction style in AI-generated replies' },
       { key: 'soundcraftEnabled', label: 'Soundcraft Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable Soundcraft mixer integration' },
       { key: 'crossfadeEnabled', label: 'Crossfade Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable smooth transitions between tracks (requires queue playback)' }
     ];
