@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SlackONOS Setup</title>
-  <link rel="stylesheet" href="/setup/setup.css?v=6.0">
+  <link rel="stylesheet" href="/setup/setup.css?v=6.2">
 </head>
 <body>
   <div class="background-animation">
@@ -71,10 +71,13 @@
             <div>
               <strong>Need help with setup?</strong> See the detailed guide with all steps, permissions and scopes:
               <div class="help-links">
-                <a href="https://github.com/htilly/SlackONOS/blob/develop/SLACK.md" target="_blank" class="help-link">
+                <a href="https://github.com/htilly/SlackONOS/blob/develop/docs/SLACK.md" target="_blank" rel="noopener noreferrer" class="help-link">
                   <span>📚</span> Slack Setup Guide
                 </a>
-                <a href="https://github.com/htilly/SlackONOS" target="_blank" class="help-link">
+                <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" class="help-link">
+                  <span>🔑</span> Slack Apps
+                </a>
+                <a href="https://github.com/htilly/SlackONOS" target="_blank" rel="noopener noreferrer" class="help-link">
                   <span>🔗</span> GitHub Repository
                 </a>
               </div>
@@ -83,12 +86,12 @@
           <div class="form-group">
             <label>App-Level Token <span class="required">*</span></label>
             <input type="text" id="slack-app-token" placeholder="xapp-1-A0..." class="input">
-            <small>From Slack app → Socket Mode → App-Level Tokens</small>
+            <small>Generate this in <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer">Slack API Apps</a> -> your app -> Socket Mode -> App-Level Tokens. It starts with <code>xapp-</code>.</small>
           </div>
           <div class="form-group">
             <label>Bot User OAuth Token <span class="required">*</span></label>
             <input type="text" id="slack-bot-token" placeholder="xoxb-123..." class="input">
-            <small>From Slack app → Install App → Bot User OAuth Token</small>
+            <small>Install or reinstall the app, then copy it from <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer">Slack API Apps</a> -> your app -> OAuth &amp; Permissions -> Bot User OAuth Token. It starts with <code>xoxb-</code>.</small>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -127,10 +130,13 @@
             <div>
               <strong>Need help with setup?</strong> See the detailed guide with all steps, permissions and scopes:
               <div class="help-links">
-                <a href="https://github.com/htilly/SlackONOS/blob/develop/DISCORD.md" target="_blank" class="help-link">
+                <a href="https://github.com/htilly/SlackONOS/blob/develop/docs/discord/SETUP.md" target="_blank" rel="noopener noreferrer" class="help-link">
                   <span>📚</span> Discord Setup Guide
                 </a>
-                <a href="https://github.com/htilly/SlackONOS" target="_blank" class="help-link">
+                <a href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer" class="help-link">
+                  <span>🔑</span> Developer Portal
+                </a>
+                <a href="https://github.com/htilly/SlackONOS" target="_blank" rel="noopener noreferrer" class="help-link">
                   <span>🔗</span> GitHub Repository
                 </a>
               </div>
@@ -139,7 +145,7 @@
           <div class="form-group">
             <label>Discord Bot Token</label>
             <input type="text" id="discord-token" placeholder="MTIzNDU2..." class="input">
-            <small>From discord.com/developers → Your application → Bot</small>
+            <small>Create or reset this in the <a href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer">Discord Developer Portal</a> -> your application -> Bot -> Token.</small>
           </div>
           <div class="form-group">
             <label>Channel IDs (comma-separated)</label>
@@ -203,16 +209,18 @@
             <span class="info-icon">ℹ️</span>
             <div>
               <strong>Missing credentials?</strong> Create an app at
-              <a href="https://developer.spotify.com/dashboard" target="_blank">developer.spotify.com</a>
+              <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">developer.spotify.com/dashboard</a>, then open the app settings.
             </div>
           </div>
           <div class="form-group">
             <label>Client ID <span class="required">*</span></label>
             <input type="text" id="spotify-client-id" placeholder="abc123..." class="input">
+            <small>Copy this from <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">Spotify Developer Dashboard</a> -> your app -> Settings -> Client ID.</small>
           </div>
           <div class="form-group">
             <label>Client Secret <span class="required">*</span></label>
             <input type="password" id="spotify-client-secret" placeholder="def456..." class="input">
+            <small>Copy or rotate this from <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">Spotify Developer Dashboard</a> -> your app -> Settings -> View client secret.</small>
           </div>
           <div class="form-group">
             <label>Market/Country</label>
@@ -252,14 +260,16 @@
               <br><br>
               <strong>Example:</strong> "Play some Christmas music" instead of "add christmas"
               <br><br>
-              <strong>Missing API key?</strong> Get one at
-              <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys</a>
+              <strong>Missing API key?</strong> Create or rotate a project key at
+              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com/api-keys</a>.
+              If requests fail with quota errors, check billing at
+              <a href="https://platform.openai.com/settings/organization/billing/overview" target="_blank" rel="noopener noreferrer">OpenAI billing</a>.
             </div>
           </div>
           <div class="form-group">
             <label>OpenAI API Key</label>
             <input type="password" id="openai-api-key" placeholder="sk-..." class="input">
-            <small>Leave empty to skip. You can add this later in the admin panel.</small>
+            <small>Use a new key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">OpenAI API keys</a>. It usually starts with <code>sk-</code>. Leave empty to skip.</small>
           </div>
           <div class="form-group">
             <label>AI Model</label>

@@ -62,6 +62,7 @@ describe('Command Registry', function() {
       stats: sinon.stub(),
       configdump: sinon.stub(),
       aiUnparsed: sinon.stub(),
+      listOpenAIModels: sinon.stub(),
       featurerequest: sinon.stub(),
       addToSpotifyPlaylist: sinon.stub(),
       diagnostics: sinon.stub(),
@@ -87,6 +88,7 @@ describe('Command Registry', function() {
     expect(registry.get('debug').admin).to.equal(true);
     expect(registry.get('flush').admin).to.equal(true);
     expect(registry.get('setconfig').admin).to.equal(true);
+    expect(registry.get('aimodels').admin).to.equal(true);
     expect(registry.get('add').admin).to.equal(false);
   });
 
@@ -95,10 +97,12 @@ describe('Command Registry', function() {
 
     registry.get('source').fn(['source'], 'C123', '<@U1>');
     registry.get('setcrossfade').fn(['setcrossfade', 'on'], 'ADMIN', '<@U1>');
+    registry.get('aimodels').fn(['aimodels'], 'ADMIN', '<@U1>');
     registry.get('diagnostics').fn(['diagnostics'], 'ADMIN', '<@U1>');
 
     expect(handlers.showSource.calledWith('C123')).to.be.true;
     expect(handlers.setCrossfade.calledWith(['setcrossfade', 'on'], 'ADMIN', '<@U1>')).to.be.true;
+    expect(handlers.listOpenAIModels.calledWith(['aimodels'], 'ADMIN', '<@U1>')).to.be.true;
     expect(handlers.diagnostics.calledWith(['diagnostics'], 'ADMIN', '<@U1>')).to.be.true;
   });
 });

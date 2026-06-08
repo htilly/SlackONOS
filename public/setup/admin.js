@@ -230,7 +230,17 @@ async function loadConfig() {
     configItems.innerHTML = '';
     const editableConfig = [
       // Discord Settings (Priority)
-      { key: 'discordToken', label: '🎮 Discord Bot Token', type: 'password', description: 'Discord bot token from Developer Portal (starts with Mj... or MT...)' },
+      {
+        key: 'discordToken',
+        label: '🎮 Discord Bot Token',
+        type: 'password',
+        description: 'Discord bot token from Developer Portal (starts with Mj... or MT...)',
+        help: {
+          text: 'Create or reset it in your application Bot settings:',
+          label: 'Discord Developer Portal',
+          url: 'https://discord.com/developers/applications'
+        }
+      },
       { key: 'discordChannels', label: '🎮 Discord Channels', type: 'text', description: 'Comma-separated channel IDs or names (e.g., "music, 1234567890")' },
       { key: 'discordAdminRoles', label: '🎮 Discord Admin Roles', type: 'text', description: 'Comma-separated role names or IDs for admin access (e.g., "Admin, DJ")' },
       
@@ -251,10 +261,26 @@ async function loadConfig() {
       { key: 'httpsPort', label: 'HTTPS Port', type: 'number', min: 1, max: 65535, description: 'Port for HTTPS server' },
       { key: 'sonos', label: 'Sonos IP Address', type: 'text', description: 'IP address of Sonos speaker' },
       { key: 'ttsEnabled', label: 'TTS Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable text-to-speech announcements' },
+      { key: 'ttsProvider', label: 'TTS Provider', type: 'select', options: ['google', 'openai'], description: 'Use Google TTS by default, or OpenAI TTS when your OpenAI key has Text-to-speech request access' },
+      { key: 'ttsFallbackProvider', label: 'TTS Fallback Provider', type: 'select', options: ['google', 'none'], description: 'Fallback used when OpenAI TTS fails' },
+      { key: 'openaiTtsModel', label: 'OpenAI TTS Model', type: 'text', description: 'OpenAI speech model for TTS, e.g. gpt-4o-mini-tts or tts-1' },
+      { key: 'openaiTtsVoice', label: 'OpenAI TTS Voice', type: 'select', options: ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer', 'verse', 'marin', 'cedar'], description: 'Voice used when TTS Provider is openai' },
+      { key: 'openaiTtsSpeed', label: 'OpenAI TTS Speed', type: 'number', min: 0.25, max: 4, step: 0.05, description: 'OpenAI TTS speed from 0.25 to 4.0' },
+      { key: 'openaiTtsInstructions', label: 'OpenAI TTS Instructions', type: 'text', description: 'Optional voice direction for OpenAI TTS models that support instructions' },
       { key: 'defaultTheme', label: 'Default Theme', type: 'text', description: 'Default music theme (e.g., lounge, club, office)' },
       { key: 'themePercentage', label: 'Theme Percentage', type: 'number', min: 0, max: 100, description: 'Percentage of theme tracks to mix in (0-100)' },
-      { key: 'openaiApiKey', label: 'OpenAI API Key', type: 'text', description: 'OpenAI API key for natural language parsing (starts with sk-)' },
-      { key: 'aiModel', label: 'AI Model', type: 'select', options: ['gpt-4o-mini', 'gpt-4o'], description: 'OpenAI model for natural language parsing' },
+      {
+        key: 'openaiApiKey',
+        label: 'OpenAI API Key',
+        type: 'text',
+        description: 'OpenAI API key for natural language parsing (starts with sk-)',
+        help: {
+          text: 'Create or rotate a project key here:',
+          label: 'OpenAI API keys',
+          url: 'https://platform.openai.com/api-keys'
+        }
+      },
+      { key: 'aiModel', label: 'AI Model', type: 'text', description: 'OpenAI model for natural language parsing. Run `aimodels` in the admin channel to list accessible model IDs.' },
       { key: 'aiMoodMirrorEnabled', label: 'AI Mood Mirror', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Mirror each user interaction style in AI-generated replies' },
       { key: 'soundcraftEnabled', label: 'Soundcraft Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable Soundcraft mixer integration' },
       { key: 'crossfadeEnabled', label: 'Crossfade Enabled', type: 'select', options: [{ value: true, label: 'Yes' }, { value: false, label: 'No' }], description: 'Enable smooth transitions between tracks (requires queue playback)' }
@@ -299,6 +325,7 @@ function createConfigItem(item, value) {
     const attrs = [];
     if (item.min !== undefined) attrs.push(`min="${item.min}"`);
     if (item.max !== undefined) attrs.push(`max="${item.max}"`);
+    if (item.step !== undefined) attrs.push(`step="${item.step}"`);
     const finalDisplayValue = displayValue !== null && displayValue !== undefined ? displayValue : '';
     const isSensitive = item.type === 'password' || item.key.includes('ApiKey') || item.key.includes('Token') || item.key.includes('Secret');
     const finalInputType = isSensitive ? 'password' : inputType;
@@ -307,7 +334,7 @@ function createConfigItem(item, value) {
     }
     inputHTML = `<input type="${finalInputType}" id="config-${item.key}" value="${escapeHtml(finalDisplayValue)}" ${attrs.join(' ')}>`;
   }
-  const description = item.description ? `<div class="config-description">${item.description}</div>` : '';
+  const description = createConfigDescription(item);
   div.innerHTML = `
     <label for="config-${item.key}">${item.label}:</label>
     ${inputHTML}
@@ -316,6 +343,23 @@ function createConfigItem(item, value) {
     <div id="config-${item.key}-message"></div>
   `;
   return div;
+}
+
+function createConfigDescription(item) {
+  if (!item.description && !item.help) {
+    return '';
+  }
+
+  const description = item.description ? `<span>${escapeHtml(item.description)}</span>` : '';
+  let help = '';
+  if (item.help && item.help.url) {
+    const helpText = item.help.text ? `${escapeHtml(item.help.text)} ` : '';
+    const helpLabel = escapeHtml(item.help.label || item.help.url);
+    const helpUrl = escapeAttribute(item.help.url);
+    help = `<span>${helpText}<a href="${helpUrl}" target="_blank" rel="noopener noreferrer" class="config-help-link">${helpLabel}</a></span>`;
+  }
+
+  return `<div class="config-description">${[description, help].filter(Boolean).join(' ')}</div>`;
 }
 
 async function saveConfig(key) {
@@ -971,5 +1015,6 @@ async function handleApiError(response, error) {
 }
 
 function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text === null || text === undefined ? '' : String(text); return div.innerHTML; }
+function escapeAttribute(text) { return escapeHtml(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 function escapeJsString(text) { return String(text || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r/g, '\\r').replace(/\n/g, '\\n'); }
 function toCssClass(text) { return String(text || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '-'); }

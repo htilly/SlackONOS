@@ -88,6 +88,19 @@ describe('Admin API module', function() {
     expect(syncVotingConfig.calledOnce).to.equal(true);
   });
 
+  it('allows updating OpenAI TTS settings via admin config', async function() {
+    const config = createConfig({ ttsProvider: 'google', openaiTtsSpeed: 1 });
+    const api = createApi({ config });
+
+    const providerResult = await api.updateConfigValue('ttsProvider', 'openai');
+    const speedResult = await api.updateConfigValue('openaiTtsSpeed', '1.25');
+
+    expect(providerResult.success).to.equal(true);
+    expect(speedResult.success).to.equal(true);
+    expect(config.store.ttsProvider).to.equal('openai');
+    expect(config.store.openaiTtsSpeed).to.equal(1.25);
+  });
+
   it('returns now-playing data from Sonos with upcoming queue tracks', async function() {
     const sonos = {
       currentTrack: sinon.stub().resolves({ title: 'Track', artist: 'Artist', album: 'Album', position: 10, duration: 100 }),

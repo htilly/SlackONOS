@@ -31,6 +31,7 @@
 
 *🤖 AI Settings:*
 > `setconfig aiPrompt <text>` - Set the DJ-style summary prompt used by AI.
+> `aimodels` (or `openaimodels`) - List OpenAI models visible to the configured API key.
 > `aiunparsed [N]` - Show the last N misunderstood AI inputs.
 
 *🗣️ Fun & Extras:*

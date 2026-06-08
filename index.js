@@ -39,6 +39,7 @@ const Spotify = require('./lib/spotify');
 // const utils = require('./lib/utils'); // Currently unused
 const process = require('process');
 const parseString = require('xml2js').parseString;
+const OpenAI = require('openai');
 const AIHandler = require('./lib/ai-handler');
 const voting = require('./lib/voting');
 const musicHelper = require('./lib/music-helper');
@@ -106,6 +107,9 @@ const trackBlacklistFile = path.join(__dirname, 'config/track-blacklist.json');
 const aiUnparsedFile = path.join(__dirname, 'config/ai-unparsed.log');
 const WinstonWrapper = require('./lib/logger');
 const Telemetry = require('./lib/telemetry');
+
+let openAIClient = null;
+let openAIClientKey = null;
 
 // Helper to load user blacklist
 function loadBlacklist() {
@@ -828,6 +832,12 @@ function ensureConfigDefaults() {
     aiModel: 'gpt-4o-mini',
     aiPrompt: 'You are a funny, upbeat DJ for a Slack music bot controlling Sonos. Reply with a super short, playful one-liner that confirms what you\'ll do, using casual humor and emojis when appropriate.',
     aiMoodMirrorEnabled: false,
+    ttsProvider: 'google',
+    ttsFallbackProvider: 'google',
+    openaiTtsModel: 'gpt-4o-mini-tts',
+    openaiTtsVoice: 'alloy',
+    openaiTtsSpeed: 1,
+    openaiTtsInstructions: '',
     // Soundcraft mixer integration
     soundcraftEnabled: false,
     soundcraftIp: '',
@@ -1362,6 +1372,7 @@ const commandRegistry = createCommandRegistry({
   stats: _stats,
   configdump: _configdump,
   aiUnparsed: _aiUnparsed,
+  listOpenAIModels: _listOpenAIModels,
   featurerequest: _featurerequest,
   addToSpotifyPlaylist: _addToSpotifyPlaylist,
   diagnostics: _diagnostics,
@@ -2979,6 +2990,11 @@ async function _setconfig(input, channel, userName) {
 > \`aiModel\`: ${config.get('aiModel') || 'gpt-4o-mini'}
 > \`aiPrompt\`: ${(config.get('aiPrompt') || '').slice(0, 80)}${(config.get('aiPrompt') || '').length > 80 ? '…' : ''}
 > \`aiMoodMirrorEnabled\`: ${config.get('aiMoodMirrorEnabled') === true}
+> \`ttsProvider\`: ${config.get('ttsProvider') || 'google'}
+> \`ttsFallbackProvider\`: ${config.get('ttsFallbackProvider') || 'google'}
+> \`openaiTtsModel\`: ${config.get('openaiTtsModel') || 'gpt-4o-mini-tts'}
+> \`openaiTtsVoice\`: ${config.get('openaiTtsVoice') || 'alloy'}
+> \`openaiTtsSpeed\`: ${Number(config.get('openaiTtsSpeed') || 1)}
 > \`defaultTheme\`: ${config.get('defaultTheme') || '(not set)'}
 > \`themePercentage\`: ${config.get('themePercentage') || 0}%
 > \`telemetryEnabled\`: ${config.get('telemetryEnabled')}
@@ -2994,6 +3010,8 @@ async function _setconfig(input, channel, userName) {
 *Example:* \`setconfig defaultTheme lounge\`
 *Example:* \`setconfig themePercentage 30\`
 *Example:* \`setconfig aiMoodMirrorEnabled true\`
+*Example:* \`setconfig ttsProvider openai\`
+*Example:* \`setconfig openaiTtsVoice nova\`
 *Example:* \`setconfig telemetryEnabled false\`
 *Example:* \`setconfig soundcraftEnabled true\`
 *Example:* \`setconfig soundcraftIp 192.168.1.100\`
@@ -3019,9 +3037,15 @@ async function _setconfig(input, channel, userName) {
     voteTimeLimitMinutes: { type: 'number', min: 1, max: 60 },
     themePercentage: { type: 'number', min: 0, max: 100 },
     crossfadeDurationSeconds: { type: 'number', min: 0, max: 30 },
-    aiModel: { type: 'string', minLen: 1, maxLen: 50, allowed: ['gpt-4o-mini', 'gpt-4o'] },
+    aiModel: { type: 'string', minLen: 1, maxLen: 100 },
     aiPrompt: { type: 'string', minLen: 1, maxLen: 500 },
     aiMoodMirrorEnabled: { type: 'boolean' },
+    ttsProvider: { type: 'string', minLen: 4, maxLen: 6, allowed: ['google', 'openai'] },
+    ttsFallbackProvider: { type: 'string', minLen: 4, maxLen: 6, allowed: ['google', 'none'] },
+    openaiTtsModel: { type: 'string', minLen: 1, maxLen: 100 },
+    openaiTtsVoice: { type: 'string', minLen: 2, maxLen: 50 },
+    openaiTtsInstructions: { type: 'string', minLen: 0, maxLen: 500 },
+    openaiTtsSpeed: { type: 'number', min: 0.25, max: 4 },
     defaultTheme: { type: 'string', minLen: 0, maxLen: 100 },
     telemetryEnabled: { type: 'boolean' },
     soundcraftEnabled: { type: 'boolean' },
@@ -3105,7 +3129,9 @@ async function _setconfig(input, channel, userName) {
     });
   } else if (configDef.type === 'string') {
     const newValue = input.slice(2).join(' ').trim();
-    if (newValue.length < (configDef.minLen || 1) || newValue.length > (configDef.maxLen || 500)) {
+    const minLen = configDef.minLen ?? 1;
+    const maxLen = configDef.maxLen ?? 500;
+    if (newValue.length < minLen || newValue.length > maxLen) {
       _slackMessage(`📝 Value length for \`${actualKey}\` must be between ${configDef.minLen} and ${configDef.maxLen} characters.`, channel);
       return;
     }
@@ -3226,6 +3252,178 @@ function _addToSpotifyPlaylist(input, channel) {
   _slackMessage('🚧 This feature is still under construction! Check back later! 🛠️', channel);
 }
 
+function getOpenAIClient() {
+  const apiKey = config.get('openaiApiKey');
+  if (!apiKey) {
+    throw new Error('openaiApiKey is not configured');
+  }
+  if (typeof apiKey !== 'string' || !apiKey.startsWith('sk-')) {
+    throw new Error('openaiApiKey has invalid format');
+  }
+  if (!openAIClient || openAIClientKey !== apiKey) {
+    openAIClient = new OpenAI({ apiKey });
+    openAIClientKey = apiKey;
+  }
+  return openAIClient;
+}
+
+function getTtsProvider() {
+  const provider = String(config.get('ttsProvider') || 'google').trim().toLowerCase();
+  return provider === 'openai' ? 'openai' : 'google';
+}
+
+function getTtsFallbackProvider() {
+  const fallback = String(config.get('ttsFallbackProvider') || 'google').trim().toLowerCase();
+  return fallback === 'none' ? 'none' : 'google';
+}
+
+function getOpenAITtsSpeed() {
+  const speed = Number(config.get('openaiTtsSpeed') || 1);
+  if (!Number.isFinite(speed)) {
+    return 1;
+  }
+  return Math.min(4, Math.max(0.25, speed));
+}
+
+async function generateGoogleTtsBuffer(fullTtsText) {
+  const audioResults = await googleTTS.getAllAudioBase64(fullTtsText, {
+    lang: 'en',
+    slow: false,
+    host: 'https://translate.google.com',
+    timeout: 10000,
+    splitPunct: ',.?!;:',
+  });
+
+  const audioBuffers = audioResults.map(result => Buffer.from(result.base64, 'base64'));
+  return Buffer.concat(audioBuffers);
+}
+
+async function generateOpenAITtsBuffer(fullTtsText) {
+  const model = String(config.get('openaiTtsModel') || 'gpt-4o-mini-tts').trim();
+  const voice = String(config.get('openaiTtsVoice') || 'alloy').trim();
+  const instructions = String(config.get('openaiTtsInstructions') || '').trim();
+  const request = {
+    model,
+    voice,
+    input: fullTtsText,
+    response_format: 'mp3',
+    speed: getOpenAITtsSpeed()
+  };
+
+  if (instructions && !/^tts-1(?:-hd)?$/i.test(model)) {
+    request.instructions = instructions;
+  }
+
+  const speech = await getOpenAIClient().audio.speech.create(request);
+  const arrayBuffer = await speech.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+async function generateTtsBuffer(fullTtsText) {
+  const provider = getTtsProvider();
+  if (provider === 'google') {
+    return {
+      buffer: await generateGoogleTtsBuffer(fullTtsText),
+      provider: 'google'
+    };
+  }
+
+  try {
+    return {
+      buffer: await generateOpenAITtsBuffer(fullTtsText),
+      provider: 'openai'
+    };
+  } catch (err) {
+    const fallbackProvider = getTtsFallbackProvider();
+    if (fallbackProvider !== 'google') {
+      throw err;
+    }
+
+    logger.warn('OpenAI TTS failed, falling back to Google TTS: ' + (err.message || err));
+    return {
+      buffer: await generateGoogleTtsBuffer(fullTtsText),
+      provider: 'google',
+      fallbackFrom: 'openai',
+      fallbackError: err.message || String(err)
+    };
+  }
+}
+
+function isLikelyChatModelId(id) {
+  const modelId = String(id || '').toLowerCase();
+  if (!modelId) return false;
+  if (/(audio|tts|transcribe|whisper|realtime|image|dall|sora|embedding|moderation)/.test(modelId)) {
+    return false;
+  }
+  return /^(gpt-|o\d|o\d-|chat-latest|gpt-oss)/.test(modelId);
+}
+
+function isLikelyTtsModelId(id) {
+  const modelId = String(id || '').toLowerCase();
+  return /(^tts-|tts|audio)/.test(modelId) && !/(transcribe|whisper|realtime)/.test(modelId);
+}
+
+function filterOpenAIModelIds(modelIds, filter) {
+  if (filter === 'all') {
+    return modelIds;
+  }
+  if (filter === 'tts' || filter === 'speech') {
+    return modelIds.filter(isLikelyTtsModelId);
+  }
+  return modelIds.filter(isLikelyChatModelId);
+}
+
+async function listOpenAIModelIds() {
+  const page = await getOpenAIClient().models.list();
+  const models = Array.isArray(page && page.data) ? page.data : [];
+  return models
+    .map(model => model && model.id)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function formatModelListForSlack(modelIds, filter) {
+  const limit = 40;
+  const shown = modelIds.slice(0, limit);
+  const title = filter === 'all'
+    ? 'All accessible OpenAI models'
+    : filter === 'tts' || filter === 'speech'
+      ? 'Accessible OpenAI TTS/audio model IDs'
+      : 'Accessible OpenAI model IDs likely usable for chat';
+  const lines = shown.map(id => `> \`${id}\``).join('\n') || '> _(none found)_';
+  const suffix = modelIds.length > shown.length
+    ? `\n_Showing ${shown.length} of ${modelIds.length}. Use \`aimodels all\` to inspect the full list._`
+    : '';
+
+  return `*🤖 ${title}*\n${lines}${suffix}`;
+}
+
+async function _listOpenAIModels(input, channel, userName) {
+  await _logUserAction(userName, 'aimodels');
+  const filter = String(input[1] || 'chat').trim().toLowerCase();
+  const normalizedFilter = ['all', 'chat', 'tts', 'speech'].includes(filter) ? filter : 'chat';
+
+  try {
+    const allModelIds = await listOpenAIModelIds();
+    const modelIds = filterOpenAIModelIds(allModelIds, normalizedFilter);
+    const message =
+      `${formatModelListForSlack(modelIds, normalizedFilter)}\n\n` +
+      `Current \`aiModel\`: \`${config.get('aiModel') || 'gpt-4o-mini'}\`\n` +
+      `Current \`openaiTtsModel\`: \`${config.get('openaiTtsModel') || 'gpt-4o-mini-tts'}\`\n` +
+      `_Try: \`aimodels tts\`, \`aimodels all\`, or \`setconfig aiModel <model-id>\`._`;
+    _slackMessage(message, channel);
+  } catch (err) {
+    logger.error('Failed to list OpenAI models: ' + (err.message || err));
+    if (err.status === 401) {
+      _slackMessage('❌ OpenAI API key is invalid or unauthorized. Check `openaiApiKey`.', channel);
+    } else if (err.status === 403) {
+      _slackMessage('❌ OpenAI key cannot list models. For restricted keys, enable `List models` → `Read`.', channel);
+    } else {
+      _slackMessage(`❌ Could not list OpenAI models: ${err.message || err}`, channel);
+    }
+  }
+}
+
 async function _tts(input, channel) {
   // Admin check now handled in processInput (platform-aware)
   const text = input.slice(1).join(' ');
@@ -3242,22 +3440,14 @@ async function _tts(input, channel) {
   const fullTtsText = `${introMessage}... ... ${text}`;
 
   try {
-    // Get audio as base64 using the new library (handles long text automatically)
-    const audioResults = await googleTTS.getAllAudioBase64(fullTtsText, {
-      lang: 'en',
-      slow: false,
-      host: 'https://translate.google.com',
-      timeout: 10000,
-      splitPunct: ',.?!;:',
-    });
+    const ttsResult = await generateTtsBuffer(fullTtsText);
 
-    // Combine all audio chunks into a single buffer
-    const audioBuffers = audioResults.map(result => Buffer.from(result.base64, 'base64'));
-    const combinedBuffer = Buffer.concat(audioBuffers);
-
-    // Write the combined audio to file (async)
-    await fs.promises.writeFile(ttsFilePath, combinedBuffer);
-    logger.info('TTS audio saved to: ' + ttsFilePath);
+    // Write the generated audio to file (async)
+    await fs.promises.writeFile(ttsFilePath, ttsResult.buffer);
+    logger.info(`TTS audio saved to: ${ttsFilePath} (provider=${ttsResult.provider})`);
+    if (ttsResult.fallbackFrom) {
+      _slackMessage(`⚠️ OpenAI TTS failed, using Google TTS fallback. Error: \`${ttsResult.fallbackError}\``, channel);
+    }
 
     // Get TTS file duration
     const fileDuration = await new Promise((resolve, reject) => {

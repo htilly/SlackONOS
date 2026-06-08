@@ -18,9 +18,15 @@ describe('Setconfig Command', function() {
     voteTimeLimitMinutes: { type: 'number', min: 1, max: 60 },
     themePercentage: { type: 'number', min: 0, max: 100 },
     crossfadeDurationSeconds: { type: 'number', min: 0, max: 30 },
-    aiModel: { type: 'string', minLen: 1, maxLen: 50, allowed: ['gpt-4o-mini', 'gpt-4o'] },
+    openaiTtsSpeed: { type: 'number', min: 0.25, max: 4 },
+    aiModel: { type: 'string', minLen: 1, maxLen: 100 },
     aiPrompt: { type: 'string', minLen: 1, maxLen: 500 },
     aiMoodMirrorEnabled: { type: 'boolean' },
+    ttsProvider: { type: 'string', minLen: 4, maxLen: 6, allowed: ['google', 'openai'] },
+    ttsFallbackProvider: { type: 'string', minLen: 4, maxLen: 6, allowed: ['google', 'none'] },
+    openaiTtsModel: { type: 'string', minLen: 1, maxLen: 100 },
+    openaiTtsVoice: { type: 'string', minLen: 2, maxLen: 50 },
+    openaiTtsInstructions: { type: 'string', minLen: 0, maxLen: 500 },
     defaultTheme: { type: 'string', minLen: 0, maxLen: 100 },
     telemetryEnabled: { type: 'boolean' },
     soundcraftEnabled: { type: 'boolean' },
@@ -170,22 +176,28 @@ describe('Setconfig Command', function() {
     const aiPromptDef = allowedConfigs.aiPrompt;
     const logLevelDef = allowedConfigs.logLevel;
 
-    it('should accept allowed aiModel value', function() {
+    it('should accept configured aiModel value', function() {
       const result = validateString('gpt-4o-mini', aiModelDef);
       expect(result.valid).to.be.true;
       expect(result.value).to.equal('gpt-4o-mini');
     });
 
-    it('should accept allowed value case-insensitively', function() {
-      const result = validateString('GPT-4O-MINI', aiModelDef);
+    it('should accept model IDs returned by OpenAI model listing', function() {
+      const result = validateString('gpt-5.4-mini', aiModelDef);
       expect(result.valid).to.be.true;
-      expect(result.value).to.equal('gpt-4o-mini'); // Returns original case from allowed list
+      expect(result.value).to.equal('gpt-5.4-mini');
     });
 
-    it('should reject non-allowed aiModel value', function() {
-      const result = validateString('invalid-model', aiModelDef);
+    it('should reject empty aiModel value', function() {
+      const result = validateString('', aiModelDef);
       expect(result.valid).to.be.false;
-      expect(result.error).to.equal('not_allowed');
+      expect(result.error).to.equal('invalid_length');
+    });
+
+    it('should validate TTS provider values', function() {
+      expect(validateString('openai', allowedConfigs.ttsProvider).valid).to.be.true;
+      expect(validateString('google', allowedConfigs.ttsProvider).valid).to.be.true;
+      expect(validateString('other', allowedConfigs.ttsProvider).valid).to.be.false;
     });
 
     it('should accept valid aiPrompt length', function() {
@@ -312,7 +324,7 @@ describe('Setconfig Command', function() {
     it('should have correct types for all number configs', function() {
       const numberConfigs = ['gongLimit', 'voteLimit', 'voteImmuneLimit', 'flushVoteLimit', 
                            'maxVolume', 'searchLimit', 'voteTimeLimitMinutes', 
-                           'themePercentage', 'crossfadeDurationSeconds'];
+                           'themePercentage', 'crossfadeDurationSeconds', 'openaiTtsSpeed'];
       
       for (const key of numberConfigs) {
         expect(allowedConfigs[key].type).to.equal('number');
@@ -332,6 +344,8 @@ describe('Setconfig Command', function() {
 
     it('should have correct types for all string configs', function() {
       const stringConfigs = ['aiModel', 'aiPrompt', 'defaultTheme', 
+                            'ttsProvider', 'ttsFallbackProvider', 'openaiTtsModel',
+                            'openaiTtsVoice', 'openaiTtsInstructions',
                             'soundcraftIp', 'logLevel'];
       
       for (const key of stringConfigs) {
@@ -364,14 +378,25 @@ describe('Setconfig Command', function() {
       expect(def.min).to.be.at.least(1);
       expect(def.max).to.be.at.most(120);
     });
+
+    it('should have reasonable openaiTtsSpeed bounds', function() {
+      const def = allowedConfigs.openaiTtsSpeed;
+      expect(def.min).to.equal(0.25);
+      expect(def.max).to.equal(4);
+    });
   });
 
   describe('Allowed Values', function() {
-    it('should have valid aiModel options', function() {
-      const allowed = allowedConfigs.aiModel.allowed;
+    it('should accept dynamic aiModel values instead of fixed options', function() {
+      expect(allowedConfigs.aiModel.allowed).to.equal(undefined);
+      expect(allowedConfigs.aiModel.maxLen).to.be.at.least(80);
+    });
+
+    it('should have valid TTS provider options', function() {
+      const allowed = allowedConfigs.ttsProvider.allowed;
       expect(allowed).to.be.an('array');
-      expect(allowed.length).to.be.greaterThan(0);
-      expect(allowed).to.include('gpt-4o-mini');
+      expect(allowed).to.include('google');
+      expect(allowed).to.include('openai');
     });
 
     it('should have valid logLevel options', function() {

@@ -324,6 +324,28 @@ small,
   font-size: 0.85rem;
 }
 
+small a,
+.field-help a,
+.config-description a {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+small a:hover,
+.field-help a:hover,
+.config-description a:hover {
+  text-decoration: underline;
+}
+
+small code,
+.field-help code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-soft);
+}
+
 .input-with-action {
   display: flex;
   gap: 8px;
