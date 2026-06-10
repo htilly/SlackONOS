@@ -46,7 +46,7 @@
     "mp3-duration": "^1.1.0",
     "nconf": "^0.13.0",
     "openai": "^6.42.0",
-    "posthog-node": "^5.36.3",
+    "posthog-node": "^5.36.9",
     "selfsigned": "^5.5.0",
     "sonos": "^1.14.3",
     "soundcraft-ui-connection": "^6.0.3",
