@@ -566,9 +566,9 @@ async function _slackMessage(message, channel_id, options = {}) {
   if (platform === 'discord') {
     try {
       const sendStart = process.hrtime.bigint();
-      await DiscordSystem.sendDiscordMessage(targetChannel, message, options);
+      const result = await DiscordSystem.sendDiscordMessage(targetChannel, message, options);
       logger.info(`[TIMING] discord_send channel=${targetChannel} chars=${String(message || '').length} ms=${elapsedMs(sendStart)}`);
-      return;
+      return result;
     } catch (e) {
       logger.warn(`Discord send failed: ${e.message || e}. Message not delivered.`);
       return; // DO NOT fall back to Slack; channel IDs incompatible
@@ -591,8 +591,9 @@ async function _slackMessage(message, channel_id, options = {}) {
       }
       
       const sendStart = process.hrtime.bigint();
-      await slack.sendMessage(message, targetChannel, options);
+      const result = await slack.sendMessage(message, targetChannel, options);
       logger.info(`[TIMING] slack_send channel=${targetChannel} chars=${String(message || '').length} ms=${elapsedMs(sendStart)}`);
+      return result;
     } else {
       logger.warn('Slack not initialized - cannot send message');
     }
@@ -844,6 +845,7 @@ function ensureConfigDefaults() {
     soundcraftChannels: [],
     // Slack settings
     slackAlwaysThread: false,
+    queueThreadThreshold: 20,
     // Crossfade settings
     crossfadeEnabled: true
   };
@@ -1053,6 +1055,7 @@ httpServer = webServer.httpServer;
       getConfig: () => ({
         maxVolume,
         searchLimit,
+        queueThreadThreshold: config.get('queueThreadThreshold'),
       }),
       voting: voting,
       soundcraft: soundcraft,
@@ -3003,6 +3006,7 @@ async function _setconfig(input, channel, userName) {
 > \`crossfadeEnabled\`: ${config.get('crossfadeEnabled') || false}
 > \`crossfadeDurationSeconds\`: ${Number(config.get('crossfadeDurationSeconds') || 6)}
 > \`slackAlwaysThread\`: ${config.get('slackAlwaysThread') || false}
+> \`queueThreadThreshold\`: ${Number(config.get('queueThreadThreshold') || 20)}
 > \`logLevel\`: ${config.get('logLevel') || 'info'}
 
 *Usage:* \`setconfig <key> <value>\`
@@ -3018,6 +3022,7 @@ async function _setconfig(input, channel, userName) {
 *Example:* \`setconfig crossfadeEnabled true\`
 *Example:* \`setconfig crossfadeDurationSeconds 6\`
 *Example:* \`setconfig slackAlwaysThread true\`
+*Example:* \`setconfig queueThreadThreshold 20\`
     `;
     _slackMessage(currentConfig.trim(), channel);
     return;
@@ -3037,6 +3042,7 @@ async function _setconfig(input, channel, userName) {
     voteTimeLimitMinutes: { type: 'number', min: 1, max: 60 },
     themePercentage: { type: 'number', min: 0, max: 100 },
     crossfadeDurationSeconds: { type: 'number', min: 0, max: 30 },
+    queueThreadThreshold: { type: 'number', min: 1, max: 1000 },
     aiModel: { type: 'string', minLen: 1, maxLen: 100 },
     aiPrompt: { type: 'string', minLen: 1, maxLen: 500 },
     aiMoodMirrorEnabled: { type: 'boolean' },

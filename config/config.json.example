@@ -42,6 +42,7 @@
     "spotifyClientId": "supersecretid",
     "spotifyClientSecret": "extrasupersecretsecret",
     "logLevel": "info",
+    "queueThreadThreshold": 20,
     "useLegacyBot": false,
     "soundcraftEnabled": false,
     "soundcraftIp": "192.168.1.100",

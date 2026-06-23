@@ -38,6 +38,7 @@ bestof U2
 current
 gong
 list
+listall
 ```
 
 ## Seasonal Awareness

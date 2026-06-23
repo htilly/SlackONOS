@@ -57,6 +57,12 @@ const args = process.argv.slice(2);
 let channelId = config.slackChannel || 'C01JS8A0YC9';
 let adminChannelId = config.slackAdminChannel || 'C01J1TBLCA0';
 const slackONOSBotId = config.slackONOSBotId || null;
+const hasSlackONOSMentionTarget = !!(
+    slackONOSBotId &&
+    !String(slackONOSBotId).includes('YOUR') &&
+    !String(slackONOSBotId).includes('123ABC')
+);
+const slackONOSMention = hasSlackONOSMentionTarget ? `<@${slackONOSBotId}>` : null;
 const sonosPingHost = process.env.SONOS_PING_HOST || config.sonosPingHost || config.sonos || mainConfig.sonos || null;
 const sonosPingEnabled = process.env.SONOS_PING !== '0' && process.env.SONOS_PING_DISABLED !== '1' && !!sonosPingHost;
 const sonosPingIntervalMs = Math.max(
@@ -760,6 +766,20 @@ const validators = {
         return `Response should NOT contain "${text}"`;
     },
 
+    successfulAddResponse: () => (responses) => {
+        const allText = responses.map(r => r.text).join(' ');
+        if (/admin-only|admin only/i.test(allText)) {
+            return 'Response should not be an admin-only rejection';
+        }
+        if (/already/i.test(allText)) {
+            return 'Response should not be duplicate rejection';
+        }
+        if (/(queue|queued|added)/i.test(allText)) {
+            return true;
+        }
+        return 'Response should confirm a track was added to the queue';
+    },
+
     recordQueueSize: (key) => (responses) => {
         const size = extractQueueSize(responses);
         if (size === null) return 'Could not parse queue size from response';
@@ -844,6 +864,67 @@ const validators = {
         return `❌ FAIL: Queue increased by ${actualIncrease}, expected ${minExpected}-${maxExpected} (based on ${expectedCount} tracks, baseline: ${baseline} → ${size})`;
     }
 };
+
+const transcriptSongRegressionCases = [
+    {
+        name: 'Transcript Add - That’s So True',
+        command: 'add That’s So True Gracie Abrams',
+        waitTime: 7
+    },
+    {
+        name: 'Transcript Add - Cold Wind Blows',
+        command: 'add Cold Wind Blows Eminem',
+        waitTime: 7
+    },
+    {
+        name: 'Transcript Add - Hjärtslag',
+        command: 'add Hjärtslag Hov1',
+        waitTime: 7
+    },
+    {
+        name: 'Transcript Add - What a Feeling',
+        command: 'add What a Feeling Irene Cara',
+        waitTime: 7
+    },
+    {
+        name: "Transcript Add - I miss you, I’m sorry",
+        command: "add i miss you, i'm sorry Gracie Abrams",
+        waitTime: 7
+    },
+    {
+        name: 'Transcript Add - iloveitiloveitiloveit',
+        command: 'add iloveitiloveitiloveit Bella Kay',
+        waitTime: 7
+    }
+];
+
+const transcriptSongRegressionTests = transcriptSongRegressionCases.map(({ name, command, waitTime }) =>
+    new TestCase(
+        name,
+        command,
+        validators.and(
+            validators.responseCount(1, 3),
+            validators.successfulAddResponse()
+        ),
+        waitTime
+    )
+);
+
+const transcriptMentionRegressionTests = hasSlackONOSMentionTarget ? [
+    new TestCase(
+        'Transcript Mention - Play White Keys Requires Vote',
+        `${slackONOSMention} play White Keys`,
+        validators.and(
+            validators.responseCount(1, 3),
+            validators.or(
+                validators.containsText('admin-only'),
+                validators.containsText('vote <track#>'),
+                validators.containsText('vote')
+            )
+        ),
+        12
+    )
+] : [];
 
 // Define test suite (will be assigned after definition)
 // ORDER MATTERS: Tests are arranged to handle state dependencies correctly
@@ -1104,6 +1185,45 @@ const testSuiteArray = [
         ),
         7
     ),
+
+    // Regression for real messages that previously coincided with admin-only false positives.
+    new TestCase(
+        'Queue Size - Baseline Before Transcript Songs',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.recordQueueSize('beforeTranscriptSongs')
+        ),
+        4
+    ),
+
+    ...transcriptSongRegressionTests,
+
+    new TestCase(
+        'Queue Size - After Transcript Songs (+6)',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.queueSizeIncreaseExactly('beforeTranscriptSongs', transcriptSongRegressionTests.length)
+        ),
+        4
+    ),
+
+    new TestCase(
+        'Transcript Simple Chat - Play White Keys Requires Vote',
+        'play White Keys',
+        validators.and(
+            validators.responseCount(1, 3),
+            validators.or(
+                validators.containsText('admin-only'),
+                validators.containsText('vote <track#>'),
+                validators.containsText('vote')
+            )
+        ),
+        7
+    ),
+
+    ...transcriptMentionRegressionTests,
 
     // Search album first to get track count
     new TestCase(

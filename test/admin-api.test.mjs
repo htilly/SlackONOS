@@ -88,6 +88,16 @@ describe('Admin API module', function() {
     expect(syncVotingConfig.calledOnce).to.equal(true);
   });
 
+  it('allows updating queueThreadThreshold via admin config', async function() {
+    const config = createConfig({ queueThreadThreshold: 20 });
+    const api = createApi({ config });
+
+    const result = await api.updateConfigValue('queueThreadThreshold', '12');
+
+    expect(result.success).to.equal(true);
+    expect(config.store.queueThreadThreshold).to.equal(12);
+  });
+
   it('allows updating OpenAI TTS settings via admin config', async function() {
     const config = createConfig({ ttsProvider: 'google', openaiTtsSpeed: 1 });
     const api = createApi({ config });

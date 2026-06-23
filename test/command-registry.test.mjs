@@ -18,6 +18,7 @@ describe('Command Registry', function() {
         search: sinon.stub(),
         searchalbum: sinon.stub(),
         searchplaylist: sinon.stub(),
+        listQueue: sinon.stub(),
         showQueue: sinon.stub(),
         upNext: sinon.stub(),
         getVolume: sinon.stub(),
@@ -79,6 +80,7 @@ describe('Command Registry', function() {
 
     expect(registry.get('current').aliases).to.deep.equal(['wtf']);
     expect(registry.get('list').aliases).to.deep.equal(['ls', 'playlist']);
+    expect(registry.get('listall').admin).to.equal(false);
     expect(registry.get('size').aliases).to.deep.equal(['count', 'count(list)']);
   });
 
@@ -96,11 +98,15 @@ describe('Command Registry', function() {
     const { handlers, registry } = makeRegistry();
 
     registry.get('source').fn(['source'], 'C123', '<@U1>');
+    registry.get('list').fn(['list'], 'C123', '<@U1>');
+    registry.get('listall').fn(['listall'], 'C123', '<@U1>');
     registry.get('setcrossfade').fn(['setcrossfade', 'on'], 'ADMIN', '<@U1>');
     registry.get('aimodels').fn(['aimodels'], 'ADMIN', '<@U1>');
     registry.get('diagnostics').fn(['diagnostics'], 'ADMIN', '<@U1>');
 
     expect(handlers.showSource.calledWith('C123')).to.be.true;
+    expect(handlers.commandHandlers.listQueue.calledWith(['list'], 'C123')).to.be.true;
+    expect(handlers.commandHandlers.showQueue.calledWith('C123')).to.be.true;
     expect(handlers.setCrossfade.calledWith(['setcrossfade', 'on'], 'ADMIN', '<@U1>')).to.be.true;
     expect(handlers.listOpenAIModels.calledWith(['aimodels'], 'ADMIN', '<@U1>')).to.be.true;
     expect(handlers.diagnostics.calledWith(['diagnostics'], 'ADMIN', '<@U1>')).to.be.true;
