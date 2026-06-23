@@ -18,6 +18,7 @@ describe('Command Handlers', function() {
   let mockSoundcraft;
   let messages;
   let userActions;
+  let handlerConfig;
 
   beforeEach(function() {
     // Clear module cache to get fresh module state
@@ -27,6 +28,11 @@ describe('Command Handlers', function() {
 
     messages = [];
     userActions = [];
+    handlerConfig = {
+      maxVolume: 80,
+      searchLimit: 10,
+      queueThreadThreshold: 20
+    };
 
     // Create mock Sonos device
     mockSonos = {
@@ -37,6 +43,7 @@ describe('Command Handlers', function() {
       previous: sinon.stub().resolves(),
       flush: sinon.stub().resolves(),
       setPlayMode: sinon.stub().resolves(),
+      deviceDescription: sinon.stub().resolves({ roomName: 'Living Room' }),
       getVolume: sinon.stub().resolves(50),
       setVolume: sinon.stub().resolves(),
       getQueue: sinon.stub().resolves({
@@ -104,10 +111,7 @@ describe('Command Handlers', function() {
       logUserAction: async (user, action) => {
         userActions.push({ user, action });
       },
-      getConfig: () => ({
-        maxVolume: 80,
-        searchLimit: 10
-      }),
+      getConfig: () => handlerConfig,
       voting: mockVoting,
       soundcraft: mockSoundcraft
     });
@@ -344,6 +348,113 @@ describe('Command Handlers', function() {
       });
     });
 
+    describe('listQueue', function() {
+      it('should show current track and the next 10 songs by default', async function() {
+        mockSonos.getQueue.resolves({
+          items: Array.from({ length: 15 }, (_, i) => ({
+            title: `Track ${i + 1}`,
+            artist: `Artist ${i + 1}`,
+            uri: `spotify:track:${i + 1}`
+          })),
+          total: 15
+        });
+
+        await commandHandlers.listQueue(['list'], 'C123');
+
+        expect(messages).to.have.length(1);
+        expect(messages[0].msg).to.include('🎵 Queue · showing next 10 of 14');
+        expect(mockSonos.deviceDescription.called).to.equal(false);
+        expect(messages[0].msg).to.include('▶️ *#0 Track 1* — _Artist 1_');
+        expect(messages[0].msg).to.include('_Artist 1 · 2:00 remaining (3:00 total)_');
+        expect(messages[0].msg).to.include('#10 Track 11 — Artist 11');
+        expect(messages[0].msg).to.not.include('Track 12');
+        expect(messages[0].msg).to.include('*More songs queued.*');
+        expect(messages[0].msg).to.include('`listall`');
+        expect(messages[0].msg).to.include('`list all`');
+      });
+
+      it('should show the full queue when called as list all', async function() {
+        await commandHandlers.listQueue(['list', 'all'], 'C123');
+
+        expect(messages.length).to.be.greaterThan(0);
+        expect(messages[0].msg).to.include('🎵 Queue · showing 3 of 3');
+        expect(messages[0].msg).to.include('Track 1');
+      });
+
+      it('should keep the first list chunk in-channel and thread list overflow', async function() {
+        handlerConfig.queueThreadThreshold = 2;
+        mockSonos.getQueue.resolves({
+          items: Array.from({ length: 15 }, (_, i) => ({
+            title: `Track ${i + 1}`,
+            artist: `Artist ${i + 1}`,
+            uri: `spotify:track:${i + 1}`
+          })),
+          total: 15
+        });
+
+        await commandHandlers.listQueue(['list'], 'C123');
+
+        expect(messages).to.have.length(2);
+        expect(messages[0].opts).to.be.undefined;
+        expect(messages[0].msg).to.include('More from this list continues in the thread');
+        expect(messages[1].opts).to.deep.equal({ forceThread: true });
+        expect(messages[1].msg).to.include('More songs from `list`:');
+        expect(messages[1].msg).to.include('#3 Track 4 — Artist 4');
+      });
+
+      it('should fetch only the visible queue window for standard list', async function() {
+        const getResult = sinon.stub().resolves({
+          items: Array.from({ length: 10 }, (_, i) => ({
+            title: `Track ${i + 2}`,
+            artist: `Artist ${i + 2}`,
+            uri: `spotify:track:${i + 2}`
+          })),
+          total: 15,
+          returned: 10
+        });
+        mockSonos.contentDirectoryService = sinon.stub().returns({ GetResult: getResult });
+
+        await commandHandlers.listQueue(['list'], 'C123');
+
+        expect(mockSonos.getQueue.called).to.equal(false);
+        expect(getResult.calledOnce).to.equal(true);
+        expect(getResult.firstCall.args[0]).to.include({
+          ObjectID: 'Q:0',
+          StartingIndex: '1',
+          RequestedCount: '10'
+        });
+        expect(messages[0].msg).to.include('#10 Track 11 — Artist 11');
+        expect(messages[0].msg).to.not.include('Track 12');
+      });
+
+      it('should reconcile the current track before listing so played songs are not shown', async function() {
+        mockSonos.currentTrack.resolves({
+          title: 'Track 5',
+          artist: 'Artist 5',
+          queuePosition: null,
+          duration: 180,
+          position: 60
+        });
+        mockSonos.getQueue.resolves({
+          items: Array.from({ length: 15 }, (_, i) => ({
+            title: `Track ${i + 1}`,
+            artist: `Artist ${i + 1}`,
+            uri: `spotify:track:${i + 1}`
+          })),
+          total: 15
+        });
+
+        await commandHandlers.listQueue(['list'], 'C123');
+
+        expect(messages).to.have.length(1);
+        expect(messages[0].msg).to.include('🎵 Queue · showing next 10 of 10');
+        expect(messages[0].msg).to.include('▶️ *#4 Track 5* — _Artist 5_');
+        expect(messages[0].msg).to.include('#5 Track 6 — Artist 6');
+        expect(messages[0].msg).to.not.include('#0 Track 1');
+        expect(messages[0].msg).to.not.include('#4 Track 5 — Artist 5');
+      });
+    });
+
     describe('showQueue', function() {
       it('should show queue with tracks', async function() {
         await commandHandlers.showQueue('C123');
@@ -363,7 +474,7 @@ describe('Command Handlers', function() {
       it('should show current track info', async function() {
         await commandHandlers.showQueue('C123');
         
-        expect(messages[0].msg).to.include('Currently playing');
+        expect(messages[0].msg).to.include('▶️ *#0 Track 1* — _Artist 1_');
       });
 
       it('should mark immune tracks', async function() {
@@ -380,6 +491,23 @@ describe('Command Handlers', function() {
         await commandHandlers.showQueue('C123');
         
         expect(messages[0].msg).to.include(':star:');
+      });
+
+      it('should keep the first full queue chunk in-channel and thread overflow', async function() {
+        handlerConfig.queueThreadThreshold = 2;
+
+        await commandHandlers.showQueue('C123');
+
+        expect(messages).to.have.length(2);
+        expect(messages[0].opts).to.be.undefined;
+        expect(messages[0].msg).to.include('🎵 Queue · showing 2 of 3');
+        expect(messages[0].msg).to.include('▶️ *#0 Track 1* — _Artist 1_');
+        expect(messages[0].msg).to.include('#1 Track 2 — Artist 2');
+        expect(messages[0].msg).to.not.include('Track 3');
+        expect(messages[0].msg).to.include('More queued songs continue in the thread');
+        expect(messages[1].opts).to.deep.equal({ forceThread: true });
+        expect(messages[1].msg).to.include('More queued songs:');
+        expect(messages[1].msg).to.include('#2 Track 3 — Artist 3');
       });
     });
 

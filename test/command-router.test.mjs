@@ -289,6 +289,169 @@ describe('Command Router', function() {
     expect(messages[0].msg).to.include('admin-only');
   });
 
+  it('treats an ambiguous AI admin parse for a mentioned song title as add', async function() {
+    const addHandler = sinon.stub();
+    const stopHandler = sinon.stub();
+    const commandRegistry = new Map([
+      ['add', { fn: addHandler, admin: false }],
+      ['stop', { fn: stopHandler, admin: true }],
+    ]);
+    const AIHandler = {
+      isAIEnabled: sinon.stub().returns(true),
+      getUserContext: sinon.stub().returns(null),
+      parseNaturalLanguage: sinon.stub().resolves({
+        command: 'stop',
+        args: [],
+        targetType: 'command',
+        confidence: 0.95,
+        reasoning: 'Misread song title as playback control',
+        summary: '',
+        followUp: null,
+        response: null,
+        suggestedAction: null,
+      }),
+      setUserContext: sinon.stub(),
+      clearUserContext: sinon.stub(),
+    };
+    const { router, messages } = makeRouter({ commandRegistry, AIHandler });
+
+    await router.routeCommand('<@BOT> what a feeling', 'C123', '<@U123>', 'slack', false, true);
+
+    expect(stopHandler.called).to.be.false;
+    expect(addHandler.calledOnce).to.be.true;
+    expect(addHandler.firstCall.args[0]).to.deep.equal(['add', 'what', 'a', 'feeling']);
+    expect(messages.some(m => m.msg.includes('admin-only'))).to.be.false;
+  });
+
+  it('keeps "play <title>" AI playback-control parses on the admin-only path', async function() {
+    const addHandler = sinon.stub();
+    const playHandler = sinon.stub();
+    const commandRegistry = new Map([
+      ['add', { fn: addHandler, admin: false }],
+      ['play', { fn: playHandler, admin: true }],
+    ]);
+    const AIHandler = {
+      isAIEnabled: sinon.stub().returns(true),
+      getUserContext: sinon.stub().returns(null),
+      parseNaturalLanguage: sinon.stub().resolves({
+        command: 'play',
+        args: [],
+        targetType: 'command',
+        confidence: 0.95,
+        reasoning: 'Misread title request as playback resume',
+        summary: '',
+        followUp: null,
+        response: null,
+        suggestedAction: null,
+      }),
+      setUserContext: sinon.stub(),
+      clearUserContext: sinon.stub(),
+    };
+    const { router, messages } = makeRouter({ commandRegistry, AIHandler });
+
+    await router.routeCommand('<@BOT> play White Keys', 'C123', '<@U123>', 'slack', false, true);
+
+    expect(playHandler.called).to.be.false;
+    expect(addHandler.called).to.be.false;
+    expect(messages[0].msg).to.include('vote <track#>');
+  });
+
+  it('keeps direct "play <title>" in a regular channel on the admin-only path', async function() {
+    const addHandler = sinon.stub();
+    const playHandler = sinon.stub();
+    const commandRegistry = new Map([
+      ['add', { fn: addHandler, admin: false }],
+      ['play', { fn: playHandler, admin: true }],
+    ]);
+    const { router, messages } = makeRouter({ commandRegistry });
+
+    await router.routeCommand('play White Keys', 'C123', '<@U123>', 'slack');
+
+    expect(playHandler.called).to.be.false;
+    expect(addHandler.called).to.be.false;
+    expect(messages[0].msg).to.include('vote <track#>');
+  });
+
+  it('keeps direct "play <track#>" in a regular channel on the admin-only path', async function() {
+    const addHandler = sinon.stub();
+    const playHandler = sinon.stub();
+    const commandRegistry = new Map([
+      ['add', { fn: addHandler, admin: false }],
+      ['play', { fn: playHandler, admin: true }],
+      ['vote', { fn: sinon.stub(), admin: false }],
+    ]);
+    const { router, messages } = makeRouter({ commandRegistry });
+
+    await router.routeCommand('play 3', 'C123', '<@U123>', 'slack');
+
+    expect(playHandler.called).to.be.false;
+    expect(addHandler.called).to.be.false;
+    expect(messages[0].msg).to.include('vote 3');
+  });
+
+  it('keeps explicit AI admin skip requests on the admin-only path', async function() {
+    const nextHandler = sinon.stub();
+    const commandRegistry = new Map([
+      ['next', { fn: nextHandler, admin: true }],
+    ]);
+    const AIHandler = {
+      isAIEnabled: sinon.stub().returns(true),
+      getUserContext: sinon.stub().returns(null),
+      parseNaturalLanguage: sinon.stub().resolves({
+        command: 'next',
+        args: [],
+        targetType: 'command',
+        confidence: 0.95,
+        reasoning: 'User wants to skip current track',
+        summary: '',
+        followUp: null,
+        response: null,
+        suggestedAction: null,
+      }),
+      setUserContext: sinon.stub(),
+      clearUserContext: sinon.stub(),
+    };
+    const { router, messages } = makeRouter({ commandRegistry, AIHandler });
+
+    await router.routeCommand('<@BOT> skip this song', 'C123', '<@U123>', 'slack', false, true);
+
+    expect(nextHandler.called).to.be.false;
+    expect(messages[0].msg).to.include('gong');
+  });
+
+  it('keeps explicit AI admin pause requests on the admin-only path', async function() {
+    const addHandler = sinon.stub();
+    const pauseHandler = sinon.stub();
+    const commandRegistry = new Map([
+      ['add', { fn: addHandler, admin: false }],
+      ['pause', { fn: pauseHandler, admin: true }],
+    ]);
+    const AIHandler = {
+      isAIEnabled: sinon.stub().returns(true),
+      getUserContext: sinon.stub().returns(null),
+      parseNaturalLanguage: sinon.stub().resolves({
+        command: 'pause',
+        args: [],
+        targetType: 'command',
+        confidence: 0.95,
+        reasoning: 'User wants to pause playback',
+        summary: '',
+        followUp: null,
+        response: null,
+        suggestedAction: null,
+      }),
+      setUserContext: sinon.stub(),
+      clearUserContext: sinon.stub(),
+    };
+    const { router, messages } = makeRouter({ commandRegistry, AIHandler });
+
+    await router.routeCommand('<@BOT> pause it', 'C123', '<@U123>', 'slack', false, true);
+
+    expect(pauseHandler.called).to.be.false;
+    expect(addHandler.called).to.be.false;
+    expect(messages[0].msg).to.include('admin-only');
+  });
+
   it('treats "play some nice tunes" as adding music, not playback control', async function() {
     const playHandler = sinon.stub();
     const commandRegistry = new Map([

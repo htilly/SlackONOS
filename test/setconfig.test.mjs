@@ -18,6 +18,7 @@ describe('Setconfig Command', function() {
     voteTimeLimitMinutes: { type: 'number', min: 1, max: 60 },
     themePercentage: { type: 'number', min: 0, max: 100 },
     crossfadeDurationSeconds: { type: 'number', min: 0, max: 30 },
+    queueThreadThreshold: { type: 'number', min: 1, max: 1000 },
     openaiTtsSpeed: { type: 'number', min: 0.25, max: 4 },
     aiModel: { type: 'string', minLen: 1, maxLen: 100 },
     aiPrompt: { type: 'string', minLen: 1, maxLen: 500 },
@@ -324,7 +325,8 @@ describe('Setconfig Command', function() {
     it('should have correct types for all number configs', function() {
       const numberConfigs = ['gongLimit', 'voteLimit', 'voteImmuneLimit', 'flushVoteLimit', 
                            'maxVolume', 'searchLimit', 'voteTimeLimitMinutes', 
-                           'themePercentage', 'crossfadeDurationSeconds', 'openaiTtsSpeed'];
+                           'themePercentage', 'crossfadeDurationSeconds', 'queueThreadThreshold',
+                           'openaiTtsSpeed'];
       
       for (const key of numberConfigs) {
         expect(allowedConfigs[key].type).to.equal('number');
@@ -377,6 +379,12 @@ describe('Setconfig Command', function() {
       const def = allowedConfigs.voteTimeLimitMinutes;
       expect(def.min).to.be.at.least(1);
       expect(def.max).to.be.at.most(120);
+    });
+
+    it('should have reasonable queueThreadThreshold bounds', function() {
+      const def = allowedConfigs.queueThreadThreshold;
+      expect(def.min).to.equal(1);
+      expect(def.max).to.be.at.least(100);
     });
 
     it('should have reasonable openaiTtsSpeed bounds', function() {

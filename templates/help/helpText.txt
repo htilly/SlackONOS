@@ -9,7 +9,8 @@
 
 *ℹ️ Info Commands:*
 > `current` (or `wtf`) - Show what's currently playing.
-> `list` (or `ls`, `playlist`) - Show the entire queue.
+> `list` (or `ls`, `playlist`) - Show what's playing and the next 10 songs.
+> `listall` (or `list all`) - Show the entire queue.
 > `upnext` - Show the next 5 tracks.
 > `size` (or `count`) - Get the number of songs in the queue.
 > `volume` - Get the current volume level.

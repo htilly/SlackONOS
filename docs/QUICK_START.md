@@ -72,7 +72,8 @@ Do this for both your admin channel and music channel.
 Try these commands in Slack:
 - `add song name` - Add music to queue
 - `current` - See what's playing
-- `list` - Show queue
+- `list` - Show what's playing and the next 10 songs
+- `listall` - Show the full queue
 - `gong` - Vote to skip current song
 
 ## Need Help?

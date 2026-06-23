@@ -323,7 +323,7 @@ SlackONOS v2.0 includes significant architectural improvements:
 - `@bot add Forever Young` → Adds the song to queue
 - `@SlackONOS what's playing?` → Shows current track
 - `@bot skip this terrible song` → Gongs the current track
-- `@SlackONOS show me the queue` → Lists all queued tracks
+- `@SlackONOS show me the queue` → Shows what's playing and the next queued tracks
 
 **🎉 Batch Add with Smart Themes (NEW!):**
 - `@SlackONOS add some christmas music` → Adds 5 holiday tracks
@@ -473,7 +473,8 @@ The bot queues song requests and plays them in order. If enough people dislike t
 * `search <text>` - Search for tracks without adding to queue
 * `bestof <artist>` - Queue the top 10 tracks by an artist
 * `current` - Show currently playing track with time remaining
-* `list` - Display the current queue
+* `list` - Show what's playing and the next 10 songs
+* `listall` - Display the full queue
 * `status` - Show playback status
 
 **Democratic Features:**

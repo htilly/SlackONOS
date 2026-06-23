@@ -269,6 +269,7 @@ async function loadConfig() {
       { key: 'openaiTtsInstructions', label: 'OpenAI TTS Instructions', type: 'text', description: 'Optional voice direction for OpenAI TTS models that support instructions' },
       { key: 'defaultTheme', label: 'Default Theme', type: 'text', description: 'Default music theme (e.g., lounge, club, office)' },
       { key: 'themePercentage', label: 'Theme Percentage', type: 'number', min: 0, max: 100, description: 'Percentage of theme tracks to mix in (0-100)' },
+      { key: 'queueThreadThreshold', label: 'Queue Thread Threshold', type: 'number', min: 1, max: 1000, description: 'Thread queue list replies when the queue has more than this many tracks' },
       {
         key: 'openaiApiKey',
         label: 'OpenAI API Key',
