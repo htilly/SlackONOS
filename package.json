@@ -35,7 +35,7 @@
   "license": "ISC",
   "dependencies": {
     "@jsfeb26/urllib-sync": "^1.1.4",
-    "@sefinek/google-tts-api": "^2.1.13",
+    "@sefinek/google-tts-api": "^2.1.15",
     "@simplewebauthn/server": "^13.3.1",
     "@slack/rtm-api": "^7.0.4",
     "@slack/socket-mode": "^2.0.7",
