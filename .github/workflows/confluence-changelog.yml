@@ -30,29 +30,42 @@ jobs:
     
     - name: Get release info
       id: release
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        INPUT_VERSION: ${{ github.event.inputs.version }}
+        INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+        RELEASE_NAME: ${{ github.event.release.name }}
+        RELEASE_URL: ${{ github.event.release.html_url }}
+        # Untrusted release body kept in an env var; never spliced into the shell.
+        RELEASE_BODY: ${{ github.event.release.body }}
       run: |
-        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+        if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
           # Manual trigger - use input values
-          echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          echo "name=SlackONOS ${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          echo "url=https://github.com/htilly/SlackONOS/releases/tag/${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          echo "dry_run=${{ github.event.inputs.dry_run }}" >> $GITHUB_OUTPUT
+          {
+            echo "version=$INPUT_VERSION"
+            echo "name=SlackONOS $INPUT_VERSION"
+            echo "url=https://github.com/htilly/SlackONOS/releases/tag/$INPUT_VERSION"
+            echo "dry_run=$INPUT_DRY_RUN"
+          } >> "$GITHUB_OUTPUT"
           echo "(Manual test run)" > release_body.txt
         else
           # Release trigger
-          echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
-          echo "name=${{ github.event.release.name }}" >> $GITHUB_OUTPUT
-          echo "url=${{ github.event.release.html_url }}" >> $GITHUB_OUTPUT
-          echo "dry_run=false" >> $GITHUB_OUTPUT
-          cat << 'EOF' > release_body.txt
-        ${{ github.event.release.body }}
-        EOF
+          {
+            echo "version=$RELEASE_TAG"
+            echo "name=$RELEASE_NAME"
+            echo "url=$RELEASE_URL"
+            echo "dry_run=false"
+          } >> "$GITHUB_OUTPUT"
+          printf '%s' "$RELEASE_BODY" > release_body.txt
         fi
     
     - name: Extract changelog for this version
       id: changelog
+      env:
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
       run: |
-        VERSION="${{ github.event.release.tag_name }}"
+        VERSION="$RELEASE_TAG"
         # Remove 'v' prefix if present
         VERSION_NUM="${VERSION#v}"
 

@@ -16,7 +16,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  */
 
 const enhancedTask = process.env.ENHANCED_TASK || process.env.TASK || "";
-const issueNumber = process.env.ISSUE_NUMBER || "unknown";
+// issueNumber is embedded in file paths passed to execSync/patch below. Restrict it
+// to digits so a workflow_dispatch caller cannot inject shell metacharacters or path
+// traversal via ISSUE_NUMBER. Non-numeric values fall back to a safe constant.
+const rawIssueNumber = process.env.ISSUE_NUMBER || "";
+const issueNumber = /^[0-9]+$/.test(rawIssueNumber) ? rawIssueNumber : "unknown";
 const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
 const model = process.env.CLAUDE_MODEL || "claude-sonnet-4-5-20250929";
 
