@@ -335,24 +335,26 @@ describe('Auth Handler', function() {
   });
 
   describe('Client IP Detection', function() {
-    it('should extract IP from x-forwarded-for header', function() {
+    it('ignores x-forwarded-for by default (trustProxy disabled) and uses the socket peer', function() {
       const req = {
         headers: { 'x-forwarded-for': '203.0.113.195, 70.41.3.18, 150.172.238.178' },
         connection: { remoteAddress: '127.0.0.1' }
       };
-      
+
+      // Forwarded headers are client-controlled; trusting them by default would
+      // let an attacker forge a unique IP per request and bypass rate limiting.
       const ip = authHandler.getClientIp(req);
-      expect(ip).to.equal('203.0.113.195');
+      expect(ip).to.equal('127.0.0.1');
     });
-    
-    it('should extract IP from x-real-ip header', function() {
+
+    it('ignores x-real-ip by default (trustProxy disabled) and uses the socket peer', function() {
       const req = {
         headers: { 'x-real-ip': '203.0.113.195' },
         connection: { remoteAddress: '127.0.0.1' }
       };
-      
+
       const ip = authHandler.getClientIp(req);
-      expect(ip).to.equal('203.0.113.195');
+      expect(ip).to.equal('127.0.0.1');
     });
     
     it('should fall back to connection.remoteAddress', function() {
@@ -382,14 +384,15 @@ describe('Auth Handler', function() {
       expect(ip).to.equal('unknown');
     });
     
-    it('should trim whitespace from x-forwarded-for', function() {
+    it('does not fall back to forwarded headers when no socket address is present', function() {
       const req = {
-        headers: { 'x-forwarded-for': '  203.0.113.195  , 70.41.3.18' },
-        connection: { remoteAddress: '127.0.0.1' }
+        headers: { 'x-forwarded-for': '  203.0.113.195  , 70.41.3.18' }
       };
-      
+
+      // With no trusted proxy and no socket/connection address, the spoofable
+      // forwarded header must not be used; result is 'unknown'.
       const ip = authHandler.getClientIp(req);
-      expect(ip).to.equal('203.0.113.195');
+      expect(ip).to.equal('unknown');
     });
   });
 

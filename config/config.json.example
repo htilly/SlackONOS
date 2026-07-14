@@ -23,6 +23,8 @@
     "openaiTtsSpeed": 1,
     "openaiTtsInstructions": "",
     "webPort" : "8080",
+    "trustProxy": false,
+    "_comment_trustProxy": "Set to true ONLY when the app runs behind a reverse proxy you control. When true, X-Forwarded-For/X-Real-IP are trusted for the client IP used in login rate limiting. Leave false for direct exposure, otherwise a client can forge the header to bypass rate limiting.",
     "httpsPort": 8443,
     "sslAutoGenerate": true,
     "sslCertPath": "",
