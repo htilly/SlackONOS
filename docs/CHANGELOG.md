@@ -5,6 +5,21 @@ All notable changes to SlackONOS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.4] - 2026-08-08
+
+### Security
+- **Dependency patch** - Closed all 18 open Dependabot alerts by bumping vulnerable transitive dependencies via `overrides`:
+  - `axios` to 1.18.1+ (10 alerts: prototype pollution, DoS, proxy/auth bypass issues)
+  - `undici` to 7.29.0+ (5 alerts: CRLF injection, cache/cookie handling, response desync)
+  - `js-yaml` to 4.3.1 (2 alerts: quadratic-complexity DoS in merge-key handling)
+  - `brace-expansion` to 2.1.4 / 5.0.9 (DoS via unbounded expansion)
+- Also picked up routine bumps for `@sefinek/google-tts-api`, `@slack/web-api`, `openai`, `posthog-node`, and `soundcraft-ui-connection`.
+- Remaining `ip`/`sonos` SSRF finding (`GHSA-2p57-rm9w-gvfp`) has no upstream fix available and is a known, previously-reviewed risk.
+
+### Verification
+- npm test: 666 passing
+- Full Slack + Sonos end-to-end integration suite: 87/87 passing against the `:master` Docker build
+
 ## [2.3.3] - 2026-06-05
 
 ### Added
