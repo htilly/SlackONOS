@@ -45,7 +45,7 @@
     "lodash": "^4.18.1",
     "mp3-duration": "^1.1.0",
     "nconf": "^0.13.0",
-    "openai": "^6.46.0",
+    "openai": "^7.4.0",
     "posthog-node": "^5.41.0",
     "selfsigned": "^5.5.0",
     "sonos": "^1.14.3",
