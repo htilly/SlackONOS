@@ -5,6 +5,17 @@ All notable changes to SlackONOS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.5] - 2026-08-08
+
+### Fixed
+- **Telemetry config path** - Resolved relative to the module instead of the process working directory, fixing telemetry config loading when the bot is started from a different directory.
+
+### Changed
+- **Dependency upgrades** - Bumped `@slack/web-api` (7.19.0 → 8.0.0) and `openai` (6.49.0 → 7.4.0), both major version upgrades. Verified no usage of removed/changed APIs (error-code helpers, `files.upload`, `rtm.start`, axios-specific transport options); Node engine requirement (`>=22.0.0`) already satisfies both packages' new minimums.
+
+### Verification
+- npm test: 666 passing
+
 ## [2.3.4] - 2026-08-08
 
 ### Security
