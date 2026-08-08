@@ -4,7 +4,7 @@
 ![Coverage](https://github.com/htilly/SlackONOS/workflows/Test%20and%20Coverage/badge.svg)
 
 
-# SlackONOS - Democratic Music Bot for Discord & Slack
+# SlackONOS – Democratic Slack & Discord Bot for Sonos Speaker Control
 
 **Control Your Sonos Speakers with Community Voting**
 
@@ -28,31 +28,31 @@ A democratic music bot for Discord and Slack that lets teams control Sonos speak
 
 ## Screenshots
 
-![Setup Wizard - Welcome](docs/images/Screenshot%201.png)
+![SlackONOS setup wizard – welcome screen for the Slack and Discord Sonos bot](docs/images/Screenshot%201.png)
 
 *Live music playback control and queue management*
 
-![Setup Wizard - Platform Selection](docs/images/Screenshot%202.png)
+![SlackONOS setup wizard – select Slack or Discord platform for Sonos control](docs/images/Screenshot%202.png)
 
 *Live music playback control and queue management*
 
-![Setup Wizard - Configuration](docs/images/Screenshot%203.png)
+![SlackONOS setup wizard – configure Sonos speakers and Spotify integration](docs/images/Screenshot%203.png)
 
 *Admin settings in the dedicated admin-channel*
 
-![Admin Panel - Overview](docs/images/Screenshot%204.png)
+![SlackONOS admin panel overview – manage the Sonos queue and Slack/Discord settings](docs/images/Screenshot%204.png)
 
 *Discord and Slack integration*
 
-![Admin Panel - Security Settings](docs/images/Screenshot%205.png)
+![SlackONOS admin panel – security settings and WebAuthn login configuration](docs/images/Screenshot%205.png)
 
 *Configure your integrations with auto-validation*
 
-![Admin Panel - Now Playing](docs/images/Screenshot%206.png)
+![SlackONOS admin panel – now playing view for the Sonos speaker queue](docs/images/Screenshot%206.png)
 
 *Secure login with WebAuthn/FIDO2 support*
 
-![Login Page](docs/images/Screenshot%207.png)
+![SlackONOS admin login page – secure WebAuthn/FIDO2 authentication for Sonos control](docs/images/Screenshot%207.png)
 
 
 ## License & Commercial Use
