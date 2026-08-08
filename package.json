@@ -35,21 +35,21 @@
   "license": "ISC",
   "dependencies": {
     "@jsfeb26/urllib-sync": "^1.1.4",
-    "@sefinek/google-tts-api": "^2.1.13",
+    "@sefinek/google-tts-api": "^2.1.15",
     "@simplewebauthn/server": "^13.3.1",
     "@slack/rtm-api": "^7.0.4",
     "@slack/socket-mode": "^2.0.7",
-    "@slack/web-api": "^7.16.0",
+    "@slack/web-api": "^7.17.0",
     "bcrypt": "^6.0.0",
     "discord.js": "^14.26.4",
     "lodash": "^4.18.1",
     "mp3-duration": "^1.1.0",
     "nconf": "^0.13.0",
-    "openai": "^6.42.0",
-    "posthog-node": "^5.36.3",
+    "openai": "^6.46.0",
+    "posthog-node": "^5.41.0",
     "selfsigned": "^5.5.0",
     "sonos": "^1.14.3",
-    "soundcraft-ui-connection": "^6.0.3",
+    "soundcraft-ui-connection": "^6.0.4",
     "urlencode": "^2.0.0",
     "winston": "^3.18.3",
     "xml2js": "^0.6.2"
@@ -58,11 +58,12 @@
     "node": ">=22.0.0"
   },
   "overrides": {
-    "axios": "^1.17.0",
+    "axios": "^1.18.1",
     "serialize-javascript": "^7.0.5",
-    "undici": "^7.28.0",
+    "undici": "^7.29.0",
     "form-data": "^4.0.6",
     "diff": "^8.0.3",
-    "ip": "^2.0.1"
+    "ip": "^2.0.1",
+    "js-yaml": "^4.3.1"
   }
 }
