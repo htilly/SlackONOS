@@ -128,4 +128,123 @@ describe('Admin API module', function() {
     expect(result.track.title).to.equal('Track');
     expect(result.nextTracks).to.deep.equal([{ title: 'Next', artist: 'Queue Artist' }]);
   });
+
+  describe('#updateConfigValue edge cases', function() {
+    it('rejects a key that is not on the admin allow-list', async function() {
+      const config = createConfig({});
+      const api = createApi({ config });
+
+      const result = await api.updateConfigValue('someRandomInternalKey', 'value');
+
+      expect(result).to.deep.equal({ success: false, error: 'Key not allowed to be updated via admin' });
+      expect(config.store.someRandomInternalKey).to.equal(undefined);
+    });
+
+    it('accepts a valid log level and applies it live via logger.setLevel', async function() {
+      const config = createConfig({ logLevel: 'info' });
+      const logger = {
+        debug: sinon.stub(), error: sinon.stub(), info: sinon.stub(),
+        setLevel: sinon.stub(), warn: sinon.stub()
+      };
+      const api = createApi({ config, logger });
+
+      const result = await api.updateConfigValue('logLevel', 'debug');
+
+      expect(result.success).to.equal(true);
+      expect(config.store.logLevel).to.equal('debug');
+      expect(logger.setLevel.calledOnceWithExactly('debug')).to.equal(true);
+      expect(logger.warn.calledOnce).to.equal(true);
+    });
+
+    it('rejects an invalid log level without touching the logger or config', async function() {
+      const config = createConfig({ logLevel: 'info' });
+      const logger = {
+        debug: sinon.stub(), error: sinon.stub(), info: sinon.stub(),
+        setLevel: sinon.stub(), warn: sinon.stub()
+      };
+      const api = createApi({ config, logger });
+
+      const result = await api.updateConfigValue('logLevel', 'shout');
+
+      expect(result.success).to.equal(false);
+      expect(result.error).to.match(/Invalid log level/);
+      expect(config.store.logLevel).to.equal('info');
+      expect(logger.setLevel.called).to.equal(false);
+    });
+
+    it('rejects a non-numeric value for a numeric config key', async function() {
+      const config = createConfig({ maxVolume: 75 });
+      const api = createApi({ config });
+
+      const result = await api.updateConfigValue('maxVolume', 'loud');
+
+      expect(result.success).to.equal(false);
+      expect(result.error).to.match(/Must be a number/);
+      expect(config.store.maxVolume).to.equal(75);
+    });
+
+    it('coerces boolean-ish strings to true', async function() {
+      const config = createConfig({ ttsEnabled: false });
+      const api = createApi({ config });
+
+      for (const truthy of ['true', '1', 'yes', 'on', 'TRUE', ' On ']) {
+        const result = await api.updateConfigValue('ttsEnabled', truthy);
+        expect(result.success, `expected "${truthy}" to succeed`).to.equal(true);
+        expect(config.store.ttsEnabled, `expected "${truthy}" to coerce to true`).to.equal(true);
+      }
+    });
+
+    it('coerces non-matching strings to false for boolean config keys', async function() {
+      const config = createConfig({ ttsEnabled: true });
+      const api = createApi({ config });
+
+      const result = await api.updateConfigValue('ttsEnabled', 'nope');
+
+      expect(result.success).to.equal(true);
+      expect(config.store.ttsEnabled).to.equal(false);
+    });
+
+    it('coerces a non-string value for a boolean key via Boolean()', async function() {
+      const config = createConfig({ crossfadeEnabled: false });
+      const api = createApi({ config });
+
+      const result = await api.updateConfigValue('crossfadeEnabled', 1);
+
+      expect(result.success).to.equal(true);
+      expect(config.store.crossfadeEnabled).to.equal(true);
+    });
+
+    it('logs an error but still reports success when persisting the config fails', async function() {
+      const logger = {
+        debug: sinon.stub(), error: sinon.stub(), info: sinon.stub(),
+        setLevel: sinon.stub(), warn: sinon.stub()
+      };
+      const config = {
+        store: { maxVolume: 75 },
+        get(key) { return this.store[key]; },
+        set(key, value) { this.store[key] = value; },
+        save(cb) { cb(new Error('disk full')); }
+      };
+      const api = createApi({ config, logger });
+
+      const result = await api.updateConfigValue('maxVolume', '60');
+
+      expect(result.success).to.equal(true);
+      expect(config.store.maxVolume).to.equal(60);
+      expect(logger.error.calledWithMatch('Failed to save config:')).to.equal(true);
+    });
+
+    it('returns a failure result when an unexpected error is thrown', async function() {
+      const config = {
+        get() { return undefined; },
+        set() { throw new Error('unexpected failure'); },
+        save() {}
+      };
+      const api = createApi({ config });
+
+      const result = await api.updateConfigValue('maxVolume', '60');
+
+      expect(result).to.deep.equal({ success: false, error: 'unexpected failure' });
+    });
+  });
 });
