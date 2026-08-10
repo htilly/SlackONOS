@@ -28,8 +28,8 @@
   "devDependencies": {
     "c8": "^11.0.0",
     "chai": "6.2.2",
-    "mocha": "^11.7.6",
-    "sinon": "^22.0.0"
+    "mocha": "^11.8.0",
+    "sinon": "^22.1.0"
   },
   "author": "",
   "license": "ISC",
@@ -38,10 +38,10 @@
     "@sefinek/google-tts-api": "^2.1.15",
     "@simplewebauthn/server": "^13.3.1",
     "@slack/rtm-api": "^7.0.4",
-    "@slack/socket-mode": "^2.0.7",
+    "@slack/socket-mode": "^3.0.0",
     "@slack/web-api": "^8.0.0",
     "bcrypt": "^6.0.0",
-    "discord.js": "^14.26.4",
+    "discord.js": "^14.27.0",
     "lodash": "^4.18.1",
     "mp3-duration": "^1.1.0",
     "nconf": "^0.13.0",
@@ -49,7 +49,7 @@
     "posthog-node": "^5.41.0",
     "selfsigned": "^5.5.0",
     "sonos": "^1.14.3",
-    "soundcraft-ui-connection": "^6.0.4",
+    "soundcraft-ui-connection": "^7.0.2",
     "urlencode": "^2.0.0",
     "winston": "^3.18.3",
     "xml2js": "^0.6.2"
