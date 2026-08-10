@@ -49,7 +49,7 @@
     "posthog-node": "^5.41.0",
     "selfsigned": "^5.5.0",
     "sonos": "^1.14.3",
-    "soundcraft-ui-connection": "^6.0.4",
+    "soundcraft-ui-connection": "^7.0.2",
     "urlencode": "^2.0.0",
     "winston": "^3.18.3",
     "xml2js": "^0.6.2"
