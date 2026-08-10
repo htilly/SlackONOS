@@ -89,7 +89,16 @@ describe('Command Handlers', function() {
     // Create mock voting
     mockVoting = {
       isTrackGongBanned: sinon.stub().returns(false),
-      hasActiveVotes: sinon.stub().returns(false)
+      hasActiveVotes: sinon.stub().returns(false),
+      clearVoteCountForTrack: sinon.stub(),
+      clearAllTrackVotes: sinon.stub(),
+      resetAllVoteState: sinon.stub().returns({
+        gongVotesCleared: false,
+        immuneTracksCleared: 0,
+        voteImmuneVotesCleared: false,
+        tracksWithVotesCleared: 0,
+        flushVotesCleared: false
+      })
     };
 
     // Create mock Soundcraft
@@ -231,9 +240,18 @@ describe('Command Handlers', function() {
     describe('flush', function() {
       it('should call sonos.flush()', function(done) {
         commandHandlers.flush(['flush'], 'C123', 'user1');
-        
+
         setTimeout(() => {
           expect(mockSonos.flush.calledOnce).to.be.true;
+          done();
+        }, 50);
+      });
+
+      it('should clear all track votes', function(done) {
+        commandHandlers.flush(['flush'], 'C123', 'user1');
+
+        setTimeout(() => {
+          expect(mockVoting.clearAllTrackVotes.calledOnce).to.be.true;
           done();
         }, 50);
       });
@@ -264,9 +282,34 @@ describe('Command Handlers', function() {
     describe('nextTrack', function() {
       it('should call sonos.next()', function(done) {
         commandHandlers.nextTrack('C123', 'user1');
-        
+
         setTimeout(() => {
           expect(mockSonos.next.calledOnce).to.be.true;
+          done();
+        }, 50);
+      });
+
+      it('should fetch the current track before skipping and clear its votes', function(done) {
+        commandHandlers.nextTrack('C123', 'user1');
+
+        setTimeout(() => {
+          expect(mockSonos.currentTrack.calledOnce).to.be.true;
+          expect(mockSonos.currentTrack.calledBefore(mockSonos.next)).to.be.true;
+          expect(mockVoting.clearVoteCountForTrack.calledWith(
+            sinon.match({ title: 'Track 1', artist: 'Artist 1' })
+          )).to.be.true;
+          done();
+        }, 50);
+      });
+
+      it('should still skip if the current-track lookup fails', function(done) {
+        mockSonos.currentTrack.rejects(new Error('boom'));
+
+        commandHandlers.nextTrack('C123', 'user1');
+
+        setTimeout(() => {
+          expect(mockSonos.next.calledOnce).to.be.true;
+          expect(mockVoting.clearVoteCountForTrack.called).to.be.false;
           done();
         }, 50);
       });
@@ -300,10 +343,22 @@ describe('Command Handlers', function() {
 
       it('should remove track from queue', function(done) {
         commandHandlers.removeTrack(['remove', '1'], 'C123');
-        
+
         setTimeout(() => {
           // Track number 1 (0-based) becomes 2 (1-based for Sonos)
           expect(mockSonos.removeTracksFromQueue.calledWith(2, 1)).to.be.true;
+          done();
+        }, 50);
+      });
+
+      it('should look up the track before removal and clear its votes', function(done) {
+        commandHandlers.removeTrack(['remove', '1'], 'C123');
+
+        setTimeout(() => {
+          expect(mockSonos.getQueue.calledOnce).to.be.true;
+          expect(mockVoting.clearVoteCountForTrack.calledWith(
+            sinon.match({ title: 'Track 2', artist: 'Artist 2' })
+          )).to.be.true;
           done();
         }, 50);
       });
@@ -321,14 +376,44 @@ describe('Command Handlers', function() {
 
       it('should remove half the queue', function(done) {
         mockSonos.getQueue.resolves({
-          items: [{}, {}, {}, {}],
+          items: [
+            { title: 'A', artist: 'A Artist' },
+            { title: 'B', artist: 'B Artist' },
+            { title: 'C', artist: 'C Artist' },
+            { title: 'D', artist: 'D Artist' }
+          ],
           total: 4
         });
 
         commandHandlers.purgeHalfQueue(['thanos'], 'C123');
-        
+
         setTimeout(() => {
           expect(mockSonos.removeTracksFromQueue.calledWith(2, 2)).to.be.true;
+          done();
+        }, 100);
+      });
+
+      it('should clear votes for the removed tracks', function(done) {
+        mockSonos.getQueue.resolves({
+          items: [
+            { title: 'A', artist: 'A Artist' },
+            { title: 'B', artist: 'B Artist' },
+            { title: 'C', artist: 'C Artist' },
+            { title: 'D', artist: 'D Artist' }
+          ],
+          total: 4
+        });
+
+        commandHandlers.purgeHalfQueue(['thanos'], 'C123');
+
+        setTimeout(() => {
+          expect(mockVoting.clearVoteCountForTrack.callCount).to.equal(2);
+          expect(mockVoting.clearVoteCountForTrack.calledWith(
+            sinon.match({ title: 'B', artist: 'B Artist' })
+          )).to.be.true;
+          expect(mockVoting.clearVoteCountForTrack.calledWith(
+            sinon.match({ title: 'C', artist: 'C Artist' })
+          )).to.be.true;
           done();
         }, 100);
       });
@@ -568,6 +653,44 @@ describe('Command Handlers', function() {
         expect(messages).to.have.length(1);
         expect(messages[0].msg).to.include('*42*');
         expect(messages[0].msg).to.include('last checked');
+      });
+    });
+  });
+
+  describe('Voting Admin Commands', function() {
+    describe('resetVotes', function() {
+      it('should reset all vote state and report a summary', function() {
+        mockVoting.resetAllVoteState.returns({
+          gongVotesCleared: true,
+          immuneTracksCleared: 2,
+          voteImmuneVotesCleared: false,
+          tracksWithVotesCleared: 3,
+          flushVotesCleared: true
+        });
+
+        commandHandlers.resetVotes(['resetvotes'], 'C123', 'admin1');
+
+        expect(mockVoting.resetAllVoteState.calledOnce).to.be.true;
+        expect(userActions.some(a => a.user === 'admin1' && a.action === 'resetvotes')).to.be.true;
+        expect(messages.some(m => m.msg.includes('RESET'))).to.be.true;
+      });
+
+      it('should fail gracefully when the voting module is unavailable', function() {
+        delete require.cache[require.resolve('../lib/command-handlers.js')];
+        const fresh = require('../lib/command-handlers.js');
+        fresh.initialize({
+          logger: mockLogger,
+          sonos: mockSonos,
+          spotify: mockSpotify,
+          sendMessage: async (msg, ch) => { messages.push({ msg, channel: ch }); },
+          logUserAction: async (user, action) => { userActions.push({ user, action }); },
+          getConfig: () => handlerConfig
+          // voting intentionally omitted
+        });
+
+        fresh.resetVotes(['resetvotes'], 'C123', 'admin1');
+
+        expect(messages.some(m => m.msg.includes('unavailable'))).to.be.true;
       });
     });
   });
