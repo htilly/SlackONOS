@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import sinon from 'sinon';
 
 /**
  * Test voting module with config changes
@@ -771,10 +772,18 @@ describe('Voting Module (voting.js)', function() {
   });
 
   describe('resetGongState', function() {
-    it('should reset gong state', function() {
-      // This is a unit test of the reset function
-      // The gong state is internal, but we can verify it doesn't throw
+    it('should not throw', function() {
       expect(() => voting.resetGongState()).to.not.throw();
+    });
+
+    it('should reset the gong counter back to zero', async function() {
+      await voting.gong('C123', 'user1', () => {});
+      messages.length = 0;
+
+      voting.resetGongState();
+
+      await voting.gongcheck('C123');
+      expect(messages.some(m => m.msg.includes('3 more votes are needed'))).to.be.true;
     });
   });
 
@@ -787,6 +796,96 @@ describe('Voting Module (voting.js)', function() {
   describe('clearVoteCountForTrack', function() {
     it('should not throw for non-existent track', function() {
       expect(() => voting.clearVoteCountForTrack({ title: 'Nonexistent', artist: 'Unknown' })).to.not.throw();
+    });
+
+    it('should clear an existing track\'s vote tally', async function() {
+      await voting.vote(['vote', '0'], 'C123', 'user1');
+      messages.length = 0;
+
+      voting.clearVoteCountForTrack({ title: 'Track 1', artist: 'Artist 1', uri: 'spotify:track:1' });
+
+      await voting.votecheck('C123');
+      expect(messages.some(m => m.msg.includes('No tracks have been voted'))).to.be.true;
+    });
+  });
+
+  describe('clearAllTrackVotes', function() {
+    it('should clear vote tallies for every track', async function() {
+      await voting.vote(['vote', '0'], 'C123', 'user1');
+      await voting.vote(['vote', '1'], 'C123', 'user1');
+      messages.length = 0;
+
+      voting.clearAllTrackVotes();
+
+      await voting.votecheck('C123');
+      expect(messages.some(m => m.msg.includes('No tracks have been voted'))).to.be.true;
+    });
+  });
+
+  describe('resetAllVoteState', function() {
+    it('should clear all voting-related state and return an accurate summary', async function() {
+      // Gong: partial vote on the current track, plus a previously banned track
+      await voting.gong('C123', 'user1', () => {});
+      voting.banTrackFromGong({ title: 'Old Banned Track', artist: 'Old Artist' });
+
+      // Vote-immune: partial vote
+      await voting.voteImmune(['voteimmune', '0'], 'C123', 'user1');
+
+      // Vote-to-play: partial vote
+      await voting.vote(['vote', '1'], 'C123', 'user1');
+
+      // Flush vote: partial vote (also starts a timer)
+      await voting.flushvote('C123', 'user1');
+
+      messages.length = 0;
+
+      const summary = voting.resetAllVoteState();
+
+      expect(summary).to.deep.equal({
+        gongVotesCleared: true,
+        immuneTracksCleared: 1,
+        voteImmuneVotesCleared: true,
+        tracksWithVotesCleared: 1,
+        flushVotesCleared: true
+      });
+
+      // Gong counter cleared
+      await voting.gongcheck('C123');
+      expect(messages.some(m => m.msg.includes('3 more votes are needed'))).to.be.true;
+
+      // Gong immunity cleared
+      expect(voting.isTrackGongBanned({ title: 'Old Banned Track', artist: 'Old Artist' })).to.be.false;
+
+      // Vote-immune cleared
+      messages.length = 0;
+      await voting.voteImmunecheck('C123');
+      expect(messages.some(m => m.msg.includes('0 votes'))).to.be.true;
+
+      // Vote-to-play cleared
+      messages.length = 0;
+      await voting.votecheck('C123');
+      expect(messages.some(m => m.msg.includes('No tracks have been voted'))).to.be.true;
+
+      // A user who'd already used their one flush vote can vote again,
+      // proving flushVoteScore was actually cleared (not just counted down)
+      messages.length = 0;
+      await voting.flushvote('C123', 'user1');
+      expect(messages.some(m => m.msg.includes('Voting period started'))).to.be.true;
+    });
+
+    it('should clear a pending flush-vote timer so it cannot fire after reset', async function() {
+      const clock = sinon.useFakeTimers();
+      try {
+        await voting.flushvote('C123', 'user1'); // starts a 5-minute timer
+        voting.resetAllVoteState();
+        messages.length = 0;
+
+        clock.tick(6 * 60 * 1000); // advance well past the original timeout
+
+        expect(messages.some(m => m.msg.includes('Voting period for flush has ended'))).to.be.false;
+      } finally {
+        clock.restore();
+      }
     });
   });
 
@@ -810,10 +909,26 @@ describe('Voting Module (voting.js)', function() {
     it('should prevent double gong from same user', async function() {
       await voting.gong('C123', 'user1', () => {});
       messages.length = 0;
-      
+
       await voting.gong('C123', 'user1', () => {});
-      
+
       expect(messages.some(m => m.msg.includes('already gonged'))).to.be.true;
+    });
+
+    it('should clear the vote-to-play tally for a track once it gets GONGed', async function() {
+      mockDeps.getCurrentTrackTitle = async () => ({ title: 'Track 1', artist: 'Artist 1', uri: 'spotify:track:1' });
+      voting.initialize(mockDeps);
+
+      await voting.vote(['vote', '0'], 'C123', 'user1');
+      messages.length = 0;
+
+      await voting.gong('C123', 'user1', () => {});
+      await voting.gong('C123', 'user2', () => {});
+      await voting.gong('C123', 'user3', () => {});
+
+      messages.length = 0;
+      await voting.votecheck('C123');
+      expect(messages.some(m => m.msg.includes('No tracks have been voted'))).to.be.true;
     });
   });
 

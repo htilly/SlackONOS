@@ -16,10 +16,13 @@ describe('Command Router', function() {
     const appendAIUnparsed = sinon.stub().resolves();
     const musicHelper = overrides.musicHelper || { searchAndQueue: sinon.stub().resolves({ added: 5 }) };
 
+    const resetVotesHandler = sinon.stub();
+
     const commandRegistry = overrides.commandRegistry || new Map([
       ['echo', { fn: echoHandler, admin: false, aliases: ['sayecho'] }],
       ['flush', { fn: flushHandler, admin: true }],
       ['vote', { fn: voteHandler, admin: false }],
+      ['resetvotes', { fn: resetVotesHandler, admin: true }],
     ]);
 
     const AIHandler = overrides.AIHandler || {
@@ -89,6 +92,7 @@ describe('Command Router', function() {
       echoHandler,
       flushHandler,
       voteHandler,
+      resetVotesHandler,
       musicHelper,
       AIHandler,
       appendAIUnparsed,
@@ -132,6 +136,25 @@ describe('Command Router', function() {
 
     expect(flushHandler.calledOnce).to.be.true;
     expect(flushHandler.firstCall.args[2]).to.equal('<@henrik>');
+  });
+
+  it('blocks unauthorized Slack resetvotes and falls back to the generic denial (no democratic alternative)', async function() {
+    const { router, resetVotesHandler, messages } = makeRouter();
+
+    await router.routeCommand('resetvotes', 'C123', '<@U123>', 'slack');
+
+    expect(resetVotesHandler.called).to.be.false;
+    expect(messages[0].msg).to.include('admin-only');
+    expect(messages[0].msg).to.not.include('flushvote');
+  });
+
+  it('allows Discord admin resetvotes when the caller is admin', async function() {
+    const { router, resetVotesHandler } = makeRouter();
+
+    await router.routeCommand('resetvotes', 'discord-channel', 'henrik', 'discord', true);
+
+    expect(resetVotesHandler.calledOnce).to.be.true;
+    expect(resetVotesHandler.firstCall.args[2]).to.equal('<@henrik>');
   });
 
   it('routes mentions through AI fallback when AI is disabled', async function() {

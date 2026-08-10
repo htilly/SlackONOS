@@ -35,6 +35,7 @@ describe('Command Registry', function() {
         setVolume: sinon.stub(),
         removeTrack: sinon.stub(),
         purgeHalfQueue: sinon.stub(),
+        resetVotes: sinon.stub(),
       },
       voting: {
         gong: sinon.stub(),
@@ -91,7 +92,14 @@ describe('Command Registry', function() {
     expect(registry.get('flush').admin).to.equal(true);
     expect(registry.get('setconfig').admin).to.equal(true);
     expect(registry.get('aimodels').admin).to.equal(true);
+    expect(registry.get('resetvotes').admin).to.equal(true);
     expect(registry.get('add').admin).to.equal(false);
+  });
+
+  it('registers resetvotes with its expected aliases', function() {
+    const { registry } = makeRegistry();
+
+    expect(registry.get('resetvotes').aliases).to.deep.equal(['clearvotes', 'votereset']);
   });
 
   it('uses injected handlers for wrapped commands', function() {
@@ -103,6 +111,7 @@ describe('Command Registry', function() {
     registry.get('setcrossfade').fn(['setcrossfade', 'on'], 'ADMIN', '<@U1>');
     registry.get('aimodels').fn(['aimodels'], 'ADMIN', '<@U1>');
     registry.get('diagnostics').fn(['diagnostics'], 'ADMIN', '<@U1>');
+    registry.get('resetvotes').fn(['resetvotes'], 'ADMIN', '<@U1>');
 
     expect(handlers.showSource.calledWith('C123')).to.be.true;
     expect(handlers.commandHandlers.listQueue.calledWith(['list'], 'C123')).to.be.true;
@@ -110,5 +119,6 @@ describe('Command Registry', function() {
     expect(handlers.setCrossfade.calledWith(['setcrossfade', 'on'], 'ADMIN', '<@U1>')).to.be.true;
     expect(handlers.listOpenAIModels.calledWith(['aimodels'], 'ADMIN', '<@U1>')).to.be.true;
     expect(handlers.diagnostics.calledWith(['diagnostics'], 'ADMIN', '<@U1>')).to.be.true;
+    expect(handlers.commandHandlers.resetVotes.calledWith(['resetvotes'], 'ADMIN', '<@U1>')).to.be.true;
   });
 });

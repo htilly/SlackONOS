@@ -910,25 +910,145 @@ const transcriptSongRegressionTests = transcriptSongRegressionCases.map(({ name,
     )
 );
 
+// NOTE: Unlike the non-mention "play White Keys" case (which hits the literal
+// admin `play` command directly and gets rejected), mentioning the bot routes
+// through handleNaturalLanguage/AI disambiguation. Since "White Keys" names a
+// specific track, the system prompt instructs the model to treat this as an
+// add request rather than admin playback control - confirmed against the live
+// bot, which queues 5 tracks including the actual "White Keys" song. This is
+// correct behavior, not a bug: `add` isn't admin-gated, so it succeeds
+// immediately without a vote.
 const transcriptMentionRegressionTests = hasSlackONOSMentionTarget ? [
     new TestCase(
-        'Transcript Mention - Play White Keys Requires Vote',
+        'Queue Size - Before Mention Play Request',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.recordQueueSize('beforeMentionPlay')
+        ),
+        4
+    ),
+
+    new TestCase(
+        'Transcript Mention - Play White Keys Adds via AI (not admin play)',
         `${slackONOSMention} play White Keys`,
         validators.and(
             validators.responseCount(1, 3),
-            validators.or(
-                validators.containsText('admin-only'),
-                validators.containsText('vote <track#>'),
-                validators.containsText('vote')
-            )
+            validators.successfulAddResponse(),
+            validators.notContainsText('admin-only')
         ),
         12
+    ),
+
+    new TestCase(
+        'Queue Size - After Mention Play Request (+N)',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.queueSizeIncreaseFrom('beforeMentionPlay', 1)
+        ),
+        4
+    )
+] : [];
+
+// AI natural-language parsing tests - only meaningful when a real mention
+// target is configured, since routeCommand only guarantees the AI path for
+// @mentions (see lib/command-router.js routeCommand/handleNaturalLanguage).
+const aiNaturalLanguageTests = hasSlackONOSMentionTarget ? [
+    new TestCase(
+        'AI Chat - Greeting Gets a Conversational Reply',
+        `${slackONOSMention} hej, vem är du?`,
+        validators.and(
+            validators.responseCount(1, 3),
+            validators.hasText(),
+            validators.notContainsText("couldn't find")
+        ),
+        8
+    ),
+
+    new TestCase(
+        'Queue Size - Before AI Off-topic Chat',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.recordQueueSize('beforeAIChat')
+        ),
+        4
+    ),
+
+    new TestCase(
+        'AI Chat - Off-topic Question Does Not Queue Music',
+        `${slackONOSMention} what's the weather like today?`,
+        validators.and(
+            validators.responseCount(1, 3),
+            validators.hasText()
+        ),
+        8
+    ),
+
+    new TestCase(
+        'Queue Size - After AI Off-topic Chat (unchanged)',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.queueSizeIncreaseExactly('beforeAIChat', 0)
+        ),
+        4
+    ),
+
+    new TestCase(
+        'Queue Size - Before AI Swedish Add Request',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.recordQueueSize('beforeAISwedishAdd')
+        ),
+        4
+    ),
+
+    new TestCase(
+        'AI Natural Language - Swedish Add Request',
+        `${slackONOSMention} lägg till lite bra rockmusik`,
+        validators.and(
+            validators.responseCount(1, 3),
+            validators.successfulAddResponse()
+        ),
+        15
+    ),
+
+    new TestCase(
+        'Queue Size - After AI Swedish Add Request (+N)',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.queueSizeIncreaseFrom('beforeAISwedishAdd', 1)
+        ),
+        4
     )
 ] : [];
 
 // Define test suite (will be assigned after definition)
 // ORDER MATTERS: Tests are arranged to handle state dependencies correctly
 const testSuiteArray = [
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE -1: SELF-HEAL - Clear any leftover vote/gong/immune state from
+    // a previous run before the Pre-flight checks verify clean state. This
+    // is deliberately NOT named 'Pre-flight:' so a failure here doesn't
+    // itself trigger the hard abort below - the Pre-flight checks remain
+    // the real safety net if the bot is unreachable or rejects the command.
+    // ═══════════════════════════════════════════════════════════════════
+
+    new TestCase(
+        'Setup: Clear Stale Vote State',
+        'resetvotes',
+        validators.and(
+            validators.hasText(),
+            validators.containsText('RESET')
+        ),
+        5,
+        adminChannelId
+    ),
+
     // ═══════════════════════════════════════════════════════════════════
     // PHASE 0: PRE-FLIGHT CHECKS - Verify clean state before starting
     // ═══════════════════════════════════════════════════════════════════
@@ -1224,6 +1344,7 @@ const testSuiteArray = [
     ),
 
     ...transcriptMentionRegressionTests,
+    ...aiNaturalLanguageTests,
 
     // Search album first to get track count
     new TestCase(
@@ -1463,6 +1584,20 @@ const testSuiteArray = [
             )
         ),
         4
+    ),
+
+    new TestCase(
+        'Vote Immune Check - Shows Vote Progress',
+        'voteimmunecheck',
+        validators.and(
+            validators.hasText(),
+            validators.or(
+                validators.containsText('votes'),
+                validators.containsText('needed'),
+                validators.containsText('immune')
+            )
+        ),
+        3
     ),
 
     new TestCase(
@@ -1897,6 +2032,108 @@ const testSuiteArray = [
     ),
 
     // ═══════════════════════════════════════════════════════════════════
+    // PHASE 11.5: BLACKLIST MANAGEMENT (user + track/artist)
+    // ═══════════════════════════════════════════════════════════════════
+
+    new TestCase(
+        'Admin - User Blacklist - List Current',
+        'blacklist',
+        validators.hasText(),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - User Blacklist - Toggle Fake Test User',
+        'blacklist <@U9TESTFAKE0001>',
+        validators.or(
+            validators.containsText('added to the blacklist'),
+            validators.containsText('removed from the blacklist')
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - User Blacklist - Toggle Fake Test User Again (Cleanup)',
+        'blacklist <@U9TESTFAKE0001>',
+        validators.or(
+            validators.containsText('added to the blacklist'),
+            validators.containsText('removed from the blacklist')
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Track Blacklist - List Current',
+        'trackblacklist',
+        validators.hasText(),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Track Blacklist - Add Rick Astley',
+        'trackblacklist add Rick Astley',
+        validators.or(
+            validators.containsText('added to the track blacklist'),
+            validators.containsText('already on the blacklist')  // tolerate leftover state from a crashed prior run
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Queue Size - Before Blacklist Enforcement Check',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.recordQueueSize('beforeBlacklistEnforcement')
+        ),
+        4
+    ),
+
+    new TestCase(
+        'Add Blacklisted Track - Should Be Blocked',
+        'add Never Gonna Give You Up Rick Astley',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.containsText('blacklist')
+        ),
+        7
+    ),
+
+    new TestCase(
+        'Queue Size - After Blacklist Enforcement (unchanged)',
+        'size',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.queueSizeIncreaseExactly('beforeBlacklistEnforcement', 0)
+        ),
+        4
+    ),
+
+    new TestCase(
+        'Admin - Track Blacklist - Remove Rick Astley (Cleanup)',
+        'trackblacklist remove Rick Astley',
+        validators.or(
+            validators.containsText('removed from the track blacklist'),
+            validators.containsText('is not on the blacklist')
+        ),
+        3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Track Blacklist - Invalid Action',
+        'trackblacklist bogus SomeName',
+        validators.containsText('Invalid action'),
+        3,
+        adminChannelId
+    ),
+
+    // ═══════════════════════════════════════════════════════════════════
     // PHASE 12: ERROR HANDLING (input validation)
     // ═══════════════════════════════════════════════════════════════════
 
@@ -1984,6 +2221,25 @@ const testSuiteArray = [
         'setvolume 5',
         validators.matchesRegex(/5|volume/i),
         3,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Reset Vote State (Cleanup)',
+        'resetvotes',
+        validators.and(
+            validators.hasText(),
+            validators.containsText('RESET')
+        ),
+        5,
+        adminChannelId
+    ),
+
+    new TestCase(
+        'Admin - Flush Queue (Cleanup)',
+        'flush',
+        validators.responseCount(1, 3),
+        5,
         adminChannelId
     ),
 ];

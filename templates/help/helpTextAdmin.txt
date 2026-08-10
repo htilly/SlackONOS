@@ -17,6 +17,7 @@
 > `trackblacklist add <name>` - Block a track or artist (e.g., "Last Christmas").
 > `trackblacklist remove <name>` - Unblock a track or artist.
 > `listimmune` - List all tracks currently immune to GONG.
+> `resetvotes` (or `clearvotes`) - Clear all stale vote/gong/immune state (use if votecheck/listimmune show stale data).
 
 *⚙️ System & Config:*
 > `setconfig [key] [value]` (or `getconfig`) - View/change bot settings.
