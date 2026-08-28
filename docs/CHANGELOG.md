@@ -5,6 +5,18 @@ All notable changes to SlackONOS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.6] - 2026-08-28
+
+### Security
+- **Credential leak on cross-origin redirect** ([GHSA-hq3h-g68c-hp78](https://github.com/advisories/GHSA-hq3h-g68c-hp78) / CVE-2026-55553, high) - Removed the unused `@jsfeb26/urllib-sync` dependency, which was the sole package pulling in a vulnerable transitive `urllib` (<=2.44.0) that preserves credential-bearing headers (`Authorization`, `Cookie`, etc.) across cross-origin redirects. Not referenced anywhere in the codebase, so it was dropped entirely rather than overridden.
+
+### Changed
+- **Dependency upgrade** - Bumped `posthog-node` (5.49.1 → 5.51.2), including an upstream fix for a Node 24.16+ memory leak (Blob request bodies never released) and a minor `isEnabled()` default-value option.
+
+### Verification
+- npm test: 745 passing
+- Full Slack + Sonos end-to-end integration suite: 110/110 passing
+
 ## [2.3.5] - 2026-08-08
 
 ### Fixed
