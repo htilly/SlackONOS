@@ -5,6 +5,19 @@ All notable changes to SlackONOS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.7] - 2026-08-30
+
+### Security
+- **Object.prototype pollution via Discord username** (critical) - Any Discord user could pollute `Object.prototype` process-wide with zero privileges by setting their display name to `__proto__`, corrupting shared object behavior across every Slack/Discord/admin-API handler for the life of the process. Fixed via a new shared prototype-pollution guard (`lib/safe-object-key.js`), applied in `index.js`'s user-action logging and defense-in-depth in the AI context store.
+- **Stored XSS in the web admin config panel** (high) - The `setconfig` chat command could plant markup that executed in the web administrator's browser session via an unescaped attribute in the config UI.
+- **Unauthorized CI-agent trigger** (high) - Any chat user, not just admins, could invoke `featurerequest`, which posts to GitHub and triggers an autonomous LLM coding agent with repository write access.
+- **Slack admin channel visibility** - Slack admin authorization is bare channel membership with no built-in privacy check; the bot now warns loudly (log line, channel announcement at startup, and a recurring `help` reminder) if the configured admin channel isn't private, without changing the underlying authorization model.
+- **CodeQL-flagged hardening**: a ReDoS-safe rewrite of WebAuthn origin trimming, a double-escaping fix in chat command text cleaning, an open-redirect fix on the post-login `?return=` parameter, and least-privilege `permissions:` blocks added to 4 CI workflows.
+
+### Verification
+- npm test: 796 passing (17 new regression tests added for this release)
+- Full Slack + Sonos end-to-end integration suite: 110/110 passing
+
 ## [2.3.6] - 2026-08-28
 
 ### Security
