@@ -333,7 +333,7 @@ function createConfigItem(item, value) {
     if (isSensitive && !finalDisplayValue) {
       attrs.push(`placeholder="Enter ${item.label.toLowerCase()}"`);
     }
-    inputHTML = `<input type="${finalInputType}" id="config-${item.key}" value="${escapeHtml(finalDisplayValue)}" ${attrs.join(' ')}>`;
+    inputHTML = `<input type="${finalInputType}" id="config-${item.key}" value="${escapeAttribute(finalDisplayValue)}" ${attrs.join(' ')}>`;
   }
   const description = createConfigDescription(item);
   div.innerHTML = `

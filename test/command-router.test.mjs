@@ -4,6 +4,7 @@ import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
 const { createCommandRouter } = require('../lib/command-router.js');
+const { createCommandRegistry } = require('../lib/command-registry.js');
 
 describe('Command Router', function() {
   function makeRouter(overrides = {}) {
@@ -694,5 +695,108 @@ describe('Command Router', function() {
     await router.routeCommand('<@BOT> ok', 'C123', '<@U123>', 'slack', false, true);
 
     expect(flushVoteHandler.calledOnce).to.be.true;
+  });
+});
+
+// Security-review finding O-010: wires the REAL command-registry.js into the
+// REAL command-router.js (not a hand-rolled test Map) so this exercises the
+// actual production dispatch path end-to-end, proving featurerequest/fr are
+// genuinely gated by the same admin check as every other admin command -
+// not just that the registry entry's flag is set correctly in isolation
+// (see test/command-registry.test.mjs for that unit-level check).
+describe('Command Router + Command Registry integration (O-010)', function() {
+  function makeFullDeps() {
+    return {
+      addHandlers: { add: sinon.stub(), addalbum: sinon.stub(), addplaylist: sinon.stub(), append: sinon.stub() },
+      commandHandlers: {
+        search: sinon.stub(), searchalbum: sinon.stub(), searchplaylist: sinon.stub(),
+        listQueue: sinon.stub(), showQueue: sinon.stub(), upNext: sinon.stub(), getVolume: sinon.stub(),
+        countQueue: sinon.stub(), nextTrack: sinon.stub(), stop: sinon.stub(), flush: sinon.stub(),
+        play: sinon.stub(), pause: sinon.stub(), resume: sinon.stub(), previous: sinon.stub(),
+        shuffle: sinon.stub(), normal: sinon.stub(), setVolume: sinon.stub(), removeTrack: sinon.stub(),
+        purgeHalfQueue: sinon.stub(), resetVotes: sinon.stub(),
+      },
+      voting: {
+        gong: sinon.stub(), gongcheck: sinon.stub(), voteImmune: sinon.stub(), vote: sinon.stub(),
+        voteImmunecheck: sinon.stub(), votecheck: sinon.stub(), flushvote: sinon.stub(), listImmune: sinon.stub(),
+      },
+      currentTrack: sinon.stub(), showSource: sinon.stub(), gongplay: sinon.stub(), status: sinon.stub(),
+      help: sinon.stub(), bestof: sinon.stub(), debug: sinon.stub(), telemetryStatus: sinon.stub(),
+      setCrossfade: sinon.stub(), setconfig: sinon.stub(), blacklist: sinon.stub(), trackblacklist: sinon.stub(),
+      tts: sinon.stub(), moveTrackAdmin: sinon.stub(), stats: sinon.stub(), configdump: sinon.stub(),
+      aiUnparsed: sinon.stub(), listOpenAIModels: sinon.stub(), featurerequest: sinon.stub(),
+      addToSpotifyPlaylist: sinon.stub(), diagnostics: sinon.stub(),
+    };
+  }
+
+  function makeIntegrationRouter() {
+    const deps = makeFullDeps();
+    const commandRegistry = createCommandRegistry(deps);
+    const messages = [];
+    const AIHandler = {
+      isAIEnabled: sinon.stub().returns(false),
+      getUserContext: sinon.stub().returns(null),
+      parseNaturalLanguage: sinon.stub().resolves(null),
+      setUserContext: sinon.stub(),
+      clearUserContext: sinon.stub(),
+    };
+    const router = createCommandRouter({
+      logger: { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub(), debug: sinon.stub() },
+      commandRegistry,
+      AIHandler,
+      musicHelper: { searchAndQueue: sinon.stub().resolves({ added: 0 }) },
+      sonos: {},
+      config: { get: sinon.stub().returns(null) },
+      sendMessage: async (msg, channel) => { messages.push({ msg, channel }); },
+      appendAIUnparsed: sinon.stub().resolves(),
+      parseArgs: (text) => (text || '').trim().split(/\s+/).filter(Boolean),
+      normalizeUser: (user) => user.replace(/[<@>]/g, ''),
+      isBlacklisted: () => false,
+      setContext: () => {},
+      messageTimestamps: new Map(),
+      getAdminChannel: () => 'ADMIN',
+    });
+    return { router, deps, messages };
+  }
+
+  it('rejects featurerequest from a non-admin Slack channel', async function() {
+    const { router, deps, messages } = makeIntegrationRouter();
+
+    await router.routeCommand('featurerequest add support for YouTube playlists', 'C123', '<@U123>', 'slack');
+
+    expect(deps.featurerequest.called).to.be.false;
+    expect(messages.some(m => m.msg.toLowerCase().includes('admin'))).to.be.true;
+  });
+
+  it('rejects the "fr" alias from a non-admin Slack channel', async function() {
+    const { router, deps } = makeIntegrationRouter();
+
+    await router.routeCommand('fr add support for YouTube playlists', 'C123', '<@U123>', 'slack');
+
+    expect(deps.featurerequest.called).to.be.false;
+  });
+
+  it('rejects featurerequest from a non-admin Discord user', async function() {
+    const { router, deps } = makeIntegrationRouter();
+
+    await router.routeCommand('featurerequest add support for YouTube playlists', 'general', 'randomuser', 'discord', false);
+
+    expect(deps.featurerequest.called).to.be.false;
+  });
+
+  it('allows featurerequest from the admin Slack channel', async function() {
+    const { router, deps } = makeIntegrationRouter();
+
+    await router.routeCommand('featurerequest add support for YouTube playlists', 'ADMIN', '<@U123>', 'slack');
+
+    expect(deps.featurerequest.calledOnce).to.be.true;
+  });
+
+  it('allows featurerequest for a Discord admin', async function() {
+    const { router, deps } = makeIntegrationRouter();
+
+    await router.routeCommand('featurerequest add support for YouTube playlists', 'general', 'adminuser', 'discord', true);
+
+    expect(deps.featurerequest.calledOnce).to.be.true;
   });
 });

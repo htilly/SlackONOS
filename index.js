@@ -50,6 +50,7 @@ const createAdminApi = require('./lib/admin-api');
 const { createWebServer } = require('./lib/web-server');
 const { createCommandRouter } = require('./lib/command-router');
 const { createCommandRegistry } = require('./lib/command-registry');
+const { isUnsafeObjectKey } = require('./lib/safe-object-key');
 const gongMessage = fs.readFileSync('templates/messages/gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('templates/messages/vote.txt', 'utf8').split('\n').filter(Boolean);
 const ttsMessage = fs.readFileSync('templates/messages/tts.txt', 'utf8').split('\n').filter(Boolean);
@@ -1877,6 +1878,17 @@ function _sanitizeActionDetails(details) {
 async function _logUserAction(userName, action, details = null) {
   // Normalize userName by stripping angle brackets
   const normalizedUser = String(userName || 'unknown').replace(/[<@>]/g, '');
+
+  // Security: normalizedUser can be an attacker-controlled display name (e.g.
+  // Discord). If it is '__proto__', 'constructor', or 'prototype', the writes
+  // below (`data[normalizedUser] = {}`, etc.) would reach through the
+  // prototype chain and pollute Object.prototype process-wide instead of
+  // creating a normal per-user record. Refuse to log for those names.
+  if (isUnsafeObjectKey(normalizedUser)) {
+    logger.warn(`Refusing to log user action for unsafe key: "${normalizedUser}"`);
+    return;
+  }
+
   const shouldCountStats = !(details && details.countStats === false);
   const sanitizedDetails = _sanitizeActionDetails(details);
 

@@ -157,6 +157,34 @@ describe('AI Handler', function() {
 
       expect(getUserContext('frank').suggestedAction).to.equal(null);
     });
+
+    // Defense-in-depth for security-review finding O-001 / O-011: every
+    // current caller of setUserContext passes a `scope` object, so this is
+    // not reachable with today's call sites - but buildContextKey's no-scope
+    // branch returns the raw userName as an object key (`userContext[key] = {...}`),
+    // which would pollute Object.prototype process-wide if a future caller
+    // ever omits scope and userName is '__proto__'.
+    it('does not pollute Object.prototype when userName is "__proto__" and no scope is given', function() {
+      setUserContext('__proto__', 'add queen', 'wants queen music');
+
+      expect(Object.prototype).to.not.have.property('lastSuggestion');
+      // A brand-new plain object must not have inherited the polluted field.
+      expect(({}).lastSuggestion).to.equal(undefined);
+    });
+
+    it('still stores and retrieves context for a user literally named "__proto__"', function() {
+      setUserContext('__proto__', 'add queen', 'wants queen music');
+
+      const ctx = getUserContext('__proto__');
+      expect(ctx.lastSuggestion).to.equal('add queen');
+    });
+
+    it('does not pollute Object.prototype for "constructor" or "prototype" either', function() {
+      setUserContext('constructor', 'gong', 'skip it');
+      setUserContext('prototype', 'gong', 'skip it');
+
+      expect(Object.prototype).to.not.have.property('lastSuggestion');
+    });
   });
 
   describe('#initialize', function() {
