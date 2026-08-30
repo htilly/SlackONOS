@@ -30,6 +30,27 @@ describe('Text Cleaning', function() {
       const result = cleanText('&gt; add &quot;song&quot; &amp; artist');
       expect(result).to.equal('add "song" & artist');
     });
+
+    // CodeQL js/double-escaping: decoding entities in four sequential,
+    // independent .replace() passes (originally: &gt; then &lt; then &amp;
+    // then &quot;) means a pass that runs *after* &amp; can accidentally
+    // match text that &amp;'s own decoding just produced. A doubly-escaped
+    // value like '&amp;quot;' should decode ONE level to the literal text
+    // '&quot;' - not keep going and produce a real '"' character, which
+    // would let a value that was supposed to still be quote-encoded slip a
+    // live quote through a single decode pass.
+    it('decodes a doubly-escaped &amp;quot; only one level, not through to a literal quote', function() {
+      const result = cleanText('add &amp;quot;test&amp;quot;');
+      expect(result).to.equal('add &quot;test&quot;');
+    });
+
+    it('decodes a doubly-escaped &amp;gt; / &amp;lt; only one level', function() {
+      // Mid-string, so the (unrelated, pre-existing) leading ">"-quote-marker
+      // stripper can't also consume the decoded result and mask what we're
+      // actually asserting here.
+      expect(cleanText('compare &amp;gt; ten')).to.equal('compare &gt; ten');
+      expect(cleanText('&amp;lt;script&amp;gt;')).to.equal('&lt;script&gt;');
+    });
   });
 
   describe('Slack formatting removal', function() {
