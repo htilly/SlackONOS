@@ -51,6 +51,7 @@ const { createWebServer } = require('./lib/web-server');
 const { createCommandRouter } = require('./lib/command-router');
 const { createCommandRegistry } = require('./lib/command-registry');
 const { isUnsafeObjectKey } = require('./lib/safe-object-key');
+const adminChannelPrivacy = require('./lib/admin-channel-privacy');
 const gongMessage = fs.readFileSync('templates/messages/gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('templates/messages/vote.txt', 'utf8').split('\n').filter(Boolean);
 const ttsMessage = fs.readFileSync('templates/messages/tts.txt', 'utf8').split('\n').filter(Boolean);
@@ -1193,6 +1194,17 @@ httpServer = webServer.httpServer;
     // 3. Lookup Slack Channels (only if Slack is initialized)
     if (slack) {
       await _lookupChannelID();
+      // Security (O-008): Slack admin authorization is bare channel
+      // membership - anyone who joins config.adminChannel gets full bot
+      // admin control, with no further check. Enforcing "must be private"
+      // would be a breaking behavior change for existing deployments, so
+      // instead we make the risk impossible to miss: a clear log line, a
+      // loud one-time warning posted to the channel itself at every
+      // startup, and (via adminChannelPrivacy.wrapHelpMessage in _help())
+      // a recurring reminder around every `help` response shown there.
+      // Never blocks startup - this is visibility, not enforcement.
+      adminChannelPrivacy.initialize({ logger, sendMessage: _slackMessage, slackWeb: slack.web });
+      global.adminChannelIsPrivate = await adminChannelPrivacy.checkAndAnnounce(global.adminChannel);
     } else {
       logger.info('Skipping Slack channel lookup (Discord-only mode)');
       // Set dummy globals for Discord-only mode
@@ -2675,7 +2687,7 @@ async function _help(input, channel, userName) {
         }
       }
 
-      const finalMessage = (aiHelpSection + helpText)
+      let finalMessage = (aiHelpSection + helpText)
         .replace(/{{gongLimit}}/g, gongLimit)
         .replace(/{{voteImmuneLimit}}/g, voteImmuneLimit)
         .replace(/{{voteLimit}}/g, voteLimit)
@@ -2684,6 +2696,13 @@ async function _help(input, channel, userName) {
         .replace(/{{searchLimit}}/g, searchLimit)
         .replace(/{{configValues}}/g, configList)
         .replace(/{{adminUrl}}/g, adminUrl);
+
+      // Security (O-008): remind whoever is reading admin help, every time,
+      // that this Slack channel being non-private means anyone who joins it
+      // gets everything below for free. No-op unless confirmed non-private.
+      if (currentPlatform === 'slack' && isAdminUser) {
+        finalMessage = adminChannelPrivacy.wrapHelpMessage(finalMessage, global.adminChannelIsPrivate);
+      }
 
       _slackMessage(finalMessage, channel, { unfurl_links: false, unfurl_media: false });
     }
