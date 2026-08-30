@@ -83,8 +83,25 @@
       } catch (e) {}
     };
 
+    // Only allow same-origin, relative paths as a redirect target. Rejects
+    // absolute URLs, protocol-relative URLs (//evil.com) and anything that
+    // doesn't parse as a plain path, closing CodeQL js/xss and
+    // js/client-side-unvalidated-url-redirection on window.location.href below.
+    function sanitizeReturnUrl(raw) {
+      const fallback = '/admin';
+      if (typeof raw !== 'string' || raw.length === 0) return fallback;
+      if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return fallback;
+      try {
+        const resolved = new URL(raw, window.location.origin);
+        if (resolved.origin !== window.location.origin) return fallback;
+        return resolved.pathname + resolved.search + resolved.hash;
+      } catch (e) {
+        return fallback;
+      }
+    }
+
     const urlParams = new URLSearchParams(window.location.search);
-    const returnUrl = urlParams.get('return') || '/admin';
+    const returnUrl = sanitizeReturnUrl(urlParams.get('return'));
 
     async function checkWebAuthnStatus() {
       try {

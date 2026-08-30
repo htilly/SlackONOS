@@ -20,6 +20,9 @@ on:
           - 'false'
           - 'true'
 
+permissions:
+  contents: read
+
 jobs:
   publish-changelog:
     runs-on: ubuntu-latest

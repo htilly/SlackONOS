@@ -96,6 +96,17 @@ describe('Command Registry', function() {
     expect(registry.get('add').admin).to.equal(false);
   });
 
+  // Security-review finding O-010: featurerequest/fr posts user-supplied text
+  // as a GitHub issue that triggers an autonomous LLM CI agent with
+  // repository write access. It must require admin, like every other
+  // command that reaches an external system on the operator's behalf.
+  it('marks featurerequest and its "fr" alias as admin-only (O-010)', function() {
+    const { registry } = makeRegistry();
+
+    expect(registry.get('featurerequest').admin).to.equal(true);
+    expect(registry.get('fr').admin).to.equal(true);
+  });
+
   it('registers resetvotes with its expected aliases', function() {
     const { registry } = makeRegistry();
 
