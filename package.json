@@ -35,7 +35,7 @@
   "license": "ISC",
   "dependencies": {
     "@sefinek/google-tts-api": "^2.1.15",
-    "@simplewebauthn/server": "^13.3.2",
+    "@simplewebauthn/server": "^13.3.3",
     "@slack/rtm-api": "^7.0.4",
     "@slack/socket-mode": "^3.0.0",
     "@slack/web-api": "^8.0.0",
