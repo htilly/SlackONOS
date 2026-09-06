@@ -50,3 +50,8 @@ docker-compose.override.yml
 # ===================================================================
 test/config/test-config.json
 test/timing-log.json
+
+# ===================================================================
+# Security review scan output (repo-security-review skill / /security-review)
+# ===================================================================
+.security-review/
