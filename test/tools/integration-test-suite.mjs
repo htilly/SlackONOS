@@ -865,6 +865,118 @@ const validators = {
     }
 };
 
+/**
+ * A "Queue Size - After X" check for a container (album/playlist) added via
+ * a single sonos.queue(containerUri) call: Sonos enumerates the container's
+ * tracks from Spotify itself, in the background, at its own pace. For a
+ * small container this finishes near-instantly, but a large public
+ * playlist (hundreds of tracks) can still be growing well past a short
+ * fixed wait, making a single-snapshot 'size' check flaky - it can catch
+ * the queue mid-population and report a false "too few tracks" failure
+ * even though nothing is actually wrong.
+ *
+ * Instead of one fixed-delay 'size' read, this polls 'size' repeatedly and
+ * stops as soon as either: the queue reaches the full expected count (done
+ * early), or two consecutive reads report the same size (growth has
+ * genuinely stopped, whether at the full count or short of it) - then hands
+ * the final read to the normal validator chain to judge pass/fail exactly
+ * as before. `baselineKey`/`countKey` mirror the same keys used by
+ * validators.queueSizeIncreasedByStoredCount so both stay in sync.
+ */
+class PollingQueueSizeTestCase extends TestCase {
+    constructor(name, validator, { baselineKey, countKey, pollWaitTime = 5, maxPolls = 12, stableReadsRequired = 2, targetChannel = null } = {}) {
+        super(name, 'size', validator, pollWaitTime, targetChannel);
+        this.baselineKey = baselineKey;
+        this.countKey = countKey;
+        this.maxPolls = maxPolls;
+        this.stableReadsRequired = stableReadsRequired;
+    }
+
+    async run(isRetry = false) {
+        this.startedAt = Date.now();
+        this.endedAt = null;
+        this.passed = false;
+        this.failed = false;
+        this.error = null;
+        this.responses = [];
+        this.timing = null;
+
+        if (verbose) console.log(`\n🧪 Running: ${this.name}${isRetry ? ' (RETRY)' : ''} (polling until stable)`);
+
+        const baseline = queueSizeStore[this.baselineKey];
+        const expectedCount = extractedValues[this.countKey];
+        const targetSize = (baseline !== undefined && expectedCount !== undefined)
+            ? baseline + expectedCount
+            : null;
+
+        let lastSize = null;
+        let stableStreak = 0;
+
+        for (let attempt = 1; attempt <= this.maxPolls; attempt++) {
+            const result = await sendAndWaitForResponse(this.command, this.waitTime, this.targetChannel);
+            this.responses = result.responses;
+            this.timing = result.timing;
+
+            if (this.responses.length > 0) {
+                const size = extractQueueSize(this.responses);
+                if (verbose) {
+                    console.log(`   Poll ${attempt}/${this.maxPolls}: queue size = ${size}${targetSize !== null ? ` (target ${targetSize})` : ''}`);
+                }
+
+                if (size !== null) {
+                    if (targetSize !== null && size >= targetSize) {
+                        break; // Fully populated - no need to keep polling.
+                    }
+                    if (size === lastSize) {
+                        stableStreak++;
+                        if (stableStreak >= this.stableReadsRequired) {
+                            // Growth has stopped short of the full expected count.
+                            // Let the validator's own tolerance decide pass/fail.
+                            break;
+                        }
+                    } else {
+                        stableStreak = 1;
+                    }
+                    lastSize = size;
+                }
+            }
+
+            if (attempt < this.maxPolls) {
+                // Small extra gap on top of sendAndWaitForResponse's own wait, so
+                // repeated 'size' polls don't hammer the bot back-to-back.
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+
+        this.endedAt = Date.now();
+
+        if (this.responses.length === 0) {
+            this.failed = true;
+            this.error = 'No response from bot';
+            if (verbose) console.log(`   ❌ Failed: ${this.error}`);
+            return false;
+        }
+
+        try {
+            const validationResult = this.validator(this.responses);
+            if (validationResult === true) {
+                this.passed = true;
+                if (verbose) console.log('   ✅ Validation passed');
+                return true;
+            }
+            this.failed = true;
+            this.error = validationResult || 'Validation failed';
+            if (verbose) console.log(`   ❌ Validation failed: ${this.error}`);
+            return false;
+        } catch (error) {
+            this.failed = true;
+            this.error = error.message;
+            if (verbose) console.log(`   ❌ Exception: ${this.error}`);
+            return false;
+        }
+    }
+}
+
 const transcriptSongRegressionCases = [
     {
         name: 'Transcript Add - That’s So True',
@@ -1385,16 +1497,17 @@ const testSuiteArray = [
         10
     ),
 
-    // Verify album tracks were added (not doubled!)
-    new TestCase(
+    // Verify album tracks were added (not doubled!). Polls until the queue
+    // stabilizes rather than reading one fixed-delay snapshot, since Sonos
+    // populates a container-added album/playlist in the background.
+    new PollingQueueSizeTestCase(
         'Queue Size - After Album (verify no doubling)',
-        'size',
         validators.and(
             validators.responseCount(1, 2),
             validators.queueSizeIncreasedByStoredCount('beforeAlbum', 'abbeyRoadTracks', 20),
             validators.recordQueueSize('beforePlaylist')
         ),
-        4
+        { baselineKey: 'beforeAlbum', countKey: 'abbeyRoadTracks' }
     ),
 
     // Search playlist first to get track count
@@ -1423,15 +1536,16 @@ const testSuiteArray = [
         12
     ),
 
-    // Verify playlist tracks added (not doubled!)
-    new TestCase(
+    // Verify playlist tracks added (not doubled!). See PollingQueueSizeTestCase -
+    // "Rock Classics" is a live, large public playlist whose track count can
+    // take well past a short fixed wait for Sonos to fully enumerate.
+    new PollingQueueSizeTestCase(
         'Queue Size - After Playlist (verify no doubling)',
-        'size',
         validators.and(
             validators.responseCount(1, 2),
             validators.queueSizeIncreasedByStoredCount('beforePlaylist', 'rockClassicsTracks', 20)
         ),
-        4
+        { baselineKey: 'beforePlaylist', countKey: 'rockClassicsTracks' }
     ),
 
     new TestCase(
