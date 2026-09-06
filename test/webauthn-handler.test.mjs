@@ -79,3 +79,128 @@ describe('webauthn-handler - origin trailing-slash stripping (CodeQL js/polynomi
     }
   });
 });
+
+/**
+ * Regression coverage for security-review finding O-007: getRPConfig()
+ * previously honored X-Forwarded-Proto/-Host/-Port unconditionally, so the
+ * rpId/origin WebAuthn binds credentials to could be steered by request
+ * headers rather than the operator's actual deployment - degrading
+ * WebAuthn's core phishing-resistance property. The fix gates those headers
+ * behind `trustProxy`, mirroring auth-handler.js's getClientIp().
+ *
+ * As with the describe block above, lib/webauthn-handler.js can't be
+ * `require()`'d in this test environment (hangs at require-time via
+ * @simplewebauthn/server), so this mirrors getRPConfig's header-handling
+ * logic exactly (see lib/webauthn-handler.js's getRPConfig, post-fix).
+ */
+describe('webauthn-handler - getRPConfig trustProxy gating (O-007)', function() {
+  // Mirrors lib/webauthn-handler.js's getRPConfig, with `config.get(...)`
+  // calls replaced by plain parameters (no nconf/file-system dependency).
+  function getRPConfig({ webauthnRpId = null, webauthnOrigin = null, trustProxy = false, webPort = 8080 }, req) {
+    const rpName = 'SlackONOS';
+    let rpId = webauthnRpId || null;
+    let origin = webauthnOrigin || null;
+
+    if (req) {
+      const xfProto = trustProxy ? (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() : '';
+      const xfHost = trustProxy ? (req.headers['x-forwarded-host'] || '').split(',')[0].trim() : '';
+      const xfPort = trustProxy ? (req.headers['x-forwarded-port'] || '').split(',')[0].trim() : '';
+
+      const protocol = xfProto || (req.connection?.encrypted ? 'https' : 'http') || 'https';
+      const hostHeader = xfHost || req.headers.host || '';
+      let [hostname, hostPort] = hostHeader.split(':');
+      hostPort = hostPort || xfPort || '';
+
+      if (hostname === '127.0.0.1' || hostname === '0.0.0.0') {
+        hostname = 'localhost';
+      }
+
+      if (!rpId) {
+        rpId = hostname;
+      }
+
+      const originConfigured = Boolean(origin);
+
+      let portSegment = '';
+      if (hostPort) {
+        const portNum = Number(hostPort);
+        if (!Number.isNaN(portNum)) {
+          const isDefault = (protocol === 'https' && portNum === 443) || (protocol === 'http' && portNum === 80);
+          if (!isDefault) portSegment = `:${portNum}`;
+        } else {
+          const xfPortNum = Number(xfPort);
+          if (!Number.isNaN(xfPortNum)) {
+            const isDefault = (protocol === 'https' && xfPortNum === 443) || (protocol === 'http' && xfPortNum === 80);
+            if (!isDefault) portSegment = `:${xfPortNum}`;
+          }
+        }
+      } else if (xfPort) {
+        const xfPortNum = Number(xfPort);
+        if (!Number.isNaN(xfPortNum)) {
+          const isDefault = (protocol === 'https' && xfPortNum === 443) || (protocol === 'http' && xfPortNum === 80);
+          if (!isDefault) portSegment = `:${xfPortNum}`;
+        }
+      }
+
+      if (!originConfigured) {
+        origin = `${protocol}://${hostname}${portSegment}`;
+      }
+    }
+
+    if (!origin) {
+      const fallbackPort = webPort || 8080;
+      origin = `https://${rpId || 'localhost'}${fallbackPort && fallbackPort !== 443 ? ':' + fallbackPort : ''}`;
+      if (!rpId) rpId = origin.split('://')[1].split(':')[0];
+    }
+
+    while (origin.endsWith('/')) {
+      origin = origin.slice(0, -1);
+    }
+    rpId = rpId.split(':')[0];
+
+    return { rpName, rpId, origin };
+  }
+
+  const forgedReq = {
+    headers: {
+      host: 'real-admin.example.com',
+      'x-forwarded-proto': 'https',
+      'x-forwarded-host': 'attacker.example.net',
+      'x-forwarded-port': '443'
+    },
+    connection: { encrypted: false }
+  };
+
+  it('ignores X-Forwarded-* headers by default (trustProxy unset)', function() {
+    const { rpId, origin } = getRPConfig({}, forgedReq);
+    expect(rpId).to.equal('real-admin.example.com');
+    expect(origin).to.equal('http://real-admin.example.com');
+  });
+
+  it('ignores X-Forwarded-* headers when trustProxy is explicitly false', function() {
+    const { rpId, origin } = getRPConfig({ trustProxy: false }, forgedReq);
+    expect(rpId).to.equal('real-admin.example.com');
+    expect(origin).to.equal('http://real-admin.example.com');
+  });
+
+  it('honors X-Forwarded-* headers only when trustProxy is explicitly true', function() {
+    const { rpId, origin } = getRPConfig({ trustProxy: true }, forgedReq);
+    expect(rpId).to.equal('attacker.example.net');
+    expect(origin).to.equal('https://attacker.example.net');
+  });
+
+  it('an explicitly configured webauthnOrigin always wins, regardless of trustProxy', function() {
+    const { origin } = getRPConfig(
+      { webauthnOrigin: 'https://configured.example.com', trustProxy: true },
+      forgedReq
+    );
+    expect(origin).to.equal('https://configured.example.com');
+  });
+
+  it('falls back to the real Host header with no proxy headers present at all', function() {
+    const plainReq = { headers: { host: 'localhost:8443' }, connection: { encrypted: true } };
+    const { rpId, origin } = getRPConfig({}, plainReq);
+    expect(rpId).to.equal('localhost');
+    expect(origin).to.equal('https://localhost:8443');
+  });
+});

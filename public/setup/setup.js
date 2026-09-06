@@ -812,10 +812,12 @@ async function discoverSonos() {
       const data = await response.json();
 
       if (data.success && data.devices.length > 0) {
+        // device.name/device.model come from LAN-supplied SSDP data (see
+        // O-004) - escape before rendering, same as admin.js does elsewhere.
         list.innerHTML = data.devices.map(device => `
-          <div class="device-item" data-ip="${device.ip}">
-            <strong>${device.name}</strong>
-            <small>${device.model} - ${device.ip}</small>
+          <div class="device-item" data-ip="${escapeAttribute(device.ip)}">
+            <strong>${escapeHtml(device.name)}</strong>
+            <small>${escapeHtml(device.model)} - ${escapeHtml(device.ip)}</small>
           </div>
         `).join('');
 
@@ -1098,4 +1100,16 @@ async function restartApp() {
       btn.textContent = 'Restart App';
     }
   }
+}
+
+// HTML-escaping helpers (same implementation as admin.js's) for LAN-supplied
+// SSDP device data rendered into innerHTML - see security-review finding
+// O-004.
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text === null || text === undefined ? '' : String(text);
+  return div.innerHTML;
+}
+function escapeAttribute(text) {
+  return escapeHtml(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
