@@ -51,6 +51,7 @@ const { createWebServer } = require('./lib/web-server');
 const { createCommandRouter } = require('./lib/command-router');
 const { createCommandRegistry } = require('./lib/command-registry');
 const { isUnsafeObjectKey } = require('./lib/safe-object-key');
+const { redactConfigValue } = require('./lib/redact-config');
 const adminChannelPrivacy = require('./lib/admin-channel-privacy');
 const gongMessage = fs.readFileSync('templates/messages/gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('templates/messages/vote.txt', 'utf8').split('\n').filter(Boolean);
@@ -1546,24 +1547,11 @@ async function _configdump(input, channel, userName) {
       _slackMessage('📄 Config file appears empty or not loaded.', channel);
       return;
     }
-    const sensitiveKeys = [
-      'token', 'slackAppToken', 'slackBotToken', 
-      'spotifyClientId', 'spotifyClientSecret',
-      'openaiApiKey', 'telemetryInstanceId', 'adminPasswordHash'
-    ];
-    
     const lines = entries.map(([k, v]) => {
-      let val = typeof v === 'string' ? v : JSON.stringify(v);
-      // Check if key is in sensitive list or contains sensitive keywords
-      if (sensitiveKeys.includes(k) || 
-          k.toLowerCase().includes('token') || 
-          k.toLowerCase().includes('secret') || 
-          k.toLowerCase().includes('apikey') || 
-          k.toLowerCase().includes('clientid') ||
-          k.toLowerCase().includes('password')) {
-        val = '[REDACTED]';
-      }
-      return `${k}: ${val}`;
+      const val = typeof v === 'string' ? v : JSON.stringify(v);
+      // Deny-by-default: see lib/redact-config.js (O-006) - a name-based
+      // substring list drifts out of date and under-redacts new keys.
+      return `${k}: ${redactConfigValue(k, val)}`;
     });
 
     // Add seasonal context info
@@ -2087,17 +2075,14 @@ async function _debug(channel, userName) {
       return `${icon} *${c.name}:* ${c.message}`;
     }).join('\n');
 
-    // Build Config Section
-    const sensitiveKeys = [
-      'token', 'slackAppToken', 'slackBotToken', 
-      'spotifyClientId', 'spotifyClientSecret',
-      'openaiApiKey', 'telemetryInstanceId', 'adminPasswordHash'
-    ];
+    // Build Config Section. Deny-by-default: see lib/redact-config.js (O-006)
+    // - the previous 8-entry exact-name allowlist missed discordToken,
+    // githubToken, githubAppPrivateKey and setupBootstrapToken.
     const configKeys = Object.keys(config.stores.file.store);
     const configValues = configKeys
       .map(key => {
         const value = config.get(key);
-        const displayValue = sensitiveKeys.includes(key) ? '[REDACTED]' : JSON.stringify(value);
+        const displayValue = redactConfigValue(key, JSON.stringify(value));
         return `> ${key}: \`${displayValue}\``;
       })
       .join('\n');
