@@ -6,8 +6,6 @@ services:
     image: slackonos:local
     container_name: slackonos
     hostname: slackonos
-    cap_add:
-      - NET_ADMIN
     restart: unless-stopped
     volumes:
       - ./config:/app/config

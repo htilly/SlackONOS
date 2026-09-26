@@ -21,12 +21,10 @@ jobs:
       uses: actions/setup-node@v6
       with:
         node-version: '22.x'
+        cache: npm
     
     - name: Install dependencies
-      run: npm install
-    
-    - name: Install coverage tool
-      run: npm install --save-dev c8
+      run: npm ci
     
     - name: Create config file
       run: |
