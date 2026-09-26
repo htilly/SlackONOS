@@ -548,6 +548,26 @@ describe('Add Handlers', function() {
       expect(mockSpotify.searchPlaylistList.called).to.be.true;
     });
 
+    it('should not search for the link text when a playlist URI lookup fails', async function() {
+      mockSpotify.getPlaylist.rejects(new Error('Spotify API error: Not Found'));
+
+      await addHandlers.addplaylist(['addplaylist', 'spotify:playlist:37i9dQZF1DWXRqgorJj26U'], 'channel1', 'user1');
+
+      expect(mockSpotify.searchPlaylistList.called).to.be.false;
+      expect(mockSonos.queue.called).to.be.false;
+      expect(mockSonos.flush.called).to.be.false;
+      expect(messages.some(m => m.message.includes("Couldn't open that playlist"))).to.be.true;
+    });
+
+    it('should not search for the link text when a playlist link lookup fails', async function() {
+      mockSpotify.getPlaylist.rejects(new Error('Spotify API error: Not Found'));
+
+      await addHandlers.addplaylist(['addplaylist', 'https://open.spotify.com/playlist/37i9dQZF1DWXRqgorJj26U?si=x'], 'channel1', 'user1');
+
+      expect(mockSpotify.searchPlaylistList.called).to.be.false;
+      expect(mockSonos.queue.called).to.be.false;
+    });
+
     it('should get playlist tracks for blacklist checking', async function() {
       await addHandlers.addplaylist(['addplaylist', 'test', 'playlist'], 'channel1', 'user1');
       
