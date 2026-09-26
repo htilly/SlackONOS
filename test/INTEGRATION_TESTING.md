@@ -54,7 +54,18 @@ The suite itself can also be configured with env vars only (no `test-config.json
 
 ## Response Time History (admin page graph)
 
-Each run can be sent to a SlackONOS instance, which stores it and graphs it on the admin page (**📈 E2E Response Times**). You can view the median response time or a single command, per release/run. Failed and aborted runs are marked in red. A table compares each command with the previous run.
+Every e2e run is committed to `data/e2e-history.json` on master. The file ships with every later build and Docker image, and the admin page graphs it (**📈 E2E Response Times**). You can view the median or a single command, per release/run. Failed and aborted runs are marked in red. A table compares each command with the previous run. No server has to be running to collect the data.
+
+**How the data flows:**
+
+1. The suite writes the run to `test/e2e-run.json` (override with `E2E_RESULTS_FILE`). This includes aborted runs (health or pre-flight failure).
+2. The `e2e` job in `.github/workflows/e2e.yml` uploads that file as a workflow artifact. This job runs on the self-hosted runner with read-only repo access.
+3. The `record-history` job on a GitHub-hosted runner checks out master and appends the run with `test/tools/append-e2e-history.mjs`. It then pushes the change as `chore(e2e): record response times for <tag> [skip ci]`. `[skip ci]` keeps the commit from starting CI or a Docker build of its own; the next real build includes it. The newest 200 runs are kept.
+4. The admin page reads the file from disk (`GET /api/admin/e2e-history`).
+
+Because the tests run after a release is published, a release's own image contains the history up to the previous run. Its own results appear in the next build.
+
+The push needs `contents: write` for the workflow's `GITHUB_TOKEN`. If master is protected so that only pull requests can change it, allow GitHub Actions to push or the `record-history` job fails.
 
 Three metrics are stored per test:
 
@@ -64,22 +75,7 @@ Three metrics are stored per test:
 | First response seen by test | When the suite's 1s polling first saw a reply |
 | Total wait | How long the test waited in total (includes polling and grace time) |
 
-**Setup:**
-
-1. On the SlackONOS instance that should show the graph (usually your normal one), set a random token in `config/config.json`:
-   ```json
-   "e2eIngestToken": "<long random string, e.g. openssl rand -hex 32>"
-   ```
-   (or the `E2E_INGEST_TOKEN` env var) and restart. Without a token the endpoint `/api/e2e/results` does not exist.
-2. On the e2e runner (runner `.env`, or `test-config.json`), set:
-
-   | Env var | test-config.json | Value |
-   |---|---|---|
-   | `E2E_RESULTS_URL` | `e2eResultsUrl` | `https://<slackonos-host>:8443/api/e2e/results` (or `http://…:8080/…` if HTTPS is off) |
-   | `E2E_RESULTS_TOKEN` | `e2eResultsToken` | same token as above |
-   | `E2E_RESULTS_INSECURE=1` | `e2eResultsInsecure: true` | accept SlackONOS' self-signed certificate |
-
-Runs are stored in `config/e2e-history.json` (the persisted config volume in Docker), newest 200 kept. Upload problems are only logged; they never fail the test run. Aborted runs (health or pre-flight failure) are reported too.
+Local runs (`npm run test:e2e`) also write `test/e2e-run.json`. To add one to the history by hand: `node test/tools/append-e2e-history.mjs test/e2e-run.json`.
 
 The GitHub workflow runs on every published release and can also be started manually (**Actions → E2E Tests → Run workflow**). The graph labels each point with the release tag, or the branch name for manual runs.
 

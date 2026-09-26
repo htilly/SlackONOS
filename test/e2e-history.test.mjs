@@ -1,35 +1,14 @@
 import { expect } from 'chai';
 import { createRequire } from 'module';
-import { Readable } from 'stream';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 const require = createRequire(import.meta.url);
-const { createE2eHistory, normalizeRun } = require('../lib/e2e-history.js');
-
-function createConfig(token) {
-  return { get: (key) => (key === 'e2eIngestToken' ? token : undefined) };
-}
-
-function createRequest({ method = 'POST', token = null, body = '' } = {}) {
-  const req = Readable.from([Buffer.from(body)]);
-  req.method = method;
-  req.headers = token ? { authorization: `Bearer ${token}` } : {};
-  return req;
-}
-
-function createResponse() {
-  const res = {
-    statusCode: null,
-    body: null,
-    headers: {},
-    setHeader(name, value) { this.headers[name] = value; },
-    writeHead(code) { this.statusCode = code; },
-    end(payload) { this.body = payload ? JSON.parse(payload) : null; }
-  };
-  return res;
-}
+const { readRuns, appendRun, normalizeRun, defaultHistoryPath } = require('../lib/e2e-history.js');
+const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function sampleRun(overrides = {}) {
   return {
@@ -52,18 +31,14 @@ function sampleRun(overrides = {}) {
 describe('e2e-history', function() {
   let tmpDir;
   let filePath;
-  const savedEnvToken = process.env.E2E_INGEST_TOKEN;
 
   beforeEach(function() {
-    delete process.env.E2E_INGEST_TOKEN;
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-history-'));
-    filePath = path.join(tmpDir, 'config', 'e2e-history.json');
+    filePath = path.join(tmpDir, 'data', 'e2e-history.json');
   });
 
   afterEach(function() {
     fs.rmSync(tmpDir, { recursive: true, force: true });
-    if (savedEnvToken === undefined) delete process.env.E2E_INGEST_TOKEN;
-    else process.env.E2E_INGEST_TOKEN = savedEnvToken;
   });
 
   describe('normalizeRun', function() {
@@ -97,67 +72,44 @@ describe('e2e-history', function() {
 
   describe('storage', function() {
     it('returns an empty list when no file exists', function() {
-      const history = createE2eHistory({ filePath, config: createConfig('t') });
-      expect(history.readRuns()).to.deep.equal([]);
+      expect(readRuns(filePath)).to.deep.equal([]);
     });
 
-    it('keeps only the newest maxRuns runs', function() {
-      const history = createE2eHistory({ filePath, config: createConfig('t'), maxRuns: 3 });
-      for (let i = 1; i <= 5; i++) history.appendRun(normalizeRun(sampleRun({ release: `v${i}` })));
-      expect(history.readRuns().map(r => r.release)).to.deep.equal(['v3', 'v4', 'v5']);
+    it('returns an empty list for a corrupt file', function() {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, '{nope');
+      expect(readRuns(filePath)).to.deep.equal([]);
+    });
+
+    it('appends runs and keeps only the newest maxRuns', function() {
+      for (let i = 1; i <= 5; i++) appendRun(filePath, sampleRun({ release: `v${i}` }), { maxRuns: 3 });
+      expect(readRuns(filePath).map(r => r.release)).to.deep.equal(['v3', 'v4', 'v5']);
+    });
+
+    it('ships an empty, valid history file with the build', function() {
+      const runs = readRuns(defaultHistoryPath(repoRoot));
+      expect(runs).to.be.an('array');
     });
   });
 
-  describe('handleIngest', function() {
-    it('is 404 when no ingest token is configured', async function() {
-      const history = createE2eHistory({ filePath, config: createConfig('') });
-      const res = createResponse();
-      await history.handleIngest(createRequest({ token: 'anything', body: JSON.stringify(sampleRun()) }), res);
-      expect(res.statusCode).to.equal(404);
-      expect(fs.existsSync(filePath)).to.equal(false);
-    });
+  describe('append-e2e-history.mjs', function() {
+    const script = path.join(repoRoot, 'test/tools/append-e2e-history.mjs');
 
-    it('rejects a missing or wrong token', async function() {
-      const history = createE2eHistory({ filePath, config: createConfig('secret-token') });
-      for (const token of [null, 'wrong', 'secret-token-longer']) {
-        const res = createResponse();
-        await history.handleIngest(createRequest({ token, body: JSON.stringify(sampleRun()) }), res);
-        expect(res.statusCode).to.equal(401);
-      }
-      expect(history.readRuns()).to.have.length(0);
-    });
-
-    it('rejects non-POST requests', async function() {
-      const history = createE2eHistory({ filePath, config: createConfig('secret-token') });
-      const res = createResponse();
-      await history.handleIngest(createRequest({ method: 'GET', token: 'secret-token' }), res);
-      expect(res.statusCode).to.equal(405);
-    });
-
-    it('rejects invalid JSON with 400', async function() {
-      const history = createE2eHistory({ filePath, config: createConfig('secret-token') });
-      const res = createResponse();
-      await history.handleIngest(createRequest({ token: 'secret-token', body: '{nope' }), res);
-      expect(res.statusCode).to.equal(400);
-    });
-
-    it('stores a valid run with the correct token', async function() {
-      const history = createE2eHistory({ filePath, config: createConfig('secret-token') });
-      const res = createResponse();
-      await history.handleIngest(createRequest({ token: 'secret-token', body: JSON.stringify(sampleRun()) }), res);
-      expect(res.statusCode).to.equal(201);
-      const runs = history.readRuns();
-      expect(runs).to.have.length(1);
-      expect(runs[0].release).to.equal('v3.1.0');
+    it('appends a run file to the given history file', function() {
+      const runFile = path.join(tmpDir, 'run.json');
+      fs.writeFileSync(runFile, JSON.stringify(sampleRun()));
+      execFileSync(process.execPath, [script, runFile, filePath], { stdio: 'pipe' });
+      execFileSync(process.execPath, [script, runFile, filePath], { stdio: 'pipe' });
+      const runs = readRuns(filePath);
+      expect(runs).to.have.length(2);
       expect(runs[0].tests.map(t => t.slackLatencyMs)).to.deep.equal([812, 240]);
     });
 
-    it('accepts the token from E2E_INGEST_TOKEN', async function() {
-      process.env.E2E_INGEST_TOKEN = 'env-token';
-      const history = createE2eHistory({ filePath, config: createConfig('') });
-      const res = createResponse();
-      await history.handleIngest(createRequest({ token: 'env-token', body: JSON.stringify(sampleRun()) }), res);
-      expect(res.statusCode).to.equal(201);
+    it('fails without touching the history for an invalid run', function() {
+      const runFile = path.join(tmpDir, 'run.json');
+      fs.writeFileSync(runFile, JSON.stringify({ nope: true }));
+      expect(() => execFileSync(process.execPath, [script, runFile, filePath], { stdio: 'pipe' })).to.throw();
+      expect(fs.existsSync(filePath)).to.equal(false);
     });
   });
 });
