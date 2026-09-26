@@ -48,6 +48,7 @@ const addHandlers = require('./lib/add-handlers');
 const githubApp = require('./lib/github-app');
 const createAdminApi = require('./lib/admin-api');
 const { createWebServer } = require('./lib/web-server');
+const { createE2eHistory, defaultHistoryPath } = require('./lib/e2e-history');
 const { createCommandRouter } = require('./lib/command-router');
 const { createCommandRegistry } = require('./lib/command-registry');
 const { isUnsafeObjectKey } = require('./lib/safe-object-key');
@@ -663,6 +664,12 @@ function syncVotingConfig() {
   voting.setConfig(getVotingConfigSnapshot());
 }
 
+const e2eHistory = createE2eHistory({
+  filePath: defaultHistoryPath(__dirname),
+  config,
+  logger
+});
+
 adminApi = createAdminApi({
   config,
   logger,
@@ -676,7 +683,8 @@ adminApi = createAdminApi({
   logBuffer,
   maxLogBufferSize: MAX_LOG_BUFFER_SIZE,
   setRuntimeConfigValue,
-  syncVotingConfig
+  syncVotingConfig,
+  e2eHistory
 });
 
 function delay(ms) {
@@ -976,6 +984,7 @@ webServer = createWebServer({
   authHandler,
   setupHandler,
   adminApi,
+  e2eHistory,
   slack,
   slackBotToken,
   slackAppToken,

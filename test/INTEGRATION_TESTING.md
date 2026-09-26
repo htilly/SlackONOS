@@ -52,6 +52,37 @@ What `test/tools/run-e2e.mjs` does:
 
 The suite itself can also be configured with env vars only (no `test-config.json`): `SLACK_BOT_TOKEN`, `SLACK_CHANNEL`, `SLACK_ADMIN_CHANNEL`, `SLACKONOS_BOT_ID`, `SONOS_PING_HOST`.
 
+## Response Time History (admin page graph)
+
+Each run can be sent to a SlackONOS instance, which stores it and graphs it on the admin page (**📈 E2E Response Times**). You can view the median response time or a single command, per release/run. Failed and aborted runs are marked in red. A table compares each command with the previous run.
+
+Three metrics are stored per test:
+
+| Metric | Meaning |
+|---|---|
+| Bot latency (default) | Slack timestamp of the bot's first reply minus the timestamp of the test message. Measured by Slack, so it has no poll-interval noise; use this one to compare releases |
+| First response seen by test | When the suite's 1s polling first saw a reply |
+| Total wait | How long the test waited in total (includes polling and grace time) |
+
+**Setup:**
+
+1. On the SlackONOS instance that should show the graph (usually your normal one), set a random token in `config/config.json`:
+   ```json
+   "e2eIngestToken": "<long random string, e.g. openssl rand -hex 32>"
+   ```
+   (or the `E2E_INGEST_TOKEN` env var) and restart. Without a token the endpoint `/api/e2e/results` does not exist.
+2. On the e2e runner (runner `.env`, or `test-config.json`), set:
+
+   | Env var | test-config.json | Value |
+   |---|---|---|
+   | `E2E_RESULTS_URL` | `e2eResultsUrl` | `https://<slackonos-host>:8443/api/e2e/results` (or `http://…:8080/…` if HTTPS is off) |
+   | `E2E_RESULTS_TOKEN` | `e2eResultsToken` | same token as above |
+   | `E2E_RESULTS_INSECURE=1` | `e2eResultsInsecure: true` | accept SlackONOS' self-signed certificate |
+
+Runs are stored in `config/e2e-history.json` (the persisted config volume in Docker), newest 200 kept. Upload problems are only logged; they never fail the test run. Aborted runs (health or pre-flight failure) are reported too.
+
+The GitHub workflow runs on every published release and can also be started manually (**Actions → E2E Tests → Run workflow**). The graph labels each point with the release tag, or the branch name for manual runs.
+
 ## Manual Quick Start
 
 ### 1. Setup Test Bot
