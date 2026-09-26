@@ -56,6 +56,14 @@ const adminChannelPrivacy = require('./lib/admin-channel-privacy');
 const gongMessage = fs.readFileSync('templates/messages/gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('templates/messages/vote.txt', 'utf8').split('\n').filter(Boolean);
 const ttsMessage = fs.readFileSync('templates/messages/tts.txt', 'utf8').split('\n').filter(Boolean);
+// Help templates are read lazily on first use and cached (they don't change at runtime)
+const helpTemplateCache = new Map();
+function readHelpTemplate(file) {
+  if (!helpTemplateCache.has(file)) {
+    helpTemplateCache.set(file, fs.readFileSync(file, 'utf8'));
+  }
+  return helpTemplateCache.get(file);
+}
 const { execSync } = require('child_process');
 
 // Try to get release tag from GitHub Actions (e.g., GITHUB_REF=refs/tags/v1.2.3)
@@ -159,8 +167,20 @@ function loadTrackBlacklist() {
   return [];
 }
 
+// In-memory cache of lowercased track blacklist entries (loaded lazily, refreshed on save)
+let trackBlacklistCache = null;
+
+function getTrackBlacklistCache() {
+  if (trackBlacklistCache === null) {
+    trackBlacklistCache = loadTrackBlacklist().map(banned => String(banned).toLowerCase());
+  }
+  return trackBlacklistCache;
+}
+
 // Helper to save track blacklist
 async function saveTrackBlacklist(list) {
+  // Refresh cache immediately so checks reflect the new list
+  trackBlacklistCache = list.map(banned => String(banned).toLowerCase());
   try {
     await fs.promises.writeFile(trackBlacklistFile, JSON.stringify(list, null, 2));
   } catch (err) {
@@ -170,12 +190,12 @@ async function saveTrackBlacklist(list) {
 
 // Helper to check if track is blacklisted (case-insensitive partial match)
 function isTrackBlacklisted(trackName, artistName) {
-  const trackBlacklist = loadTrackBlacklist();
+  const trackBlacklist = getTrackBlacklistCache();
   const fullTrackName = `${trackName} ${artistName}`.toLowerCase();
-  
-  return trackBlacklist.some(banned => {
-    const bannedLower = banned.toLowerCase();
-    return fullTrackName.includes(bannedLower) || trackName.toLowerCase().includes(bannedLower);
+  const trackNameLower = String(trackName).toLowerCase();
+
+  return trackBlacklist.some(bannedLower => {
+    return fullTrackName.includes(bannedLower) || trackNameLower.includes(bannedLower);
   });
 }
 
@@ -259,22 +279,9 @@ let adminApi = null;
 // Custom transport to capture logs in memory
 class MemoryLogTransport extends winston.transports.Console {
   log(info, callback) {
-    // Format log entry
-    const level = info.level ? info.level.replace(/\u001b\[[0-9;]*m/g, '') : 'info';
-    const logEntry = {
-      timestamp: info.timestamp || new Date().toISOString(),
-      level: level,
-      message: info.message || String(info)
-    };
-    
-    // Add to buffer (will be handled by broadcastLog, but keep for initial buffer)
-    logBuffer.push(logEntry);
-    
-    // Keep buffer size limited
-    if (logBuffer.length > MAX_LOG_BUFFER_SIZE) {
-      logBuffer.shift(); // Remove oldest entry
-    }
-    
+    // Buffering + SSE broadcast is handled by the overridden logger.* methods
+    // via broadcastLog(); do not push here or every line is stored twice.
+
     // Call parent to still output to console
     super.log(info, callback);
   }
@@ -518,13 +525,13 @@ const soundcraft = new SoundcraftHandler({
 if (config.get('soundcraftEnabled')) {
   (async () => {
     await soundcraft.connect();
-  })();
+  })().catch(err => logger.error('Soundcraft initial connect failed: ' + (err && err.message ? err.message : err)));
 }
 
 /* Initialize AI Handler */
 (async () => {
   await AIHandler.initialize(logger);
-})();
+})().catch(err => logger.error('AI Handler initialization failed: ' + (err && err.message ? err.message : err)));
 
 /* Initialize Music Helper with blacklist checker */
 musicHelper.initialize(spotify, logger, isTrackBlacklisted);
@@ -1284,18 +1291,23 @@ httpServer = webServer.httpServer;
     
     // Register shutdown handlers for graceful telemetry tracking
     const gracefulShutdown = async (signal) => {
-      logger.info(`${signal} received. Sending shutdown telemetry...`);
-      
-      // Stop status polling
-      adminApi.stopStatusPolling();
-      
-      if (telemetry) {
-        await telemetry.trackShutdown(require('./package.json').version, releaseVersion);
-        await telemetry.shutdown(); // Flush pending events
+      try {
+        logger.info(`${signal} received. Sending shutdown telemetry...`);
+
+        // Stop status polling
+        adminApi.stopStatusPolling();
+
+        if (telemetry) {
+          await telemetry.trackShutdown(require('./package.json').version, releaseVersion);
+          await telemetry.shutdown(); // Flush pending events
+        }
+
+        logger.info('Shutdown complete.');
+      } catch (err) {
+        logger.error('Error during graceful shutdown: ' + (err && err.message ? err.message : err));
+      } finally {
+        process.exit(0);
       }
-      
-      logger.info('Shutdown complete.');
-      process.exit(0);
     };
     
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
@@ -2601,8 +2613,8 @@ async function _help(input, channel, userName) {
 
     // For Discord admins, send regular help in channel and admin help via DM
     if (currentPlatform === 'discord' && isAdminUser) {
-      const regularHelp = fs.readFileSync('templates/help/helpText.txt', 'utf8');
-      const adminHelp = fs.readFileSync('templates/help/helpTextAdmin.txt', 'utf8');
+      const regularHelp = readHelpTemplate('templates/help/helpText.txt');
+      const adminHelp = readHelpTemplate('templates/help/helpTextAdmin.txt');
 
       // Generate config values and admin URL for admin help
       const configList = `
@@ -2649,7 +2661,7 @@ async function _help(input, channel, userName) {
     } else {
       // Slack or non-admin: show appropriate single help file
       const helpFile = isAdminUser ? 'templates/help/helpTextAdmin.txt' : 'templates/help/helpText.txt';
-      const helpText = fs.readFileSync(helpFile, 'utf8');
+      const helpText = readHelpTemplate(helpFile);
       
       let configList = '';
       let adminUrl = '';
@@ -3169,6 +3181,11 @@ async function _setconfig(input, channel, userName) {
       const finalValue = matchedValue;
       const oldValue = config.get(actualKey) || '';
       config.set(actualKey, finalValue);
+
+      // Apply log level change at runtime (mirrors admin API behavior)
+      if (actualKey === 'logLevel' && typeof logger.setLevel === 'function') {
+        logger.setLevel(finalValue);
+      }
       
       config.save(function (err) {
         if (err) {
@@ -3196,7 +3213,7 @@ async function _setconfig(input, channel, userName) {
           } else {
             logger.warn(`Failed to connect to Soundcraft at new IP: ${newValue}`);
           }
-        });
+        }).catch(err => logger.error('Soundcraft reconnect failed: ' + (err && err.message ? err.message : err)));
       }
     }
     
@@ -3247,7 +3264,7 @@ async function _setconfig(input, channel, userName) {
           } else {
             logger.warn('Soundcraft enabled but connection failed');
           }
-        });
+        }).catch(err => logger.error('Soundcraft connect failed: ' + (err && err.message ? err.message : err)));
       } else if (!boolValue && soundcraft.isEnabled()) {
         // Disable and disconnect
         soundcraft.config.soundcraftEnabled = false;
@@ -3454,6 +3471,13 @@ async function _tts(input, channel) {
     return;
   }
 
+  // Validate IP address for TTS before generating audio (must be accessible from Sonos)
+  if (!ipAddress || ipAddress === '' || ipAddress === 'IP_HOST' || ipAddress === '127.0.0.1' || ipAddress === 'localhost') {
+    logger.error('❌ TTS failed: ipAddress is not configured or set to localhost/127.0.0.1. Sonos cannot access this address. Please set ipAddress in config.json to your server\'s network IP address (e.g., 192.168.1.100) or set HOST_IP environment variable.');
+    _slackMessage('🚨 TTS failed: Server IP address not configured. Sonos cannot access localhost. Please configure ipAddress in config.json with your server\'s network IP address. 🔧', channel);
+    return;
+  }
+
   const ttsFilePath = path.join(os.tmpdir(), 'sonos-tts.mp3');
 
   // Pick a random intro message to use in both Slack and TTS
@@ -3474,20 +3498,13 @@ async function _tts(input, channel) {
     // Get TTS file duration
     const fileDuration = await new Promise((resolve, reject) => {
       mp3Duration(ttsFilePath, (err, duration) => {
-        if (err) reject(err);
+        if (err) return reject(err);
         resolve(duration);
       });
     });
     // Convert to milliseconds and add 2 sec buffer for Sonos to advance
     const waitTime = Math.ceil(fileDuration * 1000) + 2000;
     logger.info('TTS duration: ' + fileDuration.toFixed(2) + 's, will wait ' + waitTime + 'ms before cleanup');
-
-    // Validate IP address for TTS (must be accessible from Sonos)
-    if (!ipAddress || ipAddress === '' || ipAddress === 'IP_HOST' || ipAddress === '127.0.0.1' || ipAddress === 'localhost') {
-      logger.error('❌ TTS failed: ipAddress is not configured or set to localhost/127.0.0.1. Sonos cannot access this address. Please set ipAddress in config.json to your server\'s network IP address (e.g., 192.168.1.100) or set HOST_IP environment variable.');
-      _slackMessage('🚨 TTS failed: Server IP address not configured. Sonos cannot access localhost. Please configure ipAddress in config.json with your server\'s network IP address. 🔧', channel);
-      return;
-    }
 
     // Get current track position
     const currentTrack = await sonos.currentTrack();
@@ -3513,9 +3530,18 @@ async function _tts(input, channel) {
     // Wait for TTS to finish + 3 sec buffer, then remove from queue and go back
     setTimeout(async () => {
       try {
-        // Remove the TTS track from queue
-        await sonos.removeTracksFromQueue([ttsPosition]);
-        logger.info('Removed TTS track from queue at position ' + ttsPosition);
+        // Find the TTS track in the queue by URI (position may have shifted since queuing)
+        const queue = await sonos.getQueue();
+        const items = (queue && queue.items) || [];
+        const ttsIndex = items.findIndex(item => item.uri && item.uri.includes('/tts.mp3'));
+
+        if (ttsIndex >= 0) {
+          // Sonos uses 1-based indexing for removeTracksFromQueue
+          await sonos.removeTracksFromQueue(ttsIndex + 1, 1);
+          logger.info('Removed TTS track from queue at index ' + ttsIndex);
+        } else {
+          logger.info('TTS track not found in queue (may have already been removed)');
+        }
 
         // Go back to previous track (the one that was playing before TTS)
         await sonos.previous();
