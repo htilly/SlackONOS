@@ -94,6 +94,7 @@ The automated test suite validates all core functionality including permission c
 
 The suite follows a logical workflow:
 
+0. **Health Check** - Runs `debug` in the admin channel and requires the bot to answer with Sonos and Spotify both reported as connected. If this fails the suite aborts immediately, since every later test depends on a working speaker.
 1. **Permission Testing** - Verify admin command restrictions
 2. **Queue Cleanup** - Clear queue via admin channel
 3. **Basic Operations** - Add tracks, check duplicates
@@ -103,6 +104,9 @@ The suite follows a logical workflow:
 7. **Voting Features** - Gong system validation
 
 ### Commands Tested
+
+✅ **Health Check**
+- `debug` (admin channel) - Bot answers, Sonos + Spotify reachable (aborts the suite on failure)
 
 ✅ **Permission & Access Control**
 - `flush` (regular channel) - Access denied validation
