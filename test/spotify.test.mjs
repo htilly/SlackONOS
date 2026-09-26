@@ -247,7 +247,7 @@ describe('Spotify client (lib/spotify.js)', function() {
   it('should fetch a single token for concurrent callers', async function() {
     let tokenCalls = 0;
     fetchStub.callsFake(async (url) => {
-      if (url.includes('accounts.spotify.com')) {
+      if (new URL(url).hostname === 'accounts.spotify.com') {
         tokenCalls++;
         return jsonResponse(200, { access_token: 'tok', expires_in: 3600 });
       }
@@ -268,7 +268,7 @@ describe('Spotify client (lib/spotify.js)', function() {
     let apiCalls = 0;
     fetchStub.callsFake(async (url, opts) => {
       expect(opts.signal).to.exist;
-      if (url.includes('accounts.spotify.com')) {
+      if (new URL(url).hostname === 'accounts.spotify.com') {
         tokenCalls++;
         return jsonResponse(200, { access_token: 'tok' + tokenCalls, expires_in: 3600 });
       }
@@ -289,7 +289,7 @@ describe('Spotify client (lib/spotify.js)', function() {
   it('should not retry more than once on repeated 401', async function() {
     let apiCalls = 0;
     fetchStub.callsFake(async (url) => {
-      if (url.includes('accounts.spotify.com')) {
+      if (new URL(url).hostname === 'accounts.spotify.com') {
         return jsonResponse(200, { access_token: 'tok', expires_in: 3600 });
       }
       apiCalls++;
