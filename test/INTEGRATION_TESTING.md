@@ -77,7 +77,9 @@ Three metrics are stored per test:
 
 Local runs (`npm run test:e2e`) also write `test/e2e-run.json`. To add one to the history by hand: `node test/tools/append-e2e-history.mjs test/e2e-run.json`.
 
-The GitHub workflow runs on every published release and can also be started manually (**Actions → E2E Tests → Run workflow**). The graph labels each point with the release tag, or the branch name for manual runs.
+The GitHub workflow runs on every push to master, on every published release, and manually (**Actions → E2E Tests → Run workflow**). Pushes that only touch docs (`*.md`, `docs/`) or the history file itself are skipped. Runs share one concurrency group because there is one speaker: they queue, and if several master pushes queue up GitHub keeps only the newest pending one.
+
+The graph marks each run type with its own marker shape and a **Runs** filter: releases are diamonds with a dashed guide line and a bold tag label, master builds are dots labelled with the short commit SHA, and manual runs are squares labelled with the branch name. Failed or aborted runs are red whatever their type.
 
 ## Manual Quick Start
 
@@ -422,9 +424,9 @@ new TestCase(
 - Commit test tokens
 - Create test dependencies
 
-## CI/CD Integration (self-hosted runner, releases only)
+## CI/CD Integration (self-hosted runner)
 
-`.github/workflows/e2e.yml` runs `npm run test:e2e` **only when a new release is published**, on the test machine registered as a self-hosted GitHub Actions runner. No GitHub secrets are involved - the runner reads the config files that live on the machine.
+`.github/workflows/e2e.yml` runs `npm run test:e2e` **on every push to master, every published release, and on manual start**, on the test machine registered as a self-hosted GitHub Actions runner. No GitHub secrets are involved - the runner reads the config files that live on the machine.
 
 ### One-time setup on the test machine
 
@@ -438,7 +440,7 @@ new TestCase(
 
 ### Security notes
 
-- The repo is public: under **Settings → Actions → General**, require approval for workflow runs from outside collaborators. The e2e workflow only runs on `release: published`, which needs write access, so fork PRs never reach the runner.
+- The repo is public: under **Settings → Actions → General**, require approval for workflow runs from outside collaborators. The e2e workflow only runs on pushes to master, `release: published` and manual starts, which all need write access (or a merged PR), so fork PRs never reach the runner.
 - Bot output is not printed in the Actions log (`E2E_QUIET_BOT=1`); the full log stays on the runner in `test/e2e-bot.log` in the job workspace.
 - Only one e2e run at a time (`concurrency: slackonos-e2e`) since there is one physical speaker.
 
