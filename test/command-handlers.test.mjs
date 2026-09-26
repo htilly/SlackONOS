@@ -619,9 +619,32 @@ describe('Command Handlers', function() {
         
         expect(messages.some(m => m.msg.includes('No track'))).to.be.true;
       });
+
+      it('should include the current track (queuePosition is 1-based)', async function() {
+        mockSonos.currentTrack.resolves({ title: 'Track 2', artist: 'Artist 2', queuePosition: 2 });
+
+        await commandHandlers.upNext('C123');
+
+        expect(messages[0].msg).to.include('Track 2');
+        expect(messages[0].msg).to.include('Track 3');
+        expect(messages[0].msg).to.not.include('Track 1');
+      });
     });
 
     describe('countQueue', function() {
+      it('should fetch only a 1-item window when contentDirectoryService is available', async function() {
+        const getResult = sinon.stub().resolves({ returned: 1, total: 17, items: [{ title: 'Track 1' }] });
+        mockSonos.contentDirectoryService = () => ({ GetResult: getResult });
+
+        let result = null;
+        await commandHandlers.countQueue('C123', (count) => { result = count; });
+
+        expect(result).to.equal(17);
+        expect(getResult.calledOnce).to.be.true;
+        expect(getResult.firstCall.args[0].RequestedCount).to.equal('1');
+        expect(mockSonos.getQueue.called).to.be.false;
+      });
+
       it('should show queue count', function(done) {
         commandHandlers.countQueue('C123');
         

@@ -1,27 +1,33 @@
 # Use the official Node.js image based on Debian Slim.
 # Keep Node 22 while release builds include linux/arm/v7; node:26-slim does not publish arm/v7.
-FROM node:22-slim AS base
 
-# System deps needed for native builds (e.g., bcrypt) and git optional deps
+# ---- Builder stage: install production deps (native modules such as bcrypt need a toolchain)
+FROM node:22-slim AS builder
+
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3 build-essential git && \
-    rm -rf /var/lib/apt/lists/* && \
-    npm cache clean --force
+    apt-get install -y --no-install-recommends python3 build-essential && \
+    rm -rf /var/lib/apt/lists/*
 
-# Set the working directory for your application
 WORKDIR /app
 
 # Copy package.json and package-lock.json first to leverage Docker cache
 COPY package*.json ./
 
 # Install application dependencies reproducibly without dev dependencies
-RUN npm ci --omit=dev --verbose
+RUN npm ci --omit=dev && \
+    npm cache clean --force
+
+# ---- Runtime stage: clean image without build toolchain
+FROM node:22-slim AS base
+
+# Set the working directory for your application
+WORKDIR /app
+
+# Copy installed dependencies from the builder stage
+COPY --from=builder /app/node_modules ./node_modules
 
 # Copy the rest of your application files
 COPY . .
-
-# Ensure proper permissions (if needed, adjust as necessary)
-RUN chmod -R 755 /app
 
 # Set GITHUB_REF as environment variable if provided (for release version detection)
 # Accept GITHUB_REF as build arg and set as ENV
