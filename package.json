@@ -9,7 +9,9 @@
     "test:coverage": "NODE_ENV=test c8 --reporter=text --reporter=html --reporter=lcov mocha --reporter spec 'test/**/*.mjs' --ignore 'test/tools/**' --exit",
     "test:record": "node test/tools/record-spotify-responses.mjs",
     "test:integration": "node test/tools/integration-test-suite.mjs",
-    "test:integration:verbose": "node test/tools/integration-test-suite.mjs --verbose"
+    "test:integration:verbose": "node test/tools/integration-test-suite.mjs --verbose",
+    "test:e2e": "node test/tools/run-e2e.mjs",
+    "test:e2e:verbose": "node test/tools/run-e2e.mjs --verbose"
   },
   "keywords": [
     "sonos",

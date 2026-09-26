@@ -1,0 +1,51 @@
+name: E2E Tests
+
+# Runs the full Slack end-to-end suite (SlackONOS + TestBot) on the test machine.
+# Only triggered by new releases. Runs on a self-hosted runner with label
+# "slackonos-e2e"; all tokens/API keys live on that machine (see
+# test/INTEGRATION_TESTING.md), no GitHub secrets are used.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One physical Sonos speaker - never run two e2e jobs at once
+  group: slackonos-e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: [self-hosted, slackonos-e2e]
+    timeout-minutes: 45
+
+    steps:
+    - name: Checkout release
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.release.tag_name }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: 22.x
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Check e2e config location
+      run: |
+        if [ -z "$E2E_CONFIG_DIR" ]; then
+          echo "::error::E2E_CONFIG_DIR is not set on the runner. Add it to the runner's .env (see test/INTEGRATION_TESTING.md)."
+          exit 1
+        fi
+
+    - name: Run e2e tests
+      # Bot output is kept out of the (public) Actions log; the full log stays
+      # on the runner in test/e2e-bot.log inside the job workspace.
+      env:
+        E2E_QUIET_BOT: '1'
+      run: npm run test:e2e

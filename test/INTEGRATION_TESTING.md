@@ -14,7 +14,45 @@ The integration test suite sends real commands to your SlackONOS bot via Slack a
 
 **Technical reason:** The bot has self-filtering logic to prevent responding to its own messages, which would create infinite loops.
 
-## Quick Start
+## Fully Automated Run (recommended)
+
+One command starts SlackONOS from the current checkout, waits until it is up, runs the whole suite with the TestBot and shuts everything down again:
+
+```bash
+cp test/config/test-config.json.example    test/config/test-config.json     # TestBot
+cp test/config/e2e-bot-config.json.example test/config/e2e-bot-config.json  # SlackONOS under test
+# fill in both files, then:
+npm run test:e2e            # or: npm run test:e2e:verbose
+```
+
+Both files are gitignored - all tokens and API keys stay on the test machine.
+
+What `test/tools/run-e2e.mjs` does:
+
+1. Copies `test/config/e2e-bot-config.json` to `config/config.json` (an existing `config/config.json` is backed up and restored afterwards).
+2. Starts `node index.js`, writes its output to `test/e2e-bot.log`.
+3. Waits for `🚀 System startup complete.` (fails fast on `STARTUP FAILED` or if the process exits).
+4. Runs `test/tools/integration-test-suite.mjs` (arguments such as `--verbose` / `--channel <id>` are passed on).
+5. Stops the bot, restores the config and exits with the suite's exit code.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `E2E_CONFIG_DIR` | `test/config` | Directory holding `e2e-bot-config.json` + `test-config.json` |
+| `E2E_BOT_START_TIMEOUT` | `120` | Seconds to wait for the bot to start |
+| `E2E_BOT_SETTLE_SECONDS` | `3` | Extra wait after startup before the first test |
+| `E2E_QUIET_BOT` | unset | `1` = don't echo bot output (still written to `test/e2e-bot.log`) |
+| `E2E_BOT_CMD` | `node index.js` | Override how the bot is started |
+
+**Requirements for the SlackONOS instance under test:**
+
+- It must be its **own Slack app** (not your production SlackONOS app). Two Socket Mode connections for the same app split the events between them, so tests would randomly miss replies.
+- Stop any other SlackONOS running on the same machine, or give the e2e config other `webPort`/`httpsPort` values.
+- `adminChannel`/`standardChannel` must match `slackAdminChannel`/`slackChannel` in `test-config.json`, and `slackONOSBotId` should be the user ID of this e2e SlackONOS bot (for the @mention/AI tests).
+- `ping` must be installed if Sonos ping monitoring is used.
+
+The suite itself can also be configured with env vars only (no `test-config.json`): `SLACK_BOT_TOKEN`, `SLACK_CHANNEL`, `SLACK_ADMIN_CHANNEL`, `SLACKONOS_BOT_ID`, `SONOS_PING_HOST`.
+
+## Manual Quick Start
 
 ### 1. Setup Test Bot
 
@@ -353,35 +391,33 @@ new TestCase(
 - Commit test tokens
 - Create test dependencies
 
-## CI/CD Integration
+## CI/CD Integration (self-hosted runner, releases only)
 
-Integration tests are **manual/scheduled only** (not on every PR) since they require a running bot.
+`.github/workflows/e2e.yml` runs `npm run test:e2e` **only when a new release is published**, on the test machine registered as a self-hosted GitHub Actions runner. No GitHub secrets are involved - the runner reads the config files that live on the machine.
 
-Example GitHub Action:
+### One-time setup on the test machine
 
-```yaml
-name: Integration Tests
-on:
-  workflow_dispatch:
+1. Clone the repo (e.g. `~/SlackONOS`) and fill in `test/config/test-config.json` and `test/config/e2e-bot-config.json` there. Check with `npm run test:e2e` that it passes locally.
+2. Register the machine as a runner: GitHub → repo **Settings → Actions → Runners → New self-hosted runner**. Follow the instructions and give it the extra label **`slackonos-e2e`**.
+3. Tell the runner where the config lives. `actions/checkout` wipes gitignored files in the job workspace, so the job reads them from your clone instead. Add to the runner's `.env` file (in the runner directory):
+   ```
+   E2E_CONFIG_DIR=/home/<user>/SlackONOS/test/config
+   ```
+4. Install the runner as a service (`sudo ./svc.sh install && sudo ./svc.sh start`) so it survives reboots. Node.js is installed by the workflow via `actions/setup-node`.
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-      - run: npm install
-      - run: npm run test:integration
-        env:
-          SLACK_BOT_TOKEN: ${{ secrets.TEST_BOT_TOKEN }}
-```
+### Security notes
+
+- The repo is public: under **Settings → Actions → General**, require approval for workflow runs from outside collaborators. The e2e workflow only runs on `release: published`, which needs write access, so fork PRs never reach the runner.
+- Bot output is not printed in the Actions log (`E2E_QUIET_BOT=1`); the full log stays on the runner in `test/e2e-bot.log` in the job workspace.
+- Only one e2e run at a time (`concurrency: slackonos-e2e`) since there is one physical speaker.
 
 ## Security
 
 ⚠️ **Never commit test bot tokens!**
 
 - `test/config/test-config.json` is gitignored
-- Use env vars in CI/CD
+- `test/config/e2e-bot-config.json` is gitignored
+- CI reads config from the runner machine, not from GitHub secrets
 - Rotate tokens regularly
 
 ## More Info

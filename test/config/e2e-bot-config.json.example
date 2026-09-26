@@ -1,0 +1,22 @@
+{
+  "token": "xoxb-YOUR-E2E-SLACKONOS-BOT-TOKEN",
+  "slackAppToken": "xapp-YOUR-E2E-SLACKONOS-APP-TOKEN",
+  "adminChannel": "C01J1TBLCA0",
+  "standardChannel": "CJ51NPNN4",
+  "sonos": "192.168.1.50",
+  "ipAddress": "192.168.1.10",
+  "webPort": 8080,
+  "httpsPort": 8443,
+  "market": "SE",
+  "maxVolume": 75,
+  "gongLimit": 3,
+  "voteImmuneLimit": 6,
+  "voteLimit": 6,
+  "voteTimeLimitMinutes": 2,
+  "flushVoteLimit": 6,
+  "spotifyClientId": "YOUR-SPOTIFY-CLIENT-ID",
+  "spotifyClientSecret": "YOUR-SPOTIFY-CLIENT-SECRET",
+  "openaiApiKey": "sk-proj-YOUR-KEY",
+  "telemetryEnabled": false,
+  "logLevel": "info"
+}

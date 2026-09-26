@@ -1,2 +1,5 @@
 # Ignore test config with real tokens
 test-config.json
+# SlackONOS bot config used by the automated e2e run (npm run test:e2e)
+e2e-bot-config.json
+*.e2e-backup

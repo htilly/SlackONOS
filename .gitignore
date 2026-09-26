@@ -49,6 +49,9 @@ docker-compose.override.yml
 # Test Artifacts
 # ===================================================================
 test/config/test-config.json
+test/config/e2e-bot-config.json
+test/e2e-bot.log
+*.e2e-backup
 test/timing-log.json
 
 # ===================================================================
