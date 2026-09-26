@@ -9,6 +9,8 @@ import sinon from 'sinon';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
+const queueLock = require('../lib/queue-lock.js');
+
 describe('Add Handlers', function() {
   let addHandlers;
   let mockSonos;
@@ -19,6 +21,7 @@ describe('Add Handlers', function() {
   let userActions;
 
   beforeEach(function() {
+    queueLock._resetForTests();
     // Clear module cache to get fresh module state
     delete require.cache[require.resolve('../lib/add-handlers.js')];
     addHandlers = require('../lib/add-handlers.js');
@@ -261,6 +264,88 @@ describe('Add Handlers', function() {
       expect(messages.some(m => m.message.includes('already in the queue'))).to.be.true;
       expect(mockSonos.flush.called).to.be.false;
       expect(mockSonos.queue.called).to.be.false;
+    });
+
+    it('should serialize overlapping adds so a repeat is detected as a duplicate', async function() {
+      // Slow Sonos + a user repeating the command while the first add hangs:
+      // both adds must not queue the same track, and the second must not
+      // flush the track the first one queued.
+      this.timeout(10000);
+      const liveQueue = [];
+      let state = 'stopped';
+      mockSonos.getCurrentState.callsFake(async () => state);
+      mockSonos.getQueue.callsFake(async () => ({ items: [...liveQueue], total: liveQueue.length }));
+      mockSonos.flush.callsFake(async () => { liveQueue.length = 0; });
+      mockSonos.queue.callsFake(async (uri) => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        liveQueue.push({ title: 'Test Track', artist: 'Test Artist', uri });
+        return { FirstTrackNumberEnqueued: String(liveQueue.length) };
+      });
+      mockSonos.play.callsFake(async () => { state = 'playing'; });
+
+      await Promise.all([
+        addHandlers.add(['add', 'test', 'track'], 'channel1', 'user1'),
+        addHandlers.add(['add', 'test', 'track'], 'channel1', 'user1')
+      ]);
+
+      expect(mockSonos.queue.callCount).to.equal(1);
+      expect(mockSonos.flush.callCount).to.equal(1);
+      expect(liveQueue).to.have.length(1);
+      expect(messages.filter(m => m.message.includes('already in the queue'))).to.have.length(1);
+    });
+
+    it('should not flush a queued track while slow Sonos still reports stopped', async function() {
+      // A slow speaker keeps reporting 'stopped' until play() has gone
+      // through. A second add arriving in that window used to flush the
+      // first add's track.
+      this.timeout(10000);
+      const liveQueue = [];
+      let state = 'stopped';
+      mockSpotify.searchTrackList.callsFake(async (query) => [
+        { name: query, artist: 'Artist', uri: `spotify:track:${query.replace(/\W/g, '')}`, popularity: 50 }
+      ]);
+      mockSonos.getCurrentState.callsFake(async () => {
+        await new Promise(resolve => setTimeout(resolve, 30));
+        return state;
+      });
+      mockSonos.getQueue.callsFake(async () => ({ items: [...liveQueue], total: liveQueue.length }));
+      mockSonos.flush.callsFake(async () => { liveQueue.length = 0; });
+      mockSonos.queue.callsFake(async (uri) => {
+        await new Promise(resolve => setTimeout(resolve, 80));
+        liveQueue.push({ title: uri, artist: 'Artist', uri });
+        return { FirstTrackNumberEnqueued: String(liveQueue.length) };
+      });
+      mockSonos.play.callsFake(async () => {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        state = 'playing';
+      });
+
+      await Promise.all([
+        addHandlers.add(['add', 'first'], 'channel1', 'user1'),
+        addHandlers.add(['add', 'second'], 'channel1', 'user1')
+      ]);
+
+      expect(mockSonos.flush.callCount).to.equal(1);
+      expect(liveQueue.map(item => item.uri)).to.deep.equal(['spotify:track:first', 'spotify:track:second']);
+    });
+
+    it('should let later adds run when a Sonos call never answers', async function() {
+      this.timeout(10000);
+      queueLock._resetForTests({ maxHoldMs: 100 });
+      mockSpotify.searchTrackList.callsFake(async (query) => [
+        { name: query, artist: 'Artist', uri: `spotify:track:${query}`, popularity: 50 }
+      ]);
+      mockSonos.getQueue.resolves({ items: [], total: 0 });
+      // The first queue call hangs forever, the next one answers normally
+      mockSonos.queue.onFirstCall().returns(new Promise(() => {}));
+      mockSonos.queue.resolves({ FirstTrackNumberEnqueued: '1' });
+
+      addHandlers.add(['add', 'hung'], 'channel1', 'user1');
+      await addHandlers.add(['add', 'next'], 'channel1', 'user1');
+
+      expect(mockSonos.queue.secondCall.args[0]).to.equal('spotify:track:next');
+      expect(messages.some(m => m.message.includes('Added') && m.message.includes('next'))).to.be.true;
+      expect(mockLogger.warn.calledWithMatch(/Queue lock held by "add"/)).to.be.true;
     });
 
     it('should flush queue when player is stopped', async function() {
