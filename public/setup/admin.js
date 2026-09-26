@@ -35,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadAllData();
   setupRefreshButton();
   setupLogViewer();
+  setupE2eChart();
   loadLogLevel(); // Load log level setting
   startEventStream(); // Use real-time updates instead of polling
   // Keep auto-refresh as fallback (longer interval)
@@ -47,7 +48,8 @@ async function loadAllData() {
   await Promise.all([
     loadStatus(),
     loadNowPlaying(),
-    loadConfig()
+    loadConfig(),
+    loadE2eHistory()
   ]);
 }
 
@@ -1005,6 +1007,243 @@ async function setupWebAuthn() {
     }
 
   await loadWebAuthnStatus();
+}
+
+/* --- E2E response times (runs posted by test/tools/integration-test-suite.mjs) --- */
+
+let e2eRuns = [];
+let e2eEnabled = false;
+
+function setupE2eChart() {
+  const commandSelect = document.getElementById('e2e-command-select');
+  const metricSelect = document.getElementById('e2e-metric-select');
+  if (!commandSelect || !metricSelect) return;
+  commandSelect.addEventListener('change', renderE2e);
+  metricSelect.addEventListener('change', renderE2e);
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(renderE2e, 150);
+  });
+}
+
+async function loadE2eHistory() {
+  if (!document.getElementById('e2e-chart')) return;
+  try {
+    const response = await fetch(`${API_BASE}/e2e-history`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const runs = Array.isArray(data.runs) ? data.runs : [];
+    // Skip re-rendering (and dropping hover state) when nothing changed
+    const changed = runs.length !== e2eRuns.length ||
+      (runs.length && runs[runs.length - 1].id !== e2eRuns[e2eRuns.length - 1].id);
+    e2eEnabled = Boolean(data.enabled);
+    if (!changed && e2eRuns.length) return;
+    e2eRuns = runs;
+    populateE2eCommands();
+    renderE2e();
+  } catch (err) {
+    const summary = document.getElementById('e2e-summary');
+    if (summary) summary.textContent = `Could not load e2e history: ${err.message}`;
+  }
+}
+
+function populateE2eCommands() {
+  const select = document.getElementById('e2e-command-select');
+  if (!select) return;
+  const current = select.value;
+  const names = new Map();
+  e2eRuns.forEach(run => (run.tests || []).forEach(t => {
+    if (!names.has(t.name)) names.set(t.name, t.command || '');
+  }));
+  select.innerHTML = '<option value="__median__">All commands (median)</option>' +
+    [...names.keys()].sort((a, b) => a.localeCompare(b))
+      .map(name => `<option value="${escapeAttribute(name)}">${escapeHtml(name)}</option>`)
+      .join('');
+  if ([...select.options].some(o => o.value === current)) select.value = current;
+}
+
+function e2eRunLabel(run) {
+  if (run.release) return run.release;
+  if (run.commit) return run.commit.slice(0, 7);
+  return run.startedAt ? new Date(run.startedAt).toLocaleDateString() : '?';
+}
+
+function formatMs(value) {
+  if (value === null || value === undefined) return '–';
+  return value >= 1000 ? `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)} s` : `${Math.round(value)} ms`;
+}
+
+function median(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function e2eValueForRun(run, command, metric) {
+  const tests = run.tests || [];
+  if (command === '__median__') {
+    return median(tests.map(t => t[metric]).filter(v => typeof v === 'number'));
+  }
+  const test = tests.find(t => t.name === command);
+  return test && typeof test[metric] === 'number' ? test[metric] : null;
+}
+
+function niceCeil(value) {
+  if (value <= 0) return 1000;
+  const exp = Math.pow(10, Math.floor(Math.log10(value)));
+  const f = value / exp;
+  const nice = f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10;
+  return nice * exp;
+}
+
+function renderE2e() {
+  const summary = document.getElementById('e2e-summary');
+  const chart = document.getElementById('e2e-chart');
+  const table = document.getElementById('e2e-table');
+  if (!summary || !chart || !table) return;
+
+  if (!e2eRuns.length) {
+    summary.textContent = e2eEnabled
+      ? 'No e2e runs received yet. They appear here after the next e2e run.'
+      : 'Not enabled. Set e2eIngestToken in config.json, and E2E_RESULTS_URL + E2E_RESULTS_TOKEN on the e2e runner (see test/INTEGRATION_TESTING.md).';
+    chart.innerHTML = '';
+    table.innerHTML = '';
+    return;
+  }
+
+  const command = document.getElementById('e2e-command-select').value;
+  const metric = document.getElementById('e2e-metric-select').value;
+
+  const last = e2eRuns[e2eRuns.length - 1];
+  const outcomeText = last.outcome === 'passed' ? '✅ passed'
+    : last.outcome === 'aborted' ? `🛑 aborted${last.abortReason ? ` (${last.abortReason})` : ''}`
+    : '❌ failed';
+  summary.innerHTML =
+    `Latest: <strong>${escapeHtml(e2eRunLabel(last))}</strong> – ${last.passed}/${last.total} ${escapeHtml(outcomeText)}` +
+    (last.finishedAt ? ` · ${escapeHtml(new Date(last.finishedAt).toLocaleString())}` : '') +
+    (last.runUrl ? ` · <a href="${escapeAttribute(last.runUrl)}" target="_blank" rel="noopener">workflow run</a>` : '') +
+    ` · ${e2eRuns.length} run(s) stored`;
+
+  renderE2eChart(chart, command, metric);
+  renderE2eTable(table, metric);
+}
+
+function renderE2eChart(container, command, metric) {
+  const points = e2eRuns.map((run, i) => ({ run, i, value: e2eValueForRun(run, command, metric) }));
+  const valid = points.filter(p => p.value !== null);
+  if (!valid.length) {
+    container.innerHTML = '<p class="e2e-summary">No data for this command/metric yet.</p>';
+    return;
+  }
+
+  const width = Math.max(280, container.clientWidth || 600);
+  const height = 220;
+  const m = { top: 12, right: 12, bottom: 28, left: 52 };
+  const plotW = width - m.left - m.right;
+  const plotH = height - m.top - m.bottom;
+  const yMax = niceCeil(Math.max(...valid.map(p => p.value)) * 1.1);
+  const n = points.length;
+  const x = i => m.left + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const y = v => m.top + plotH - (v / yMax) * plotH;
+
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => f * yMax);
+  const grid = ticks.map(t =>
+    `<line x1="${m.left}" x2="${width - m.right}" y1="${y(t)}" y2="${y(t)}"></line>`).join('');
+  const yLabels = ticks.map(t =>
+    `<text x="${m.left - 8}" y="${y(t) + 4}" text-anchor="end">${escapeHtml(formatMs(t))}</text>`).join('');
+
+  // At most ~6 x labels so release names never collide
+  const maxLabels = Math.max(2, Math.floor(plotW / 90));
+  const step = Math.max(1, Math.ceil(n / maxLabels));
+  // Always label the newest run; drop a regular label that would collide with it
+  const xLabels = points
+    .filter(p => p.i === n - 1 || (p.i % step === 0 && n - 1 - p.i >= step * 0.6))
+    .map(p => `<text x="${x(p.i)}" y="${height - 8}" text-anchor="middle">${escapeHtml(e2eRunLabel(p.run).slice(0, 14))}</text>`)
+    .join('');
+
+  // Gaps (null values) break the line instead of drawing through them
+  let d = '';
+  let pen = false;
+  points.forEach(p => {
+    if (p.value === null) { pen = false; return; }
+    d += `${pen ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(p.value).toFixed(1)}`;
+    pen = true;
+  });
+
+  const dots = valid.map(p => {
+    const failed = p.run.outcome !== 'passed';
+    return `<circle class="e2e-dot${failed ? ' is-failed' : ''}" cx="${x(p.i)}" cy="${y(p.value)}" r="4"></circle>`;
+  }).join('');
+
+  const band = n === 1 ? plotW : plotW / (n - 1);
+  const hits = points.map(p =>
+    `<rect class="e2e-hit" data-i="${p.i}" x="${x(p.i) - band / 2}" y="${m.top}" width="${band}" height="${plotH}"></rect>`).join('');
+
+  const label = command === '__median__' ? 'Median of all commands' : command;
+  container.innerHTML =
+    `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeAttribute(label)} response time per e2e run">` +
+    `<g class="e2e-grid">${grid}</g>` +
+    `<g class="e2e-axis">${yLabels}${xLabels}</g>` +
+    `<line class="e2e-crosshair" x1="0" x2="0" y1="${m.top}" y2="${m.top + plotH}"></line>` +
+    `<path class="e2e-line" d="${d}"></path>` +
+    `${dots}${hits}</svg>` +
+    '<p class="e2e-readout" role="status" aria-live="polite"></p>' +
+    '<p class="e2e-summary">Hover a point for details. Red dot = run with failed or aborted tests.</p>';
+
+  const svg = container.querySelector('svg');
+  const readout = container.querySelector('.e2e-readout');
+  const cross = container.querySelector('.e2e-crosshair');
+  // Readout sits under the chart instead of floating over it, so it never hides a point
+  const showPoint = (p) => {
+    const test = command === '__median__' ? null : (p.run.tests || []).find(t => t.name === command);
+    const status = p.run.outcome === 'passed' ? '✅ passed' : p.run.outcome === 'aborted' ? '🛑 aborted' : '❌ failed';
+    readout.innerHTML =
+      `<strong>${escapeHtml(e2eRunLabel(p.run))}</strong> ` +
+      `<span class="e2e-tip-muted">${escapeHtml(p.run.finishedAt ? new Date(p.run.finishedAt).toLocaleString() : '')}</span> · ` +
+      `${escapeHtml(label)}: <strong>${escapeHtml(formatMs(p.value))}</strong>` +
+      (test ? ` · Test ${test.passed ? '✅ passed' : '❌ failed'}${test.retried ? ' (retried)' : ''}` : '') +
+      ` · Run ${p.run.passed}/${p.run.total} ${escapeHtml(status)}`;
+  };
+  svg.querySelectorAll('.e2e-hit').forEach(rect => {
+    rect.addEventListener('mouseenter', () => {
+      const p = points[Number(rect.dataset.i)];
+      cross.setAttribute('x1', x(p.i));
+      cross.setAttribute('x2', x(p.i));
+      cross.style.visibility = 'visible';
+      showPoint(p);
+    });
+  });
+  svg.addEventListener('mouseleave', () => {
+    cross.style.visibility = 'hidden';
+    showPoint(points[n - 1]);
+  });
+  showPoint(points[n - 1]);
+}
+
+function renderE2eTable(container, metric) {
+  const last = e2eRuns[e2eRuns.length - 1];
+  const rows = (last.tests || []).map(test => {
+    let prev = null;
+    for (let i = e2eRuns.length - 2; i >= 0 && prev === null; i--) {
+      const t = (e2eRuns[i].tests || []).find(x => x.name === test.name);
+      if (t && typeof t[metric] === 'number') prev = t[metric];
+    }
+    const cur = typeof test[metric] === 'number' ? test[metric] : null;
+    const diff = cur !== null && prev !== null ? cur - prev : null;
+    // Under 100 ms is within Slack timestamp noise - don't flag it
+    const cls = diff === null || Math.abs(diff) < 100 ? '' : diff > 0 ? 'e2e-slower' : 'e2e-faster';
+    const diffText = diff === null ? '–' : `${diff > 0 ? '+' : diff < 0 ? '−' : ''}${formatMs(Math.abs(diff))}`;
+    return `<tr><td>${test.passed ? '✅' : '❌'} ${escapeHtml(test.name)}</td>` +
+      `<td><code>${escapeHtml(test.command || '')}</code></td>` +
+      `<td class="num">${escapeHtml(formatMs(cur))}</td>` +
+      `<td class="num ${cls}">${escapeHtml(diffText)}</td></tr>`;
+  }).join('');
+  container.innerHTML =
+    `<div class="e2e-table-scroll"><table class="e2e-table"><thead><tr><th>Test</th><th>Command</th>` +
+    `<th class="num">${escapeHtml(e2eRunLabel(last))}</th><th class="num">vs previous</th></tr></thead>` +
+    `<tbody>${rows}</tbody></table></div>`;
 }
 
 async function handleApiError(response, error) {

@@ -1,13 +1,17 @@
 name: E2E Tests
 
 # Runs the full Slack end-to-end suite (SlackONOS + TestBot) on the test machine.
-# Only triggered by new releases. Runs on a self-hosted runner with label
-# "slackonos-e2e"; all tokens/API keys live on that machine (see
-# test/INTEGRATION_TESTING.md), no GitHub secrets are used.
+# Triggered by new releases, or manually from the Actions tab (any branch).
+# Runs on a self-hosted runner with label "slackonos-e2e"; all tokens/API
+# keys live on that machine (see test/INTEGRATION_TESTING.md), no GitHub
+# secrets are used. If the runner's .env sets E2E_RESULTS_URL and
+# E2E_RESULTS_TOKEN, each run's response times are sent to that SlackONOS
+# admin page for graphing.
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,7 +30,7 @@ jobs:
     - name: Checkout release
       uses: actions/checkout@v6
       with:
-        ref: ${{ github.event.release.tag_name }}
+        ref: ${{ github.event.release.tag_name || github.ref }}
 
     - name: Setup Node.js
       uses: actions/setup-node@v6
@@ -48,4 +52,6 @@ jobs:
       # on the runner in test/e2e-bot.log inside the job workspace.
       env:
         E2E_QUIET_BOT: '1'
+        # Label for the admin page graph: release tag, or branch for manual runs
+        E2E_RELEASE: ${{ github.event.release.tag_name || github.ref_name }}
       run: npm run test:e2e

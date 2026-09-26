@@ -14,6 +14,8 @@
 
 import { WebClient } from '@slack/web-api';
 import { execFile } from 'child_process';
+import http from 'http';
+import https from 'https';
 import { readFileSync, writeFileSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -77,6 +79,9 @@ const slackResponseGraceSeconds = Math.max(
     0,
     parseInt(process.env.SLACK_RESPONSE_GRACE_SECONDS || config.slackResponseGraceSeconds || '5', 10) || 0
 );
+const resultsUrl = process.env.E2E_RESULTS_URL || config.e2eResultsUrl || null;
+const resultsToken = process.env.E2E_RESULTS_TOKEN || config.e2eResultsToken || null;
+const resultsInsecure = process.env.E2E_RESULTS_INSECURE === '1' || config.e2eResultsInsecure === true;
 let verbose = false;
 
 for (let i = 0; i < args.length; i++) {
@@ -404,12 +409,21 @@ async function sendAndWaitForResponse(message, waitTime = 3, targetChannel = nul
         const totalTime = Date.now() - sendTime;
         const responseTime = firstResponseTime ? firstResponseTime - sendTime : null;
         const graceUsed = graceWaitTime > 0 && totalTime > baseWaitTime;
+        // Bot latency from Slack's own message timestamps - independent of the
+        // 1s poll interval above, so it's the number to compare between runs.
+        const responseTsValues = allResponses
+            .map(resp => parseFloat(resp.ts))
+            .filter(ts => Number.isFinite(ts) && ts > sentMessageTs);
+        const slackLatency = responseTsValues.length
+            ? Math.round((Math.min(...responseTsValues) - sentMessageTs) * 1000)
+            : null;
 
         return {
             responses: allResponses,
             timing: {
                 totalTime: totalTime,
                 firstResponseTime: responseTime,
+                slackLatency,
                 responseCount: allResponses.length,
                 baseWaitTime,
                 graceWaitTime,
@@ -424,6 +438,7 @@ async function sendAndWaitForResponse(message, waitTime = 3, targetChannel = nul
             timing: {
                 totalTime: Date.now() - sendTime,
                 firstResponseTime: null,
+                slackLatency: null,
                 responseCount: 0,
                 baseWaitTime: waitTime * 1000,
                 graceWaitTime: slackResponseGraceSeconds * 1000,
@@ -2387,6 +2402,83 @@ const testSuiteArray = [
 let testSuite = [];
 
 // Run test suite
+/**
+ * Send one run to the SlackONOS admin page (POST /api/e2e/results), so
+ * response times can be graphed per command over releases. Optional: only
+ * runs when E2E_RESULTS_URL + E2E_RESULTS_TOKEN (or e2eResultsUrl /
+ * e2eResultsToken in test-config.json) are set. Never fails the suite.
+ */
+async function reportRunResults(timingLog, { outcome, abortReason = null, passed, failed, total, wallClockMs }) {
+    if (!resultsUrl || !resultsToken) {
+        if (verbose) console.log('📈 Results reporting: disabled (no E2E_RESULTS_URL / E2E_RESULTS_TOKEN)');
+        return;
+    }
+
+    const env = process.env;
+    const runUrl = env.GITHUB_SERVER_URL && env.GITHUB_REPOSITORY && env.GITHUB_RUN_ID
+        ? `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`
+        : null;
+
+    const payload = {
+        startedAt: timingLog.timestamp,
+        finishedAt: new Date().toISOString(),
+        outcome,
+        abortReason,
+        release: env.E2E_RELEASE || (env.GITHUB_REF_TYPE === 'tag' ? env.GITHUB_REF_NAME : null) || null,
+        commit: env.E2E_COMMIT || env.GITHUB_SHA || null,
+        trigger: env.GITHUB_EVENT_NAME || 'local',
+        runUrl,
+        passed,
+        failed,
+        total,
+        wallClockMs,
+        sonosPing: timingLog.sonosPing?.summary || null,
+        tests: timingLog.tests.map(test => ({
+            name: test.name,
+            command: test.command,
+            channel: test.channel,
+            passed: test.passed,
+            retried: test.retried,
+            slackLatencyMs: test.timing?.slackLatency ?? null,
+            firstResponseMs: test.timing?.firstResponseTime ?? null,
+            totalMs: test.timing?.totalTime ?? null,
+            responseCount: test.responseCount
+        }))
+    };
+
+    try {
+        const url = new URL(resultsUrl);
+        const body = JSON.stringify(payload);
+        const client = url.protocol === 'https:' ? https : http;
+        const statusCode = await new Promise((resolve, reject) => {
+            const req = client.request(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(body),
+                    'Authorization': `Bearer ${resultsToken}`
+                },
+                // SlackONOS generates a self-signed cert by default
+                rejectUnauthorized: !resultsInsecure,
+                timeout: 10000
+            }, res => {
+                res.resume();
+                res.on('end', () => resolve(res.statusCode));
+            });
+            req.on('timeout', () => req.destroy(new Error('timeout')));
+            req.on('error', reject);
+            req.end(body);
+        });
+        if (statusCode >= 200 && statusCode < 300) {
+            console.log(`📈 Results sent to ${url.origin} (HTTP ${statusCode})`);
+        } else {
+            console.error(`⚠️  Results upload to ${url.origin} failed: HTTP ${statusCode}`);
+        }
+    } catch (error) {
+        console.error(`⚠️  Results upload failed: ${error.message}`);
+    }
+}
+
 async function runTestSuite() {
     console.log('🚀 SlackONOS Integration Test Suite\n');
     console.log(`📋 Channel: ${channelId}`);
@@ -2561,6 +2653,10 @@ async function runTestSuite() {
                 console.log('   Make sure the Sonos speaker is powered on and reachable');
                 console.log('   and that the Spotify credentials are valid, then try again.');
                 console.log('═'.repeat(60));
+                await reportRunResults(timingLog, {
+                    outcome: 'aborted', abortReason: 'Health check failed',
+                    passed, failed, total: testSuite.length, wallClockMs: Date.now() - startTime
+                });
                 process.exit(1);
             }
 
@@ -2580,6 +2676,10 @@ async function runTestSuite() {
                 console.log('   • Immune tracks from voteimmune');
                 console.log('   • Pending gong votes');
                 console.log('═'.repeat(60));
+                await reportRunResults(timingLog, {
+                    outcome: 'aborted', abortReason: `${test.name} failed`,
+                    passed, failed, total: testSuite.length, wallClockMs: Date.now() - startTime
+                });
                 process.exit(1);
             }
         }
@@ -2706,6 +2806,10 @@ async function runTestSuite() {
 
     // Post results to admin channel
     await postResultsToAdminChannel(passed, failed, testSuite.length, totalTime, wallClockTime, timingLog, previousTimingLog);
+    await reportRunResults(timingLog, {
+        outcome: failed === 0 ? 'passed' : 'failed',
+        passed, failed, total: testSuite.length, wallClockMs: wallClockTime
+    });
 
     if (failed > 0) {
         console.log('\n⚠️  Some tests failed. Check that SlackONOS bot is running.');

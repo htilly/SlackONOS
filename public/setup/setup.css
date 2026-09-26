@@ -1487,3 +1487,149 @@ small code,
     transition-duration: 0.001ms !important;
   }
 }
+
+/* E2E response time chart */
+.e2e-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.e2e-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.e2e-controls label {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.e2e-controls select {
+  width: auto;
+  max-width: 100%;
+}
+
+.e2e-summary {
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  margin: 0 0 8px;
+}
+
+.e2e-summary a {
+  color: var(--accent);
+}
+
+.e2e-chart {
+  position: relative;
+  width: 100%;
+}
+
+.e2e-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.e2e-chart .e2e-grid line {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.e2e-chart .e2e-axis text {
+  fill: var(--text-muted);
+  font-size: 11px;
+}
+
+.e2e-chart .e2e-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.e2e-chart .e2e-dot {
+  fill: var(--accent);
+  stroke: var(--bg-elevated);
+  stroke-width: 2;
+}
+
+.e2e-chart .e2e-dot.is-failed {
+  fill: var(--error);
+}
+
+.e2e-chart .e2e-crosshair {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  visibility: hidden;
+}
+
+.e2e-chart .e2e-hit {
+  fill: transparent;
+  cursor: crosshair;
+}
+
+.e2e-readout {
+  min-height: 1.4em;
+  margin: 4px 0;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.e2e-readout .e2e-tip-muted {
+  color: var(--text-muted);
+}
+
+.e2e-table-wrap {
+  margin-top: 12px;
+}
+
+.e2e-table-wrap summary {
+  cursor: pointer;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.e2e-table-scroll {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+.e2e-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.e2e-table th,
+.e2e-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.e2e-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.e2e-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.e2e-table .e2e-slower {
+  color: var(--error);
+}
+
+.e2e-table .e2e-faster {
+  color: var(--success);
+}
