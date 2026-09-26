@@ -1147,6 +1147,27 @@ const aiNaturalLanguageTests = hasSlackONOSMentionTarget ? [
 // ORDER MATTERS: Tests are arranged to handle state dependencies correctly
 const testSuiteArray = [
     // ═══════════════════════════════════════════════════════════════════
+    // PHASE -2: HEALTH CHECK - Run the admin 'debug' command first to verify
+    // that the bot answers and that it can reach both Sonos and Spotify.
+    // Matches on "<check>:* Connected" rather than the ✅ emoji so it works
+    // whether Slack returns the unicode emoji or its :shortcode:. A failure
+    // aborts the suite - nothing after this can pass without a speaker.
+    // ═══════════════════════════════════════════════════════════════════
+
+    new TestCase(
+        'Health: Debug Report',
+        'debug',
+        validators.and(
+            validators.hasText(),
+            validators.containsText('System Debug Report'),
+            validators.matchesRegex(/Sonos Speaker:?\*?:?\s*Connected at/),
+            validators.matchesRegex(/Spotify API:?\*?:?\s*Connected/)
+        ),
+        15,
+        adminChannelId
+    ),
+
+    // ═══════════════════════════════════════════════════════════════════
     // PHASE -1: SELF-HEAL - Clear any leftover vote/gong/immune state from
     // a previous run before the Pre-flight checks verify clean state. This
     // is deliberately NOT named 'Pre-flight:' so a failure here doesn't
@@ -2515,6 +2536,33 @@ async function runTestSuite() {
                 }
             }
             failed++;
+
+            // ABORT EARLY if the health check fails - Sonos/Spotify/bot unreachable
+            if (test.name.startsWith('Health:')) {
+                if (pingMonitor) {
+                    pingMonitor.stop();
+                }
+                const healthLines = test.responses
+                    .map(r => r.text || '')
+                    .join('\n')
+                    .split('\n')
+                    .filter(line => /Spotify API|Sonos Speaker|Soundcraft/.test(line));
+                console.log('\n' + '═'.repeat(60));
+                console.log('🛑 HEALTH CHECK FAILED - ABORTING TEST SUITE');
+                console.log('');
+                if (healthLines.length > 0) {
+                    console.log('   Health status reported by the bot:');
+                    healthLines.forEach(line => console.log(`   ${line}`));
+                } else {
+                    console.log('   The bot did not return a debug report.');
+                    console.log('   Check that SlackONOS is running and listening in the admin channel.');
+                }
+                console.log('');
+                console.log('   Make sure the Sonos speaker is powered on and reachable');
+                console.log('   and that the Spotify credentials are valid, then try again.');
+                console.log('═'.repeat(60));
+                process.exit(1);
+            }
 
             // ABORT EARLY if pre-flight checks fail - bot needs restart
             if (test.name.startsWith('Pre-flight:')) {
