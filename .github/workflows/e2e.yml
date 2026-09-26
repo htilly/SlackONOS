@@ -2,6 +2,14 @@ name: E2E Tests
 
 # Runs the full Slack end-to-end suite (SlackONOS + TestBot) on the test machine.
 # Triggered by new releases, or manually from the Actions tab (any branch).
+#
+# The e2e job is guarded to github.actor == 'htilly'. The runner is a
+# self-hosted runner on a host with LAN access and live credentials on disk,
+# and this repository is public, so the job must never run for anyone else.
+# NOTE: this guard lives in the workflow file, so it is a backstop, not the
+# primary control - a pull request can edit this file. The real control is the
+# repository's "Require approval for all external contributors" fork-PR
+# setting.
 # Runs on a self-hosted runner with label "slackonos-e2e"; all tokens/API
 # keys live on that machine (see test/INTEGRATION_TESTING.md), no GitHub
 # secrets are used.
@@ -26,6 +34,8 @@ concurrency:
 
 jobs:
   e2e:
+    # Only the repository owner may put code on the self-hosted runner.
+    if: github.actor == 'htilly'
     runs-on: [self-hosted, slackonos-e2e]
     timeout-minutes: 45
 
