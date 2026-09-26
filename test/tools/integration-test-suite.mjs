@@ -14,8 +14,6 @@
 
 import { WebClient } from '@slack/web-api';
 import { execFile } from 'child_process';
-import http from 'http';
-import https from 'https';
 import { readFileSync, writeFileSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -79,9 +77,9 @@ const slackResponseGraceSeconds = Math.max(
     0,
     parseInt(process.env.SLACK_RESPONSE_GRACE_SECONDS || config.slackResponseGraceSeconds || '5', 10) || 0
 );
-const resultsUrl = process.env.E2E_RESULTS_URL || config.e2eResultsUrl || null;
-const resultsToken = process.env.E2E_RESULTS_TOKEN || config.e2eResultsToken || null;
-const resultsInsecure = process.env.E2E_RESULTS_INSECURE === '1' || config.e2eResultsInsecure === true;
+// Where this run's results are written for the e2e workflow to commit into
+// data/e2e-history.json (see test/tools/append-e2e-history.mjs)
+const resultsFile = process.env.E2E_RESULTS_FILE || join(__dirname, '../e2e-run.json');
 let verbose = false;
 
 for (let i = 0; i < args.length; i++) {
@@ -2403,23 +2401,18 @@ let testSuite = [];
 
 // Run test suite
 /**
- * Send one run to the SlackONOS admin page (POST /api/e2e/results), so
- * response times can be graphed per command over releases. Optional: only
- * runs when E2E_RESULTS_URL + E2E_RESULTS_TOKEN (or e2eResultsUrl /
- * e2eResultsToken in test-config.json) are set. Never fails the suite.
+ * Write this run (per-test response times) to E2E_RESULTS_FILE. The e2e
+ * workflow appends it to data/e2e-history.json and commits it, so every
+ * later build ships the history for the admin page graph. Never fails the
+ * suite.
  */
-async function reportRunResults(timingLog, { outcome, abortReason = null, passed, failed, total, wallClockMs }) {
-    if (!resultsUrl || !resultsToken) {
-        if (verbose) console.log('📈 Results reporting: disabled (no E2E_RESULTS_URL / E2E_RESULTS_TOKEN)');
-        return;
-    }
-
+function writeRunResults(timingLog, { outcome, abortReason = null, passed, failed, total, wallClockMs }) {
     const env = process.env;
     const runUrl = env.GITHUB_SERVER_URL && env.GITHUB_REPOSITORY && env.GITHUB_RUN_ID
         ? `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`
         : null;
 
-    const payload = {
+    const run = {
         startedAt: timingLog.timestamp,
         finishedAt: new Date().toISOString(),
         outcome,
@@ -2447,35 +2440,10 @@ async function reportRunResults(timingLog, { outcome, abortReason = null, passed
     };
 
     try {
-        const url = new URL(resultsUrl);
-        const body = JSON.stringify(payload);
-        const client = url.protocol === 'https:' ? https : http;
-        const statusCode = await new Promise((resolve, reject) => {
-            const req = client.request(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Content-Length': Buffer.byteLength(body),
-                    'Authorization': `Bearer ${resultsToken}`
-                },
-                // SlackONOS generates a self-signed cert by default
-                rejectUnauthorized: !resultsInsecure,
-                timeout: 10000
-            }, res => {
-                res.resume();
-                res.on('end', () => resolve(res.statusCode));
-            });
-            req.on('timeout', () => req.destroy(new Error('timeout')));
-            req.on('error', reject);
-            req.end(body);
-        });
-        if (statusCode >= 200 && statusCode < 300) {
-            console.log(`📈 Results sent to ${url.origin} (HTTP ${statusCode})`);
-        } else {
-            console.error(`⚠️  Results upload to ${url.origin} failed: HTTP ${statusCode}`);
-        }
+        writeFileSync(resultsFile, JSON.stringify(run, null, 2));
+        console.log(`📈 Run results written to ${resultsFile}`);
     } catch (error) {
-        console.error(`⚠️  Results upload failed: ${error.message}`);
+        console.error(`⚠️  Could not write run results: ${error.message}`);
     }
 }
 
@@ -2653,7 +2621,7 @@ async function runTestSuite() {
                 console.log('   Make sure the Sonos speaker is powered on and reachable');
                 console.log('   and that the Spotify credentials are valid, then try again.');
                 console.log('═'.repeat(60));
-                await reportRunResults(timingLog, {
+                writeRunResults(timingLog, {
                     outcome: 'aborted', abortReason: 'Health check failed',
                     passed, failed, total: testSuite.length, wallClockMs: Date.now() - startTime
                 });
@@ -2676,7 +2644,7 @@ async function runTestSuite() {
                 console.log('   • Immune tracks from voteimmune');
                 console.log('   • Pending gong votes');
                 console.log('═'.repeat(60));
-                await reportRunResults(timingLog, {
+                writeRunResults(timingLog, {
                     outcome: 'aborted', abortReason: `${test.name} failed`,
                     passed, failed, total: testSuite.length, wallClockMs: Date.now() - startTime
                 });
@@ -2806,7 +2774,7 @@ async function runTestSuite() {
 
     // Post results to admin channel
     await postResultsToAdminChannel(passed, failed, testSuite.length, totalTime, wallClockTime, timingLog, previousTimingLog);
-    await reportRunResults(timingLog, {
+    writeRunResults(timingLog, {
         outcome: failed === 0 ? 'passed' : 'failed',
         passed, failed, total: testSuite.length, wallClockMs: wallClockTime
     });

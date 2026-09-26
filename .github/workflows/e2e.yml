@@ -4,9 +4,12 @@ name: E2E Tests
 # Triggered by new releases, or manually from the Actions tab (any branch).
 # Runs on a self-hosted runner with label "slackonos-e2e"; all tokens/API
 # keys live on that machine (see test/INTEGRATION_TESTING.md), no GitHub
-# secrets are used. If the runner's .env sets E2E_RESULTS_URL and
-# E2E_RESULTS_TOKEN, each run's response times are sent to that SlackONOS
-# admin page for graphing.
+# secrets are used.
+#
+# Each run's response times are appended to data/e2e-history.json on master
+# by the record-history job, so every later build (and Docker image) ships
+# the history graphed on the admin page. That job runs on a GitHub-hosted
+# runner - the self-hosted runner never gets write access to the repo.
 
 on:
   release:
@@ -47,6 +50,9 @@ jobs:
           exit 1
         fi
 
+    - name: Clear results from earlier runs
+      run: rm -f test/e2e-run.json
+
     - name: Run e2e tests
       # Bot output is kept out of the (public) Actions log; the full log stays
       # on the runner in test/e2e-bot.log inside the job workspace.
@@ -55,3 +61,66 @@ jobs:
         # Label for the admin page graph: release tag, or branch for manual runs
         E2E_RELEASE: ${{ github.event.release.tag_name || github.ref_name }}
       run: npm run test:e2e
+
+    - name: Upload run results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: e2e-run
+        path: test/e2e-run.json
+        if-no-files-found: warn
+        retention-days: 7
+
+  record-history:
+    # Commits the run into data/e2e-history.json on master, even when tests failed
+    needs: e2e
+    if: always() && needs.e2e.result != 'skipped' && needs.e2e.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download run results
+      id: download
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: e2e-run
+        path: ${{ runner.temp }}/e2e-run
+
+    - name: Checkout master
+      if: steps.download.outcome == 'success'
+      uses: actions/checkout@v6
+      with:
+        ref: master
+
+    - name: Setup Node.js
+      if: steps.download.outcome == 'success'
+      uses: actions/setup-node@v6
+      with:
+        node-version: 22.x
+
+    - name: Append run and push
+      if: steps.download.outcome == 'success'
+      env:
+        RUN_FILE: ${{ runner.temp }}/e2e-run/e2e-run.json
+        RUN_LABEL: ${{ github.event.release.tag_name || github.ref_name }}
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        # Retry in case master moved while we were appending
+        for attempt in 1 2 3; do
+          git fetch origin master
+          git reset --hard origin/master
+          node test/tools/append-e2e-history.mjs "$RUN_FILE" data/e2e-history.json
+          git add data/e2e-history.json
+          git commit -m "chore(e2e): record response times for $RUN_LABEL [skip ci]"
+          if git push origin HEAD:master; then
+            exit 0
+          fi
+          echo "Push failed (attempt $attempt), retrying..."
+          sleep $((attempt * 5))
+        done
+        echo "::error::Could not push e2e history to master (branch protection?)"
+        exit 1

@@ -1009,10 +1009,9 @@ async function setupWebAuthn() {
   await loadWebAuthnStatus();
 }
 
-/* --- E2E response times (runs posted by test/tools/integration-test-suite.mjs) --- */
+/* --- E2E response times (data/e2e-history.json, committed by the e2e workflow) --- */
 
 let e2eRuns = [];
-let e2eEnabled = false;
 
 function setupE2eChart() {
   const commandSelect = document.getElementById('e2e-command-select');
@@ -1037,7 +1036,6 @@ async function loadE2eHistory() {
     // Skip re-rendering (and dropping hover state) when nothing changed
     const changed = runs.length !== e2eRuns.length ||
       (runs.length && runs[runs.length - 1].id !== e2eRuns[e2eRuns.length - 1].id);
-    e2eEnabled = Boolean(data.enabled);
     if (!changed && e2eRuns.length) return;
     e2eRuns = runs;
     populateE2eCommands();
@@ -1105,9 +1103,7 @@ function renderE2e() {
   if (!summary || !chart || !table) return;
 
   if (!e2eRuns.length) {
-    summary.textContent = e2eEnabled
-      ? 'No e2e runs received yet. They appear here after the next e2e run.'
-      : 'Not enabled. Set e2eIngestToken in config.json, and E2E_RESULTS_URL + E2E_RESULTS_TOKEN on the e2e runner (see test/INTEGRATION_TESTING.md).';
+    summary.textContent = 'No e2e runs in this build yet. The e2e workflow commits results to data/e2e-history.json; they show up here from the next build.';
     chart.innerHTML = '';
     table.innerHTML = '';
     return;

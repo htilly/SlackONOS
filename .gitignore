@@ -53,6 +53,7 @@ test/config/e2e-bot-config.json
 test/e2e-bot.log
 *.e2e-backup
 test/timing-log.json
+test/e2e-run.json
 
 # ===================================================================
 # Security review scan output (repo-security-review skill / /security-review)
