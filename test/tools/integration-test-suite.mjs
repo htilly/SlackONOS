@@ -33,9 +33,13 @@ let mainConfig = {};
 try {
     config = JSON.parse(readFileSync(testConfigPath, 'utf8'));
 } catch (error) {
-    console.error('❌ Could not load test/config/test-config.json');
-    console.error('   Run: cp test/config/test-config.json.example test/config/test-config.json');
-    process.exit(1);
+    // The config file is optional when everything is provided via env vars
+    if (!process.env.SLACK_BOT_TOKEN) {
+        console.error('❌ Could not load test/config/test-config.json');
+        console.error('   Run: cp test/config/test-config.json.example test/config/test-config.json');
+        console.error('   (or set SLACK_BOT_TOKEN, SLACK_CHANNEL, SLACK_ADMIN_CHANNEL, SLACKONOS_BOT_ID)');
+        process.exit(1);
+    }
 }
 
 try {
@@ -54,9 +58,9 @@ const slack = new WebClient(slackToken);
 
 // Parse CLI args
 const args = process.argv.slice(2);
-let channelId = config.slackChannel || 'C01JS8A0YC9';
-let adminChannelId = config.slackAdminChannel || 'C01J1TBLCA0';
-const slackONOSBotId = config.slackONOSBotId || null;
+let channelId = process.env.SLACK_CHANNEL || config.slackChannel || 'C01JS8A0YC9';
+let adminChannelId = process.env.SLACK_ADMIN_CHANNEL || config.slackAdminChannel || 'C01J1TBLCA0';
+const slackONOSBotId = process.env.SLACKONOS_BOT_ID || config.slackONOSBotId || null;
 const hasSlackONOSMentionTarget = !!(
     slackONOSBotId &&
     !String(slackONOSBotId).includes('YOUR') &&
