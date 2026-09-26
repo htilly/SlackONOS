@@ -930,6 +930,22 @@ describe('Voting Module (voting.js)', function() {
       await voting.votecheck('C123');
       expect(messages.some(m => m.msg.includes('No tracks have been voted'))).to.be.true;
     });
+
+    it('should only trigger onGongSuccess once for concurrent gongs', async function() {
+      // Slow sendMessage widens the window between increment and limit check
+      mockDeps.sendMessage = async (msg, channel) => {
+        messages.push({ msg, channel });
+        await new Promise(resolve => setTimeout(resolve, 5));
+      };
+      voting.initialize(mockDeps);
+      voting.setConfig({ gongLimit: 3 });
+
+      const onGongSuccess = sinon.stub().resolves();
+      await Promise.all(['u1', 'u2', 'u3', 'u4', 'u5'].map(u => voting.gong('C123', u, onGongSuccess)));
+
+      expect(onGongSuccess.callCount).to.equal(1);
+      expect(messages.filter(m => m.msg.includes('THE PEOPLE HAVE SPOKEN')).length).to.equal(1);
+    });
   });
 
   describe('gongcheck', function() {
@@ -1002,6 +1018,22 @@ describe('Voting Module (voting.js)', function() {
       await voting.voteImmune(['voteimmune', '0'], 'C123', 'user1');
       
       expect(messages.some(m => m.msg.includes('already'))).to.be.true;
+    });
+
+    it('should count immunity votes per track, not combined across tracks', async function() {
+      await voting.voteImmune(['voteimmune', '0'], 'C123', 'user1');
+      await voting.voteImmune(['voteimmune', '1'], 'C123', 'user2');
+      await voting.voteImmune(['voteimmune', '0'], 'C123', 'user3');
+
+      expect(messages.some(m => m.msg.includes('*1/3* for *Track 2*'))).to.be.true;
+      expect(messages.some(m => m.msg.includes('*2/3* for *Track 1*'))).to.be.true;
+      expect(messages.some(m => m.msg.includes('IMMUNITY GRANTED'))).to.be.false;
+      expect(voting.isTrackGongBanned({ title: 'Track 1', artist: 'Artist 1', uri: 'spotify:track:1' })).to.be.false;
+
+      await voting.voteImmune(['voteimmune', '0'], 'C123', 'user4');
+      expect(messages.some(m => m.msg.includes('IMMUNITY GRANTED'))).to.be.true;
+      expect(voting.isTrackGongBanned({ title: 'Track 1', artist: 'Artist 1', uri: 'spotify:track:1' })).to.be.true;
+      expect(voting.isTrackGongBanned({ title: 'Track 2', artist: 'Artist 2', uri: 'spotify:track:2' })).to.be.false;
     });
   });
 

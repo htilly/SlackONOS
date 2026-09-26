@@ -216,3 +216,94 @@ describe('Spotify Search Integration', function() {
     });
   });
 });
+
+describe('Spotify client (lib/spotify.js)', function() {
+  let createSpotify;
+  let fetchStub;
+  let spotify;
+  const logger = { info() {}, warn() {}, error() {}, debug() {} };
+
+  const jsonResponse = (status, body) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: String(status),
+    json: async () => body
+  });
+
+  beforeEach(async function() {
+    const { createRequire } = await import('module');
+    const require = createRequire(import.meta.url);
+    delete require.cache[require.resolve('../lib/spotify.js')];
+    createSpotify = require('../lib/spotify.js');
+    fetchStub = sinon.stub(globalThis, 'fetch');
+    spotify = createSpotify({ clientId: 'id', clientSecret: 'secret', market: 'US' }, logger);
+  });
+
+  afterEach(function() {
+    fetchStub.restore();
+    delete createSpotify.instance;
+  });
+
+  it('should fetch a single token for concurrent callers', async function() {
+    let tokenCalls = 0;
+    fetchStub.callsFake(async (url) => {
+      if (url.includes('accounts.spotify.com')) {
+        tokenCalls++;
+        return jsonResponse(200, { access_token: 'tok', expires_in: 3600 });
+      }
+      return jsonResponse(200, { artists: { items: [] } });
+    });
+
+    await Promise.all([
+      spotify.searchArtistList('a', 1),
+      spotify.searchArtistList('b', 1),
+      spotify.searchArtistList('c', 1)
+    ]);
+
+    expect(tokenCalls).to.equal(1);
+  });
+
+  it('should refresh the token and retry once on 401', async function() {
+    let tokenCalls = 0;
+    let apiCalls = 0;
+    fetchStub.callsFake(async (url, opts) => {
+      expect(opts.signal).to.exist;
+      if (url.includes('accounts.spotify.com')) {
+        tokenCalls++;
+        return jsonResponse(200, { access_token: 'tok' + tokenCalls, expires_in: 3600 });
+      }
+      apiCalls++;
+      if (opts.headers.Authorization === 'Bearer tok1') {
+        return jsonResponse(401, {});
+      }
+      return jsonResponse(200, { artists: { items: [{ name: 'U2', uri: 'spotify:artist:1' }] } });
+    });
+
+    const result = await spotify.searchArtistList('U2', 1);
+
+    expect(result).to.deep.equal([{ name: 'U2', uri: 'spotify:artist:1' }]);
+    expect(tokenCalls).to.equal(2);
+    expect(apiCalls).to.equal(2);
+  });
+
+  it('should not retry more than once on repeated 401', async function() {
+    let apiCalls = 0;
+    fetchStub.callsFake(async (url) => {
+      if (url.includes('accounts.spotify.com')) {
+        return jsonResponse(200, { access_token: 'tok', expires_in: 3600 });
+      }
+      apiCalls++;
+      return jsonResponse(401, {});
+    });
+
+    let error;
+    try {
+      await spotify.searchArtistList('U2', 1);
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).to.be.an('error');
+    expect(apiCalls).to.equal(2);
+  });
+});
