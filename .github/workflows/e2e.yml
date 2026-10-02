@@ -1,7 +1,9 @@
 name: E2E Tests
 
 # Runs the full Slack end-to-end suite (SlackONOS + TestBot) on the test machine.
-# Triggered by new releases, or manually from the Actions tab (any branch).
+# Triggered by every push to master, every published release, and manually
+# from the Actions tab (any branch). The run type is recorded with the results
+# so the admin page graph can tell master builds, releases and manual runs apart.
 #
 # The e2e job is guarded to github.actor == 'htilly'. The runner is a
 # self-hosted runner on a host with LAN access and live credentials on disk,
@@ -20,6 +22,14 @@ name: E2E Tests
 # runner - the self-hosted runner never gets write access to the repo.
 
 on:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      # The history commits this workflow makes itself
+      - 'data/e2e-history.json'
   release:
     types: [published]
   workflow_dispatch:
@@ -28,7 +38,8 @@ permissions:
   contents: read
 
 concurrency:
-  # One physical Sonos speaker - never run two e2e jobs at once
+  # One physical Sonos speaker - never run two e2e jobs at once. Runs queue;
+  # if several master pushes queue up, GitHub keeps only the newest pending one.
   group: slackonos-e2e
   cancel-in-progress: false
 
@@ -40,10 +51,11 @@ jobs:
     timeout-minutes: 45
 
     steps:
-    - name: Checkout release
+    - name: Checkout code under test
       uses: actions/checkout@v6
       with:
-        ref: ${{ github.event.release.tag_name || github.ref }}
+        # Release: the tag. Push/manual: the exact commit that triggered the run
+        ref: ${{ github.event.release.tag_name || github.sha }}
 
     - name: Setup Node.js
       uses: actions/setup-node@v6
@@ -68,8 +80,9 @@ jobs:
       # on the runner in test/e2e-bot.log inside the job workspace.
       env:
         E2E_QUIET_BOT: '1'
-        # Label for the admin page graph: release tag, or branch for manual runs
-        E2E_RELEASE: ${{ github.event.release.tag_name || github.ref_name }}
+        # Graph label: release tag, branch for manual runs, empty for master
+        # pushes (the graph then shows the short commit SHA)
+        E2E_RELEASE: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event_name == 'workflow_dispatch' && github.ref_name || '' }}
       run: npm run test:e2e
 
     - name: Upload run results
@@ -115,8 +128,11 @@ jobs:
       if: steps.download.outcome == 'success'
       env:
         RUN_FILE: ${{ runner.temp }}/e2e-run/e2e-run.json
-        RUN_LABEL: ${{ github.event.release.tag_name || github.ref_name }}
+        RUN_LABEL: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
       run: |
+        if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+          RUN_LABEL="master@${GITHUB_SHA::7}"
+        fi
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         # Retry in case master moved while we were appending

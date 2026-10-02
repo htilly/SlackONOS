@@ -50,6 +50,7 @@ const createAdminApi = require('./lib/admin-api');
 const { createWebServer } = require('./lib/web-server');
 const { defaultHistoryPath: defaultE2eHistoryPath } = require('./lib/e2e-history');
 const { createCommandRouter } = require('./lib/command-router');
+const commandContext = require('./lib/command-context');
 const { createCommandRegistry } = require('./lib/command-registry');
 const { isUnsafeObjectKey } = require('./lib/safe-object-key');
 const { redactConfigValue } = require('./lib/redact-config');
@@ -561,17 +562,31 @@ if (slackBotToken && slackAppToken) {
 // Initialize Discord (optional - only if token configured)
 let discord = null;
 
-// Thread-local context for tracking current platform
-let currentPlatform = 'slack';
-let currentChannel = null;
-let currentIsAdmin = false;
+// Per-command context (platform/channel/isAdmin) lives in AsyncLocalStorage,
+// see lib/command-context.js - never in shared globals.
+function currentCommandPlatform() {
+  const ctx = commandContext.get();
+  if (ctx && ctx.platform) return ctx.platform;
+  // Outside any command (startup/admin notices): prefer Slack when configured
+  return slack ? 'slack' : (discord ? 'discord' : 'slack');
+}
 // Map to store message timestamps for thread replies: channel -> ts
 const messageTimestamps = new Map();
 
+// Run a reaction handler inside its own command context (platform/channel)
+function withReactionContext(handler) {
+  return (action, trackName, channelId, userName, platform) =>
+    commandContext.run(
+      { platform, channel: channelId, isAdmin: false, userName },
+      () => handler(action, trackName, channelId, userName, platform)
+    );
+}
+
 // Helper function wrapper for backward compatibility (Slack)
 async function _slackMessage(message, channel_id, options = {}) {
-  const platform = currentPlatform;
-  const targetChannel = channel_id || currentChannel;
+  const ctx = commandContext.get();
+  const platform = currentCommandPlatform();
+  const targetChannel = channel_id || (ctx && ctx.channel);
 
   // If current context is Discord: never try Slack first.
   if (platform === 'discord') {
@@ -1084,7 +1099,7 @@ httpServer = webServer.httpServer;
       musicHelper: musicHelper,
       getConfig: () => config,
       getAdminChannel: () => global.adminChannel,
-      getCurrentPlatform: () => currentPlatform,
+      getCurrentPlatform: currentCommandPlatform,
     });
 
     // Check that at least one platform is configured
@@ -1099,12 +1114,8 @@ httpServer = webServer.httpServer;
         logger.info('✅ Slack connection established.');
 
         // Set up reaction handler for Slack
-        slack.setReactionHandler(async (action, trackName, channelId, userName, platform) => {
+        slack.setReactionHandler(withReactionContext(async (action, trackName, channelId, userName, platform) => {
           logger.info(`[SLACK] Reaction ${action} from ${userName} for track: ${trackName}`);
-
-          // Set platform context
-          currentPlatform = platform;
-          currentChannel = channelId;
 
           // For reactions, we vote/gong the track that was just added (most recent in queue)
           // This is more intuitive than requiring a queue position number
@@ -1132,7 +1143,7 @@ httpServer = webServer.httpServer;
             }
           }
           // Note: Gong reactions removed - gong only works via command on currently playing track
-        });
+        }));
       } catch (slackErr) {
         logger.error(`Failed to connect to Slack API: ${slackErr.message}`);
         if (!hasDiscord) {
@@ -1157,12 +1168,8 @@ httpServer = webServer.httpServer;
           logger.info('✅ Discord connection established.');
 
           // Set up reaction handler for Discord
-          DiscordSystem.setReactionHandler(async (action, trackName, channelId, userName, platform) => {
+          DiscordSystem.setReactionHandler(withReactionContext(async (action, trackName, channelId, userName, platform) => {
             logger.info(`[DISCORD] Reaction ${action} from ${userName} for track: ${trackName}`);
-
-            // Set platform context
-            currentPlatform = platform;
-            currentChannel = channelId;
 
             // For reactions, we vote/gong the track that was just added (most recent in queue)
             // This is more intuitive than requiring a queue position number
@@ -1190,7 +1197,7 @@ httpServer = webServer.httpServer;
               }
             }
             // Note: Gong reactions removed - gong only works via command on currently playing track
-          });
+          }));
         } else {
           logger.warn('Discord returned null (token maybe invalid). Running Slack-only.');
         }
@@ -1500,11 +1507,6 @@ const commandRouter = createCommandRouter({
   logUserAction: _logUserAction,
   getUserMusicProfile: _getUserMusicProfile,
   getUserInteractionProfile: _getUserInteractionProfile,
-  setContext: (platform, channel, isAdmin) => {
-    currentPlatform = platform;
-    currentChannel = channel;
-    currentIsAdmin = isAdmin;
-  },
   messageTimestamps,
   getAdminChannel: () => global.adminChannel,
 });
@@ -1813,7 +1815,7 @@ async function _bestof(input, channel, userName) {
 
     _slackMessage(msg, channel, {
       trackName: tracksByArtist[0]?.name || bestArtist,
-      addReactions: currentPlatform === 'discord'
+      addReactions: currentCommandPlatform() === 'discord'
     });
 
     // Queue tracks in parallel (much faster!) - don't block user response
@@ -2599,7 +2601,8 @@ function _status(channel, cb) {
 async function _help(input, channel, userName) {
   try {
     // Determine admin status platform-aware
-    const isAdminUser = currentPlatform === 'discord' ? currentIsAdmin : (channel === global.adminChannel);
+    const helpCtx = commandContext.get();
+    const isAdminUser = currentCommandPlatform() === 'discord' ? Boolean(helpCtx && helpCtx.isAdmin) : (channel === global.adminChannel);
 
     // AI help section (only shown if OpenAI is enabled)
     let aiHelpSection = '';
@@ -2614,7 +2617,7 @@ async function _help(input, channel, userName) {
     }
 
     // For Discord admins, send regular help in channel and admin help via DM
-    if (currentPlatform === 'discord' && isAdminUser) {
+    if (currentCommandPlatform() === 'discord' && isAdminUser) {
       const regularHelp = readHelpTemplate('templates/help/helpText.txt');
       const adminHelp = readHelpTemplate('templates/help/helpTextAdmin.txt');
 
@@ -2699,7 +2702,7 @@ async function _help(input, channel, userName) {
       // Security (O-008): remind whoever is reading admin help, every time,
       // that this Slack channel being non-private means anyone who joins it
       // gets everything below for free. No-op unless confirmed non-private.
-      if (currentPlatform === 'slack' && isAdminUser) {
+      if (currentCommandPlatform() === 'slack' && isAdminUser) {
         finalMessage = adminChannelPrivacy.wrapHelpMessage(finalMessage, global.adminChannelIsPrivate);
       }
 
@@ -2717,7 +2720,7 @@ async function _help(input, channel, userName) {
  * @param {string} text - Message text to send
  */
 async function _sendDirectMessage(userName, text) {
-  if (currentPlatform !== 'discord') {
+  if (currentCommandPlatform() !== 'discord') {
     logger.warn('[DM] Direct messages only supported on Discord');
     return false;
   }

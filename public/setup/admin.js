@@ -1016,9 +1016,11 @@ let e2eRuns = [];
 function setupE2eChart() {
   const commandSelect = document.getElementById('e2e-command-select');
   const metricSelect = document.getElementById('e2e-metric-select');
-  if (!commandSelect || !metricSelect) return;
+  const typeSelect = document.getElementById('e2e-type-select');
+  if (!commandSelect || !metricSelect || !typeSelect) return;
   commandSelect.addEventListener('change', renderE2e);
   metricSelect.addEventListener('change', renderE2e);
+  typeSelect.addEventListener('change', renderE2e);
   let resizeTimer = null;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
@@ -1096,6 +1098,44 @@ function niceCeil(value) {
   return nice * exp;
 }
 
+// Run type from the workflow event: every push to master, every release, or manual
+const E2E_RUN_TYPES = {
+  release: { label: 'Release', shape: 'diamond' },
+  master: { label: 'Master build', shape: 'circle' },
+  manual: { label: 'Manual', shape: 'square' }
+};
+
+function e2eRunType(run) {
+  if (run.trigger === 'release') return 'release';
+  if (run.trigger === 'push') return 'master';
+  return 'manual';
+}
+
+function e2eMarker(type, cx, cy, cls, dense = false) {
+  const shape = E2E_RUN_TYPES[type].shape;
+  if (shape === 'diamond') {
+    const r = 6.5;
+    return `<path class="${cls}" d="M${cx},${cy - r}L${cx + r},${cy}L${cx},${cy + r}L${cx - r},${cy}Z"></path>`;
+  }
+  if (shape === 'square') {
+    const h = 4.5;
+    return `<rect class="${cls}" x="${cx - h}" y="${cy - h}" width="${h * 2}" height="${h * 2}" rx="1.5"></rect>`;
+  }
+  // Master builds are the bulk of the points - shrink them when the chart gets crowded
+  return `<circle class="${cls}" cx="${cx}" cy="${cy}" r="${dense ? 2.5 : 4}"></circle>`;
+}
+
+function e2eLegend(runs) {
+  const types = Object.keys(E2E_RUN_TYPES).filter(type => runs.some(run => e2eRunType(run) === type));
+  const swatch = (type, cls) =>
+    `<svg class="e2e-legend-swatch" viewBox="0 0 16 16" aria-hidden="true">${e2eMarker(type, 8, 8, cls)}</svg>`;
+  const items = types.map(type => `<span class="e2e-legend-item">${swatch(type, 'e2e-dot')}${escapeHtml(E2E_RUN_TYPES[type].label)}</span>`);
+  if (runs.some(run => run.outcome !== 'passed')) {
+    items.push(`<span class="e2e-legend-item">${swatch('master', 'e2e-dot is-failed')}Failed or aborted</span>`);
+  }
+  return `<div class="e2e-legend">${items.join('')}</div>`;
+}
+
 function renderE2e() {
   const summary = document.getElementById('e2e-summary');
   const chart = document.getElementById('e2e-chart');
@@ -1111,23 +1151,33 @@ function renderE2e() {
 
   const command = document.getElementById('e2e-command-select').value;
   const metric = document.getElementById('e2e-metric-select').value;
+  const typeFilter = document.getElementById('e2e-type-select').value;
+  const runs = typeFilter === 'all' ? e2eRuns : e2eRuns.filter(run => e2eRunType(run) === typeFilter);
 
-  const last = e2eRuns[e2eRuns.length - 1];
+  if (!runs.length) {
+    summary.textContent = `No ${typeFilter === 'master' ? 'master build' : typeFilter} runs stored yet (${e2eRuns.length} run(s) in total).`;
+    chart.innerHTML = '';
+    table.innerHTML = '';
+    return;
+  }
+
+  const last = runs[runs.length - 1];
   const outcomeText = last.outcome === 'passed' ? '✅ passed'
     : last.outcome === 'aborted' ? `🛑 aborted${last.abortReason ? ` (${last.abortReason})` : ''}`
     : '❌ failed';
   summary.innerHTML =
-    `Latest: <strong>${escapeHtml(e2eRunLabel(last))}</strong> – ${last.passed}/${last.total} ${escapeHtml(outcomeText)}` +
+    `Latest: <strong>${escapeHtml(e2eRunLabel(last))}</strong> (${escapeHtml(E2E_RUN_TYPES[e2eRunType(last)].label)}) – ` +
+    `${last.passed}/${last.total} ${escapeHtml(outcomeText)}` +
     (last.finishedAt ? ` · ${escapeHtml(new Date(last.finishedAt).toLocaleString())}` : '') +
     (last.runUrl ? ` · <a href="${escapeAttribute(last.runUrl)}" target="_blank" rel="noopener">workflow run</a>` : '') +
-    ` · ${e2eRuns.length} run(s) stored`;
+    ` · ${runs.length} run(s) shown`;
 
-  renderE2eChart(chart, command, metric);
-  renderE2eTable(table, metric);
+  renderE2eChart(chart, runs, command, metric);
+  renderE2eTable(table, runs, metric);
 }
 
-function renderE2eChart(container, command, metric) {
-  const points = e2eRuns.map((run, i) => ({ run, i, value: e2eValueForRun(run, command, metric) }));
+function renderE2eChart(container, runs, command, metric) {
+  const points = runs.map((run, i) => ({ run, i, type: e2eRunType(run), value: e2eValueForRun(run, command, metric) }));
   const valid = points.filter(p => p.value !== null);
   if (!valid.length) {
     container.innerHTML = '<p class="e2e-summary">No data for this command/metric yet.</p>';
@@ -1150,14 +1200,26 @@ function renderE2eChart(container, command, metric) {
   const yLabels = ticks.map(t =>
     `<text x="${m.left - 8}" y="${y(t) + 4}" text-anchor="end">${escapeHtml(formatMs(t))}</text>`).join('');
 
-  // At most ~6 x labels so release names never collide
-  const maxLabels = Math.max(2, Math.floor(plotW / 90));
-  const step = Math.max(1, Math.ceil(n / maxLabels));
-  // Always label the newest run; drop a regular label that would collide with it
-  const xLabels = points
-    .filter(p => p.i === n - 1 || (p.i % step === 0 && n - 1 - p.i >= step * 0.6))
-    .map(p => `<text x="${x(p.i)}" y="${height - 8}" text-anchor="middle">${escapeHtml(e2eRunLabel(p.run).slice(0, 14))}</text>`)
+  // X labels: releases first (they are the milestones), then the newest run,
+  // then evenly spaced others - skipping any that would collide (<80px apart)
+  const minGap = 80;
+  const labelled = [];
+  const tryLabel = p => {
+    if (labelled.some(q => Math.abs(x(q.i) - x(p.i)) < minGap)) return;
+    labelled.push(p);
+  };
+  points.filter(p => p.type === 'release').reverse().forEach(tryLabel);
+  tryLabel(points[n - 1]);
+  const step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(plotW / minGap))));
+  points.filter(p => p.i % step === 0).forEach(tryLabel);
+  const clampX = cx => Math.min(Math.max(cx, m.left + 20), width - m.right - 20);
+  const xLabels = labelled
+    .map(p => `<text x="${clampX(x(p.i))}" y="${height - 8}" text-anchor="middle"${p.type === 'release' ? ' class="is-release"' : ''}>${escapeHtml(e2eRunLabel(p.run).slice(0, 14))}</text>`)
     .join('');
+
+  // Faint guide at each release so milestones stand out among master builds
+  const releaseLines = points.filter(p => p.type === 'release')
+    .map(p => `<line x1="${x(p.i)}" x2="${x(p.i)}" y1="${m.top}" y2="${m.top + plotH}"></line>`).join('');
 
   // Gaps (null values) break the line instead of drawing through them
   let d = '';
@@ -1168,10 +1230,10 @@ function renderE2eChart(container, command, metric) {
     pen = true;
   });
 
-  const dots = valid.map(p => {
-    const failed = p.run.outcome !== 'passed';
-    return `<circle class="e2e-dot${failed ? ' is-failed' : ''}" cx="${x(p.i)}" cy="${y(p.value)}" r="4"></circle>`;
-  }).join('');
+  // Releases drawn last so they sit on top of neighbouring master builds
+  const dots = [...valid].sort((a, b) => (a.type === 'release') - (b.type === 'release'))
+    .map(p => e2eMarker(p.type, x(p.i), y(p.value), `e2e-dot${p.run.outcome !== 'passed' ? ' is-failed' : ''}`, plotW / n < 10 && p.run.outcome === 'passed'))
+    .join('');
 
   const band = n === 1 ? plotW : plotW / (n - 1);
   const hits = points.map(p =>
@@ -1181,12 +1243,14 @@ function renderE2eChart(container, command, metric) {
   container.innerHTML =
     `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeAttribute(label)} response time per e2e run">` +
     `<g class="e2e-grid">${grid}</g>` +
+    `<g class="e2e-release-lines">${releaseLines}</g>` +
     `<g class="e2e-axis">${yLabels}${xLabels}</g>` +
     `<line class="e2e-crosshair" x1="0" x2="0" y1="${m.top}" y2="${m.top + plotH}"></line>` +
     `<path class="e2e-line" d="${d}"></path>` +
     `${dots}${hits}</svg>` +
+    e2eLegend(runs) +
     '<p class="e2e-readout" role="status" aria-live="polite"></p>' +
-    '<p class="e2e-summary">Hover a point for details. Red dot = run with failed or aborted tests.</p>';
+    '<p class="e2e-summary">Hover a point for details.</p>';
 
   const svg = container.querySelector('svg');
   const readout = container.querySelector('.e2e-readout');
@@ -1197,7 +1261,7 @@ function renderE2eChart(container, command, metric) {
     const status = p.run.outcome === 'passed' ? '✅ passed' : p.run.outcome === 'aborted' ? '🛑 aborted' : '❌ failed';
     readout.innerHTML =
       `<strong>${escapeHtml(e2eRunLabel(p.run))}</strong> ` +
-      `<span class="e2e-tip-muted">${escapeHtml(p.run.finishedAt ? new Date(p.run.finishedAt).toLocaleString() : '')}</span> · ` +
+      `<span class="e2e-tip-muted">${escapeHtml(E2E_RUN_TYPES[p.type].label)} · ${escapeHtml(p.run.finishedAt ? new Date(p.run.finishedAt).toLocaleString() : '')}</span> · ` +
       `${escapeHtml(label)}: <strong>${escapeHtml(formatMs(p.value))}</strong>` +
       (test ? ` · Test ${test.passed ? '✅ passed' : '❌ failed'}${test.retried ? ' (retried)' : ''}` : '') +
       ` · Run ${p.run.passed}/${p.run.total} ${escapeHtml(status)}`;
@@ -1218,12 +1282,12 @@ function renderE2eChart(container, command, metric) {
   showPoint(points[n - 1]);
 }
 
-function renderE2eTable(container, metric) {
-  const last = e2eRuns[e2eRuns.length - 1];
+function renderE2eTable(container, runs, metric) {
+  const last = runs[runs.length - 1];
   const rows = (last.tests || []).map(test => {
     let prev = null;
-    for (let i = e2eRuns.length - 2; i >= 0 && prev === null; i--) {
-      const t = (e2eRuns[i].tests || []).find(x => x.name === test.name);
+    for (let i = runs.length - 2; i >= 0 && prev === null; i--) {
+      const t = (runs[i].tests || []).find(x => x.name === test.name);
       if (t && typeof t[metric] === 'number') prev = t[metric];
     }
     const cur = typeof test[metric] === 'number' ? test[metric] : null;
@@ -1238,7 +1302,7 @@ function renderE2eTable(container, metric) {
   }).join('');
   container.innerHTML =
     `<div class="e2e-table-scroll"><table class="e2e-table"><thead><tr><th>Test</th><th>Command</th>` +
-    `<th class="num">${escapeHtml(e2eRunLabel(last))}</th><th class="num">vs previous</th></tr></thead>` +
+    `<th class="num">${escapeHtml(e2eRunLabel(last))}</th><th class="num">vs previous shown run</th></tr></thead>` +
     `<tbody>${rows}</tbody></table></div>`;
 }
 
