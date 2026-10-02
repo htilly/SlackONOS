@@ -155,7 +155,11 @@ jobs:
           git reset --hard origin/master
           node test/tools/append-e2e-history.mjs "$RUN_FILE" data/e2e-history.json
           git add data/e2e-history.json
-          # No [skip ci]: this commit must trigger docker-image.yml so the
+          # NB do not write the literal skip-ci marker anywhere in a commit
+          # message or PR body that gets squashed into one: GitHub scans the
+          # whole message, so merely quoting it suppresses every workflow for
+          # that push. (Learned the hard way in #353.)
+          # No skip marker: this commit must trigger docker-image.yml so the
           # history it just wrote is baked into the next image (the admin
           # page reads data/e2e-history.json from inside the image).
           # e2e.yml itself ignores this path, so this cannot re-trigger e2e.
