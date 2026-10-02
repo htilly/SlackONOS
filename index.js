@@ -50,6 +50,7 @@ const createAdminApi = require('./lib/admin-api');
 const { createWebServer } = require('./lib/web-server');
 const { defaultHistoryPath: defaultE2eHistoryPath } = require('./lib/e2e-history');
 const { createCommandRouter } = require('./lib/command-router');
+const commandContext = require('./lib/command-context');
 const { createCommandRegistry } = require('./lib/command-registry');
 const { isUnsafeObjectKey } = require('./lib/safe-object-key');
 const { redactConfigValue } = require('./lib/redact-config');
@@ -57,6 +58,14 @@ const adminChannelPrivacy = require('./lib/admin-channel-privacy');
 const gongMessage = fs.readFileSync('templates/messages/gong.txt', 'utf8').split('\n').filter(Boolean);
 const voteMessage = fs.readFileSync('templates/messages/vote.txt', 'utf8').split('\n').filter(Boolean);
 const ttsMessage = fs.readFileSync('templates/messages/tts.txt', 'utf8').split('\n').filter(Boolean);
+// Help templates are read lazily on first use and cached (they don't change at runtime)
+const helpTemplateCache = new Map();
+function readHelpTemplate(file) {
+  if (!helpTemplateCache.has(file)) {
+    helpTemplateCache.set(file, fs.readFileSync(file, 'utf8'));
+  }
+  return helpTemplateCache.get(file);
+}
 const { execSync } = require('child_process');
 
 // Try to get release tag from GitHub Actions (e.g., GITHUB_REF=refs/tags/v1.2.3)
@@ -160,8 +169,20 @@ function loadTrackBlacklist() {
   return [];
 }
 
+// In-memory cache of lowercased track blacklist entries (loaded lazily, refreshed on save)
+let trackBlacklistCache = null;
+
+function getTrackBlacklistCache() {
+  if (trackBlacklistCache === null) {
+    trackBlacklistCache = loadTrackBlacklist().map(banned => String(banned).toLowerCase());
+  }
+  return trackBlacklistCache;
+}
+
 // Helper to save track blacklist
 async function saveTrackBlacklist(list) {
+  // Refresh cache immediately so checks reflect the new list
+  trackBlacklistCache = list.map(banned => String(banned).toLowerCase());
   try {
     await fs.promises.writeFile(trackBlacklistFile, JSON.stringify(list, null, 2));
   } catch (err) {
@@ -171,12 +192,12 @@ async function saveTrackBlacklist(list) {
 
 // Helper to check if track is blacklisted (case-insensitive partial match)
 function isTrackBlacklisted(trackName, artistName) {
-  const trackBlacklist = loadTrackBlacklist();
+  const trackBlacklist = getTrackBlacklistCache();
   const fullTrackName = `${trackName} ${artistName}`.toLowerCase();
-  
-  return trackBlacklist.some(banned => {
-    const bannedLower = banned.toLowerCase();
-    return fullTrackName.includes(bannedLower) || trackName.toLowerCase().includes(bannedLower);
+  const trackNameLower = String(trackName).toLowerCase();
+
+  return trackBlacklist.some(bannedLower => {
+    return fullTrackName.includes(bannedLower) || trackNameLower.includes(bannedLower);
   });
 }
 
@@ -260,22 +281,9 @@ let adminApi = null;
 // Custom transport to capture logs in memory
 class MemoryLogTransport extends winston.transports.Console {
   log(info, callback) {
-    // Format log entry
-    const level = info.level ? info.level.replace(/\u001b\[[0-9;]*m/g, '') : 'info';
-    const logEntry = {
-      timestamp: info.timestamp || new Date().toISOString(),
-      level: level,
-      message: info.message || String(info)
-    };
-    
-    // Add to buffer (will be handled by broadcastLog, but keep for initial buffer)
-    logBuffer.push(logEntry);
-    
-    // Keep buffer size limited
-    if (logBuffer.length > MAX_LOG_BUFFER_SIZE) {
-      logBuffer.shift(); // Remove oldest entry
-    }
-    
+    // Buffering + SSE broadcast is handled by the overridden logger.* methods
+    // via broadcastLog(); do not push here or every line is stored twice.
+
     // Call parent to still output to console
     super.log(info, callback);
   }
@@ -519,13 +527,13 @@ const soundcraft = new SoundcraftHandler({
 if (config.get('soundcraftEnabled')) {
   (async () => {
     await soundcraft.connect();
-  })();
+  })().catch(err => logger.error('Soundcraft initial connect failed: ' + (err && err.message ? err.message : err)));
 }
 
 /* Initialize AI Handler */
 (async () => {
   await AIHandler.initialize(logger);
-})();
+})().catch(err => logger.error('AI Handler initialization failed: ' + (err && err.message ? err.message : err)));
 
 /* Initialize Music Helper with blacklist checker */
 musicHelper.initialize(spotify, logger, isTrackBlacklisted);
@@ -554,17 +562,31 @@ if (slackBotToken && slackAppToken) {
 // Initialize Discord (optional - only if token configured)
 let discord = null;
 
-// Thread-local context for tracking current platform
-let currentPlatform = 'slack';
-let currentChannel = null;
-let currentIsAdmin = false;
+// Per-command context (platform/channel/isAdmin) lives in AsyncLocalStorage,
+// see lib/command-context.js - never in shared globals.
+function currentCommandPlatform() {
+  const ctx = commandContext.get();
+  if (ctx && ctx.platform) return ctx.platform;
+  // Outside any command (startup/admin notices): prefer Slack when configured
+  return slack ? 'slack' : (discord ? 'discord' : 'slack');
+}
 // Map to store message timestamps for thread replies: channel -> ts
 const messageTimestamps = new Map();
 
+// Run a reaction handler inside its own command context (platform/channel)
+function withReactionContext(handler) {
+  return (action, trackName, channelId, userName, platform) =>
+    commandContext.run(
+      { platform, channel: channelId, isAdmin: false, userName },
+      () => handler(action, trackName, channelId, userName, platform)
+    );
+}
+
 // Helper function wrapper for backward compatibility (Slack)
 async function _slackMessage(message, channel_id, options = {}) {
-  const platform = currentPlatform;
-  const targetChannel = channel_id || currentChannel;
+  const ctx = commandContext.get();
+  const platform = currentCommandPlatform();
+  const targetChannel = channel_id || (ctx && ctx.channel);
 
   // If current context is Discord: never try Slack first.
   if (platform === 'discord') {
@@ -1077,7 +1099,7 @@ httpServer = webServer.httpServer;
       musicHelper: musicHelper,
       getConfig: () => config,
       getAdminChannel: () => global.adminChannel,
-      getCurrentPlatform: () => currentPlatform,
+      getCurrentPlatform: currentCommandPlatform,
     });
 
     // Check that at least one platform is configured
@@ -1092,12 +1114,8 @@ httpServer = webServer.httpServer;
         logger.info('✅ Slack connection established.');
 
         // Set up reaction handler for Slack
-        slack.setReactionHandler(async (action, trackName, channelId, userName, platform) => {
+        slack.setReactionHandler(withReactionContext(async (action, trackName, channelId, userName, platform) => {
           logger.info(`[SLACK] Reaction ${action} from ${userName} for track: ${trackName}`);
-
-          // Set platform context
-          currentPlatform = platform;
-          currentChannel = channelId;
 
           // For reactions, we vote/gong the track that was just added (most recent in queue)
           // This is more intuitive than requiring a queue position number
@@ -1125,7 +1143,7 @@ httpServer = webServer.httpServer;
             }
           }
           // Note: Gong reactions removed - gong only works via command on currently playing track
-        });
+        }));
       } catch (slackErr) {
         logger.error(`Failed to connect to Slack API: ${slackErr.message}`);
         if (!hasDiscord) {
@@ -1150,12 +1168,8 @@ httpServer = webServer.httpServer;
           logger.info('✅ Discord connection established.');
 
           // Set up reaction handler for Discord
-          DiscordSystem.setReactionHandler(async (action, trackName, channelId, userName, platform) => {
+          DiscordSystem.setReactionHandler(withReactionContext(async (action, trackName, channelId, userName, platform) => {
             logger.info(`[DISCORD] Reaction ${action} from ${userName} for track: ${trackName}`);
-
-            // Set platform context
-            currentPlatform = platform;
-            currentChannel = channelId;
 
             // For reactions, we vote/gong the track that was just added (most recent in queue)
             // This is more intuitive than requiring a queue position number
@@ -1183,7 +1197,7 @@ httpServer = webServer.httpServer;
               }
             }
             // Note: Gong reactions removed - gong only works via command on currently playing track
-          });
+          }));
         } else {
           logger.warn('Discord returned null (token maybe invalid). Running Slack-only.');
         }
@@ -1286,18 +1300,23 @@ httpServer = webServer.httpServer;
     
     // Register shutdown handlers for graceful telemetry tracking
     const gracefulShutdown = async (signal) => {
-      logger.info(`${signal} received. Sending shutdown telemetry...`);
-      
-      // Stop status polling
-      adminApi.stopStatusPolling();
-      
-      if (telemetry) {
-        await telemetry.trackShutdown(require('./package.json').version, releaseVersion);
-        await telemetry.shutdown(); // Flush pending events
+      try {
+        logger.info(`${signal} received. Sending shutdown telemetry...`);
+
+        // Stop status polling
+        adminApi.stopStatusPolling();
+
+        if (telemetry) {
+          await telemetry.trackShutdown(require('./package.json').version, releaseVersion);
+          await telemetry.shutdown(); // Flush pending events
+        }
+
+        logger.info('Shutdown complete.');
+      } catch (err) {
+        logger.error('Error during graceful shutdown: ' + (err && err.message ? err.message : err));
+      } finally {
+        process.exit(0);
       }
-      
-      logger.info('Shutdown complete.');
-      process.exit(0);
     };
     
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
@@ -1488,11 +1507,6 @@ const commandRouter = createCommandRouter({
   logUserAction: _logUserAction,
   getUserMusicProfile: _getUserMusicProfile,
   getUserInteractionProfile: _getUserInteractionProfile,
-  setContext: (platform, channel, isAdmin) => {
-    currentPlatform = platform;
-    currentChannel = channel;
-    currentIsAdmin = isAdmin;
-  },
   messageTimestamps,
   getAdminChannel: () => global.adminChannel,
 });
@@ -1801,7 +1815,7 @@ async function _bestof(input, channel, userName) {
 
     _slackMessage(msg, channel, {
       trackName: tracksByArtist[0]?.name || bestArtist,
-      addReactions: currentPlatform === 'discord'
+      addReactions: currentCommandPlatform() === 'discord'
     });
 
     // Queue tracks in parallel (much faster!) - don't block user response
@@ -2587,7 +2601,8 @@ function _status(channel, cb) {
 async function _help(input, channel, userName) {
   try {
     // Determine admin status platform-aware
-    const isAdminUser = currentPlatform === 'discord' ? currentIsAdmin : (channel === global.adminChannel);
+    const helpCtx = commandContext.get();
+    const isAdminUser = currentCommandPlatform() === 'discord' ? Boolean(helpCtx && helpCtx.isAdmin) : (channel === global.adminChannel);
 
     // AI help section (only shown if OpenAI is enabled)
     let aiHelpSection = '';
@@ -2602,9 +2617,9 @@ async function _help(input, channel, userName) {
     }
 
     // For Discord admins, send regular help in channel and admin help via DM
-    if (currentPlatform === 'discord' && isAdminUser) {
-      const regularHelp = fs.readFileSync('templates/help/helpText.txt', 'utf8');
-      const adminHelp = fs.readFileSync('templates/help/helpTextAdmin.txt', 'utf8');
+    if (currentCommandPlatform() === 'discord' && isAdminUser) {
+      const regularHelp = readHelpTemplate('templates/help/helpText.txt');
+      const adminHelp = readHelpTemplate('templates/help/helpTextAdmin.txt');
 
       // Generate config values and admin URL for admin help
       const configList = `
@@ -2651,7 +2666,7 @@ async function _help(input, channel, userName) {
     } else {
       // Slack or non-admin: show appropriate single help file
       const helpFile = isAdminUser ? 'templates/help/helpTextAdmin.txt' : 'templates/help/helpText.txt';
-      const helpText = fs.readFileSync(helpFile, 'utf8');
+      const helpText = readHelpTemplate(helpFile);
       
       let configList = '';
       let adminUrl = '';
@@ -2687,7 +2702,7 @@ async function _help(input, channel, userName) {
       // Security (O-008): remind whoever is reading admin help, every time,
       // that this Slack channel being non-private means anyone who joins it
       // gets everything below for free. No-op unless confirmed non-private.
-      if (currentPlatform === 'slack' && isAdminUser) {
+      if (currentCommandPlatform() === 'slack' && isAdminUser) {
         finalMessage = adminChannelPrivacy.wrapHelpMessage(finalMessage, global.adminChannelIsPrivate);
       }
 
@@ -2705,7 +2720,7 @@ async function _help(input, channel, userName) {
  * @param {string} text - Message text to send
  */
 async function _sendDirectMessage(userName, text) {
-  if (currentPlatform !== 'discord') {
+  if (currentCommandPlatform() !== 'discord') {
     logger.warn('[DM] Direct messages only supported on Discord');
     return false;
   }
@@ -3171,6 +3186,11 @@ async function _setconfig(input, channel, userName) {
       const finalValue = matchedValue;
       const oldValue = config.get(actualKey) || '';
       config.set(actualKey, finalValue);
+
+      // Apply log level change at runtime (mirrors admin API behavior)
+      if (actualKey === 'logLevel' && typeof logger.setLevel === 'function') {
+        logger.setLevel(finalValue);
+      }
       
       config.save(function (err) {
         if (err) {
@@ -3198,7 +3218,7 @@ async function _setconfig(input, channel, userName) {
           } else {
             logger.warn(`Failed to connect to Soundcraft at new IP: ${newValue}`);
           }
-        });
+        }).catch(err => logger.error('Soundcraft reconnect failed: ' + (err && err.message ? err.message : err)));
       }
     }
     
@@ -3249,7 +3269,7 @@ async function _setconfig(input, channel, userName) {
           } else {
             logger.warn('Soundcraft enabled but connection failed');
           }
-        });
+        }).catch(err => logger.error('Soundcraft connect failed: ' + (err && err.message ? err.message : err)));
       } else if (!boolValue && soundcraft.isEnabled()) {
         // Disable and disconnect
         soundcraft.config.soundcraftEnabled = false;
@@ -3456,6 +3476,13 @@ async function _tts(input, channel) {
     return;
   }
 
+  // Validate IP address for TTS before generating audio (must be accessible from Sonos)
+  if (!ipAddress || ipAddress === '' || ipAddress === 'IP_HOST' || ipAddress === '127.0.0.1' || ipAddress === 'localhost') {
+    logger.error('❌ TTS failed: ipAddress is not configured or set to localhost/127.0.0.1. Sonos cannot access this address. Please set ipAddress in config.json to your server\'s network IP address (e.g., 192.168.1.100) or set HOST_IP environment variable.');
+    _slackMessage('🚨 TTS failed: Server IP address not configured. Sonos cannot access localhost. Please configure ipAddress in config.json with your server\'s network IP address. 🔧', channel);
+    return;
+  }
+
   const ttsFilePath = path.join(os.tmpdir(), 'sonos-tts.mp3');
 
   // Pick a random intro message to use in both Slack and TTS
@@ -3476,20 +3503,13 @@ async function _tts(input, channel) {
     // Get TTS file duration
     const fileDuration = await new Promise((resolve, reject) => {
       mp3Duration(ttsFilePath, (err, duration) => {
-        if (err) reject(err);
+        if (err) return reject(err);
         resolve(duration);
       });
     });
     // Convert to milliseconds and add 2 sec buffer for Sonos to advance
     const waitTime = Math.ceil(fileDuration * 1000) + 2000;
     logger.info('TTS duration: ' + fileDuration.toFixed(2) + 's, will wait ' + waitTime + 'ms before cleanup');
-
-    // Validate IP address for TTS (must be accessible from Sonos)
-    if (!ipAddress || ipAddress === '' || ipAddress === 'IP_HOST' || ipAddress === '127.0.0.1' || ipAddress === 'localhost') {
-      logger.error('❌ TTS failed: ipAddress is not configured or set to localhost/127.0.0.1. Sonos cannot access this address. Please set ipAddress in config.json to your server\'s network IP address (e.g., 192.168.1.100) or set HOST_IP environment variable.');
-      _slackMessage('🚨 TTS failed: Server IP address not configured. Sonos cannot access localhost. Please configure ipAddress in config.json with your server\'s network IP address. 🔧', channel);
-      return;
-    }
 
     // Get current track position
     const currentTrack = await sonos.currentTrack();
@@ -3515,9 +3535,18 @@ async function _tts(input, channel) {
     // Wait for TTS to finish + 3 sec buffer, then remove from queue and go back
     setTimeout(async () => {
       try {
-        // Remove the TTS track from queue
-        await sonos.removeTracksFromQueue([ttsPosition]);
-        logger.info('Removed TTS track from queue at position ' + ttsPosition);
+        // Find the TTS track in the queue by URI (position may have shifted since queuing)
+        const queue = await sonos.getQueue();
+        const items = (queue && queue.items) || [];
+        const ttsIndex = items.findIndex(item => item.uri && item.uri.includes('/tts.mp3'));
+
+        if (ttsIndex >= 0) {
+          // Sonos uses 1-based indexing for removeTracksFromQueue
+          await sonos.removeTracksFromQueue(ttsIndex + 1, 1);
+          logger.info('Removed TTS track from queue at index ' + ttsIndex);
+        } else {
+          logger.info('TTS track not found in queue (may have already been removed)');
+        }
 
         // Go back to previous track (the one that was playing before TTS)
         await sonos.previous();

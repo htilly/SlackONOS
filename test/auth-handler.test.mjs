@@ -456,4 +456,19 @@ describe('Auth Handler', function() {
       expect(username.length).to.be.greaterThan(0);
     });
   });
+
+  describe('config isolation', function() {
+    it('does not re-register or replace stores on the global nconf singleton', function() {
+      const nconf = require('nconf');
+      const storeNamesBefore = Object.keys(nconf.stores);
+      const fileStoreBefore = nconf.stores.file;
+
+      authHandler.getAdminUsername();
+      authHandler.isPasswordSet();
+      authHandler.getClientIp({ headers: {}, socket: { remoteAddress: '127.0.0.1' } });
+
+      expect(Object.keys(nconf.stores)).to.deep.equal(storeNamesBefore);
+      expect(nconf.stores.file).to.equal(fileStoreBefore);
+    });
+  });
 });

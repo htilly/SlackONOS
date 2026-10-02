@@ -5,6 +5,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { createCommandRouter } = require('../lib/command-router.js');
 const { createCommandRegistry } = require('../lib/command-registry.js');
+const commandContext = require('../lib/command-context.js');
 
 describe('Command Router', function() {
   function makeRouter(overrides = {}) {
@@ -110,6 +111,53 @@ describe('Command Router', function() {
     expect(echoHandler.firstCall.args[1]).to.equal('C123');
     expect(echoHandler.firstCall.args[2]).to.equal('<@U123>');
     expect(contextUpdates[0]).to.deep.equal({ platform: 'slack', channel: 'C123', isAdmin: false });
+  });
+
+  it('keeps each overlapping command in its own platform context', async function() {
+    const seen = [];
+    const slowHandler = async (input, channel) => {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      seen.push({ channel, platform: commandContext.get().platform });
+    };
+    const fastHandler = async (input, channel) => {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      seen.push({ channel, platform: commandContext.get().platform });
+    };
+    const { router } = makeRouter({
+      commandRegistry: new Map([
+        ['slow', { fn: slowHandler, admin: false }],
+        ['fast', { fn: fastHandler, admin: false }],
+      ]),
+    });
+
+    await Promise.all([
+      router.routeCommand('slow', 'C123', '<@U123>', 'slack'),
+      router.routeCommand('fast', 'D456', 'discorduser', 'discord'),
+    ]);
+
+    expect(seen).to.deep.equal([
+      { channel: 'D456', platform: 'discord' },
+      { channel: 'C123', platform: 'slack' },
+    ]);
+    expect(commandContext.get()).to.equal(null);
+  });
+
+  it('keeps the command context in timers started by a handler', async function() {
+    let resolveTimer;
+    const timerFired = new Promise(resolve => { resolveTimer = resolve; });
+    const timerHandler = () => {
+      setTimeout(() => resolveTimer(commandContext.get()), 5);
+    };
+    const { router } = makeRouter({
+      commandRegistry: new Map([['later', { fn: timerHandler, admin: false }]]),
+    });
+
+    await router.routeCommand('later', 'D456', 'discorduser', 'discord', true);
+    // A Slack command runs before the timer fires
+    await router.routeCommand('later-unknown', 'C123', '<@U123>', 'slack');
+
+    const ctx = await timerFired;
+    expect(ctx).to.include({ platform: 'discord', channel: 'D456', isAdmin: true });
   });
 
   it('stores Slack message timestamps for threaded replies', async function() {

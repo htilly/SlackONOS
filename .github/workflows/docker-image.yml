@@ -75,12 +75,19 @@ jobs:
 
     - name: Determine Docker tags
       id: docker_tags
+      env:
+        INPUT_TAG: ${{ github.event.inputs.tag }}
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
       run: |
         SHORT_SHA="${GITHUB_SHA::7}"
         
         if [ "${{ github.event_name }}" = "release" ]; then
           # Release: tag with version and latest
-          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${RELEASE_TAG}"
+          if ! [[ "$VERSION" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::Invalid release tag: must match ^[A-Za-z0-9._-]+$"
+            exit 1
+          fi
           # Remove 'v' prefix if present for semver tag
           SEMVER="${VERSION#v}"
           echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:latest,${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${VERSION},${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${SEMVER}" >> $GITHUB_OUTPUT
@@ -89,7 +96,11 @@ jobs:
           echo "github_ref=refs/tags/${VERSION}" >> $GITHUB_OUTPUT
         elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
           # Manual trigger
-          TAG="${{ github.event.inputs.tag }}"
+          TAG="${INPUT_TAG}"
+          if ! [[ "$TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::Invalid tag input: must match ^[A-Za-z0-9._-]+$"
+            exit 1
+          fi
           if [ "${{ github.event.inputs.include_latest }}" = "true" ]; then
             echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/slackonos:latest,${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${TAG},${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${TAG}-${SHORT_SHA}" >> $GITHUB_OUTPUT
             echo "is_release=true" >> $GITHUB_OUTPUT
@@ -124,13 +135,16 @@ jobs:
 
     - name: Create GitHub Release Summary
       if: github.event_name == 'release'
+      env:
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       run: |
         echo "## 🐳 Docker Image Published" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Version:** ${{ github.event.release.tag_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Version:** ${RELEASE_TAG}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "**Pull commands:**" >> $GITHUB_STEP_SUMMARY
         echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-        echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/slackonos:latest" >> $GITHUB_STEP_SUMMARY
-        echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/slackonos:${{ github.event.release.tag_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "docker pull ${DOCKERHUB_USERNAME}/slackonos:latest" >> $GITHUB_STEP_SUMMARY
+        echo "docker pull ${DOCKERHUB_USERNAME}/slackonos:${RELEASE_TAG}" >> $GITHUB_STEP_SUMMARY
         echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
