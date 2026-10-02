@@ -75,6 +75,13 @@ jobs:
     - name: Clear results from earlier runs
       run: rm -f test/e2e-run.json
 
+    # Production SlackONOS runs on this same host and shares this Slack app
+    # and the one physical Sonos speaker, so it must be down while the suite's
+    # own SlackONOS instance is up. Two Socket Mode connections for one app
+    # split the events between them and the suite misses replies.
+    - name: Stop production SlackONOS
+      run: docker stop slackonos
+
     - name: Run e2e tests
       # Bot output is kept out of the (public) Actions log; the full log stays
       # on the runner in test/e2e-bot.log inside the job workspace.
@@ -84,6 +91,13 @@ jobs:
         # pushes (the graph then shows the short commit SHA)
         E2E_RELEASE: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event_name == 'workflow_dispatch' && github.ref_name || '' }}
       run: npm run test:e2e
+
+    # Must run even when the suite fails, so a red build never leaves
+    # production down. See also the host-side watchdog, which covers the
+    # cancelled-run path where always() does not fire.
+    - name: Restart production SlackONOS
+      if: always()
+      run: docker start slackonos
 
     - name: Upload run results
       if: always()
