@@ -1565,6 +1565,50 @@ small code,
   fill: var(--error);
 }
 
+.e2e-chart .e2e-release-lines line {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+.e2e-chart .e2e-axis text.is-release {
+  fill: var(--text-soft);
+  font-weight: 600;
+}
+
+.e2e-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: var(--text-soft);
+}
+
+.e2e-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.e2e-chart svg.e2e-legend-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  overflow: visible;
+}
+
+.e2e-legend-swatch .e2e-dot {
+  fill: var(--accent);
+  stroke: var(--bg-elevated);
+  stroke-width: 2;
+}
+
+.e2e-legend-swatch .e2e-dot.is-failed {
+  fill: var(--error);
+}
+
 .e2e-chart .e2e-crosshair {
   stroke: var(--border-strong);
   stroke-width: 1;

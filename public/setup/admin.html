@@ -6,7 +6,7 @@
   <title>SlackONOS Admin</title>
   <!-- Preload CDN scripts for faster loading -->
   <link rel="preload" as="script" href="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@9.0.0/dist/bundle/index.umd.min.js">
-  <link rel="stylesheet" href="/setup/setup.css?v=6.3">
+  <link rel="stylesheet" href="/setup/setup.css?v=6.4">
 </head>
 <body class="admin-page">
   <div class="admin-container">
@@ -50,6 +50,15 @@
               <label for="e2e-command-select">Command</label>
               <select id="e2e-command-select">
                 <option value="__median__">All commands (median)</option>
+              </select>
+            </span>
+            <span class="e2e-control">
+              <label for="e2e-type-select">Runs</label>
+              <select id="e2e-type-select">
+                <option value="all" selected>All</option>
+                <option value="release">Releases</option>
+                <option value="master">Master builds</option>
+                <option value="manual">Manual</option>
               </select>
             </span>
             <span class="e2e-control">
