@@ -155,7 +155,11 @@ jobs:
           git reset --hard origin/master
           node test/tools/append-e2e-history.mjs "$RUN_FILE" data/e2e-history.json
           git add data/e2e-history.json
-          git commit -m "chore(e2e): record response times for $RUN_LABEL [skip ci]"
+          # No [skip ci]: this commit must trigger docker-image.yml so the
+          # history it just wrote is baked into the next image (the admin
+          # page reads data/e2e-history.json from inside the image).
+          # e2e.yml itself ignores this path, so this cannot re-trigger e2e.
+          git commit -m "chore(e2e): record response times for $RUN_LABEL"
           if git push origin HEAD:master; then
             exit 0
           fi
