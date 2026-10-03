@@ -5,7 +5,7 @@ All notable changes to SlackONOS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.4.0] - 2026-10-03
 
 ### Removed
 - **Feature-request automation** - The `featurerequest`/`fr` command, the `feature-request-enhance.yml` workflow and its `.github/agent/` LLM tooling are gone. The pipeline fed issue titles through OpenAI/Claude and committed and pushed the resulting diff from a write-scoped CI job, so a prompt-injected title could land arbitrary code on a branch. The `githubToken`/`githubApp*` config keys and `lib/github-app.js` went with it. Ideas and bugs go to GitHub issues as usual.
@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Local secrets kept out of images** - `.dockerignore` (and `docker/Dockerfile-local.dockerignore`) are now allowlists of what the image needs, so an image built from a developer checkout can no longer contain `config/*.json` backups, `config/ssl/key.pem`, `userActions.json`, the e2e bot's live config and logs under `test/`, or editor/agent settings. The dev image (`Dockerfile-local`) also runs as `node`, including the test suite.
 - **AI chat stays on topic** - The AI's free-text `chat` replies are limited to short, music-related DJ lines. The prompt forbids code, technical help, homework and long answers, and the server replaces replies that contain code or run over several lines and truncates anything over 240 characters, so the bot can't be used as a free general-purpose assistant on the operator's OpenAI key.
 - **Per-user chat rate limits** - Non-admins are limited to 30 commands and 10 AI requests per minute (`userCommandRateLimit`, `aiRateLimitPerUser`; `0` disables). The user is told once per window, further messages are dropped. Admins are not limited. Stops one user from flooding the queue or running up the OpenAI bill.
+
+### Upgrade notes
+- **Config folder ownership:** the container now runs as the unprivileged `node` user (uid/gid 1000). On first start it takes ownership of the mounted `/app/config`, so existing installs keep working; set `PUID`/`PGID` to run as another user.
+- **Ports below 1024:** a `webPort`/`httpsPort` below 1024 now needs a port mapping (e.g. `80:8080`) instead.
+- **`featurerequest` is removed:** also drop `githubToken` and `githubApp*` from your `config.json`, and revoke any GitHub token or App key that was only used for it.
+
+### Verification
+- npm test: 891 passing (up from 796 in 2.3.7)
+- Full Slack + Sonos end-to-end integration suite: 111/111 passing
+- Docker image (release and local) built and started as `node` against a root-owned config volume; CodeQL: no open alerts
 
 ## [2.3.7] - 2026-08-30
 
