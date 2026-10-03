@@ -348,6 +348,8 @@ describe('AI Handler', function() {
       expect(isOffTopicChatResponse('const f = (a) => a * 2')).to.equal(true);
       expect(isOffTopicChatResponse('import os from \'os\'')).to.equal(true);
       expect(isOffTopicChatResponse('1. one\n2. two\n3. three\n4. four')).to.equal(true);
+      expect(isOffTopicChatResponse('<SCRIPT>alert(1)</SCRIPT>')).to.equal(true);
+      expect(isOffTopicChatResponse('<script src=x></script>')).to.equal(true);
       expect(isOffTopicChatResponse('I can import some 80s classics!')).to.equal(false);
       expect(isOffTopicChatResponse('World class bangers are loading.')).to.equal(false);
     });
