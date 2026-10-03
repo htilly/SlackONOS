@@ -534,18 +534,24 @@ describe('Add Handlers', function() {
       expect(userActions[0]).to.deep.equal({ userName: 'user1', action: 'addplaylist' });
     });
 
-    it('should try direct lookup first', async function() {
+    it('should pick a named playlist the same way searchplaylist does', async function() {
+      mockSpotify.searchPlaylistList.resolves([
+        { name: 'Unrelated Mix', owner: 'Someone', uri: 'spotify:playlist:other' },
+        { name: 'Test Playlist', owner: 'Test User', uri: 'spotify:playlist:abc123' }
+      ]);
+
       await addHandlers.addplaylist(['addplaylist', 'test', 'playlist'], 'channel1', 'user1');
-      
-      expect(mockSpotify.getPlaylist.called).to.be.true;
+
+      expect(mockSpotify.searchPlaylistList.calledWith('test playlist', 10)).to.be.true;
+      expect(mockSpotify.getPlaylist.called).to.be.false;
+      expect(mockSpotify.getPlaylistTracks.calledWith('spotify:playlist:abc123')).to.be.true;
     });
 
-    it('should fall back to search when direct lookup fails', async function() {
-      mockSpotify.getPlaylist.rejects(new Error('Not found'));
-      
-      await addHandlers.addplaylist(['addplaylist', 'test', 'playlist'], 'channel1', 'user1');
-      
-      expect(mockSpotify.searchPlaylistList.called).to.be.true;
+    it('should look up a playlist URI directly', async function() {
+      await addHandlers.addplaylist(['addplaylist', 'spotify:playlist:abc123'], 'channel1', 'user1');
+
+      expect(mockSpotify.getPlaylist.calledWith('spotify:playlist:abc123')).to.be.true;
+      expect(mockSpotify.searchPlaylistList.called).to.be.false;
     });
 
     it('should not search for the link text when a playlist URI lookup fails', async function() {
@@ -586,8 +592,7 @@ describe('Add Handlers', function() {
       expect(messages.some(m => m.message.includes('Added') && m.message.includes('playlist'))).to.be.true;
     });
 
-    it('should send error when search also fails', async function() {
-      mockSpotify.getPlaylist.rejects(new Error('Not found'));
+    it('should send error when search finds nothing', async function() {
       mockSpotify.searchPlaylistList.resolves([]);
       
       await addHandlers.addplaylist(['addplaylist', 'nonexistent'], 'channel1', 'user1');

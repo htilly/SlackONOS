@@ -1548,23 +1548,26 @@ const testSuiteArray = [
         { baselineKey: 'beforeAlbum', countKey: 'abbeyRoadTracks' }
     ),
 
-    // Search playlist first to get track count
+    // Search playlist first to get track count. Uses our own playlist so the
+    // track count is fixed - a public playlist's search ranking and size drift
+    // over time, and searchplaylist/addplaylist may then pick different ones.
     new TestCase(
-        'Search Playlist - Rock Classics (get track count)',
-        'searchplaylist rock classics',
+        'Search Playlist - SlackONOS Test Playlist (get track count)',
+        'searchplaylist slackonos test playlist',
         validators.and(
             validators.responseCount(1, 2),
-            validators.matchesRegex(/playlist|tracks|\d+/i),
-            validators.extractAndStoreTrackCount('rockClassicsTracks')
+            validators.containsText('SlackONOS Test Playlist'),
+            validators.extractAndStoreTrackCount('testPlaylistTracks')
         ),
         5
     ),
 
     new TestCase(
-        'Add Playlist - Rock Classics',
-        'addplaylist rock classics',
+        'Add Playlist - SlackONOS Test Playlist',
+        'addplaylist slackonos test playlist',
         validators.and(
             validators.responseCount(1, 3),
+            validators.containsText('SlackONOS Test Playlist'),
             validators.or(
                 validators.containsText('queue'),
                 validators.containsText('added'),
@@ -1574,16 +1577,15 @@ const testSuiteArray = [
         12
     ),
 
-    // Verify playlist tracks added (not doubled!). See PollingQueueSizeTestCase -
-    // "Rock Classics" is a live, large public playlist whose track count can
-    // take well past a short fixed wait for Sonos to fully enumerate.
+    // Verify playlist tracks added (not doubled!). See PollingQueueSizeTestCase.
+    // Our own playlist has a known, fixed size, so expect the exact count.
     new PollingQueueSizeTestCase(
         'Queue Size - After Playlist (verify no doubling)',
         validators.and(
             validators.responseCount(1, 2),
-            validators.queueSizeIncreasedByStoredCount('beforePlaylist', 'rockClassicsTracks', 20)
+            validators.queueSizeIncreasedByStoredCount('beforePlaylist', 'testPlaylistTracks', 0)
         ),
-        { baselineKey: 'beforePlaylist', countKey: 'rockClassicsTracks' }
+        { baselineKey: 'beforePlaylist', countKey: 'testPlaylistTracks' }
     ),
 
     new TestCase(
