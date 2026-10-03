@@ -1,17 +1,22 @@
-node_modules
-coverage
-.git
-.github
-doc/
-*.md
-.gitignore
-.dockerignore
-.DS_Store
-config/config.json
-config/webauthn-credentials.json
-config/blacklist.json
-config/track-blacklist.json
-config/ai-unparsed.log
-keys/
-test/config/test-config.json
+# Allowlist: the runtime files plus what the test suite needs. Everything else
+# stays out, so local secrets (config/*.json, config/ssl/, keys/, the e2e bot
+# configs and logs under test/, editor/agent settings) can never be baked
+# into an image built from a developer checkout (security review O-007).
+*
+!index.js
+!package.json
+!package-lock.json
+!.c8rc.json
+!lib/
+!public/
+!templates/
+!data/
+!config/config.json.example
+!docker/entrypoint.sh
+!LICENSE
+!test/
+test/config/*.json
+!test/config/*.json.example
+test/*.log
+test/e2e-run.json
 test/timing-log.json
