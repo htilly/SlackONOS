@@ -3,10 +3,6 @@ name: Run Tests
 on:
   push:
     branches: [ master, main ]
-    paths-ignore:
-      # Written by the e2e workflow itself; it only needs to reach
-      # docker-image.yml, which gates its build on its own test job.
-      - 'data/e2e-history.json'
   pull_request:
     branches: [ master, main ]
 

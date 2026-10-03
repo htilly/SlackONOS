@@ -1009,9 +1009,13 @@ async function setupWebAuthn() {
   await loadWebAuthnStatus();
 }
 
-/* --- E2E response times (data/e2e-history.json, committed by the e2e workflow) --- */
+/* --- E2E response times (read from PostHog via /api/admin/e2e-history) --- */
 
 let e2eRuns = [];
+// Set when the backend could not reach PostHog and served the runs bundled
+// with this build instead. Shown verbatim so a fallback never looks like an
+// empty-but-working chart.
+let e2eWarning = null;
 
 function setupE2eChart() {
   const commandSelect = document.getElementById('e2e-command-select');
@@ -1035,11 +1039,14 @@ async function loadE2eHistory() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     const runs = Array.isArray(data.runs) ? data.runs : [];
+    const warning = typeof data.warning === 'string' ? data.warning : null;
     // Skip re-rendering (and dropping hover state) when nothing changed
     const changed = runs.length !== e2eRuns.length ||
+      warning !== e2eWarning ||
       (runs.length && runs[runs.length - 1].id !== e2eRuns[e2eRuns.length - 1].id);
     if (!changed && e2eRuns.length) return;
     e2eRuns = runs;
+    e2eWarning = warning;
     populateE2eCommands();
     renderE2e();
   } catch (err) {
@@ -1143,7 +1150,8 @@ function renderE2e() {
   if (!summary || !chart || !table) return;
 
   if (!e2eRuns.length) {
-    summary.textContent = 'No e2e runs in this build yet. The e2e workflow commits results to data/e2e-history.json; they show up here from the next build.';
+    summary.textContent = e2eWarning
+      || 'No e2e runs recorded yet. The e2e workflow sends each run to PostHog when it finishes; the next run will show up here.';
     chart.innerHTML = '';
     table.innerHTML = '';
     return;

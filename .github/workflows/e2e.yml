@@ -16,10 +16,15 @@ name: E2E Tests
 # keys live on that machine (see test/INTEGRATION_TESTING.md), no GitHub
 # secrets are used.
 #
-# Each run's response times are appended to data/e2e-history.json on master
-# by the record-history job, so every later build (and Docker image) ships
-# the history graphed on the admin page. That job runs on a GitHub-hosted
-# runner - the self-hosted runner never gets write access to the repo.
+# Each run's response times are sent to PostHog as one `e2e_run` event by the
+# record-history job, and the admin page reads them back server-side. The
+# graph updates as soon as a run finishes.
+#
+# This replaced committing data/e2e-history.json to master: a push made with
+# the default GITHUB_TOKEN never triggers a workflow, so the image that would
+# have baked the history in was never built and the graph stayed empty. The
+# capture needs only the project's PUBLIC write key, so the self-hosted runner
+# still never gets write access to the repo.
 
 on:
   push:
@@ -28,8 +33,6 @@ on:
     paths-ignore:
       - '**.md'
       - 'docs/**'
-      # The history commits this workflow makes itself
-      - 'data/e2e-history.json'
   release:
     types: [published]
   workflow_dispatch:
@@ -109,13 +112,15 @@ jobs:
         retention-days: 7
 
   record-history:
-    # Commits the run into data/e2e-history.json on master, even when tests failed
+    # Records the run in PostHog, even when the tests failed - a failed run is
+    # exactly the data point worth graphing. Runs on a GitHub-hosted runner so
+    # the self-hosted runner never needs the write key.
     needs: e2e
     if: always() && needs.e2e.result != 'skipped' && needs.e2e.result != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: read
 
     steps:
     - name: Download run results
@@ -126,11 +131,9 @@ jobs:
         name: e2e-run
         path: ${{ runner.temp }}/e2e-run
 
-    - name: Checkout master
+    - name: Checkout tools
       if: steps.download.outcome == 'success'
       uses: actions/checkout@v6
-      with:
-        ref: master
 
     - name: Setup Node.js
       if: steps.download.outcome == 'success'
@@ -138,37 +141,13 @@ jobs:
       with:
         node-version: 22.x
 
-    - name: Append run and push
+    - name: Send run to PostHog
       if: steps.download.outcome == 'success'
       env:
-        RUN_FILE: ${{ runner.temp }}/e2e-run/e2e-run.json
-        RUN_LABEL: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
-      run: |
-        if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-          RUN_LABEL="master@${GITHUB_SHA::7}"
-        fi
-        git config user.name "github-actions[bot]"
-        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        # Retry in case master moved while we were appending
-        for attempt in 1 2 3; do
-          git fetch origin master
-          git reset --hard origin/master
-          node test/tools/append-e2e-history.mjs "$RUN_FILE" data/e2e-history.json
-          git add data/e2e-history.json
-          # NB do not write the literal skip-ci marker anywhere in a commit
-          # message or PR body that gets squashed into one: GitHub scans the
-          # whole message, so merely quoting it suppresses every workflow for
-          # that push. (Learned the hard way in #353.)
-          # No skip marker: this commit must trigger docker-image.yml so the
-          # history it just wrote is baked into the next image (the admin
-          # page reads data/e2e-history.json from inside the image).
-          # e2e.yml itself ignores this path, so this cannot re-trigger e2e.
-          git commit -m "chore(e2e): record response times for $RUN_LABEL"
-          if git push origin HEAD:master; then
-            exit 0
-          fi
-          echo "Push failed (attempt $attempt), retrying..."
-          sleep $((attempt * 5))
-        done
-        echo "::error::Could not push e2e history to master (branch protection?)"
-        exit 1
+        # OPTIONAL override. Unset, the script uses the same public project
+        # write key lib/telemetry.js defaults to, so this job needs no secret.
+        # Write keys are public by design: they ship in browsers and can only
+        # append events, never read them. Reading the history needs a personal
+        # API key, which lives only on the server, never in CI.
+        E2E_POSTHOG_WRITE_KEY: ${{ secrets.E2E_POSTHOG_WRITE_KEY }}
+      run: node test/tools/send-e2e-posthog.mjs "${{ runner.temp }}/e2e-run/e2e-run.json"

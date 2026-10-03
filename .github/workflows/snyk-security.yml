@@ -21,9 +21,6 @@ name: Snyk Security
 on:
   push:
     branches: ["master" ]
-    paths-ignore:
-      # Written by the e2e workflow itself; no code change to scan.
-      - 'data/e2e-history.json'
   pull_request:
     branches: ["master"]
 
