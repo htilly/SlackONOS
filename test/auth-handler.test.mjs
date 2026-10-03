@@ -160,6 +160,7 @@ describe('Auth Handler', function() {
 
   describe('Rate Limiting', function() {
     const testIp = '192.168.1.100';
+    const LIMIT = authHandler.RATE_LIMIT_ATTEMPTS;
     
     afterEach(function() {
       // Reset rate limit after each test
@@ -170,7 +171,7 @@ describe('Auth Handler', function() {
       const result = authHandler.checkRateLimit(testIp);
       
       expect(result.allowed).to.be.true;
-      expect(result.remaining).to.equal(4); // 5 attempts - 1
+      expect(result.remaining).to.equal(LIMIT - 1);
     });
     
     it('should count multiple attempts', function() {
@@ -179,11 +180,11 @@ describe('Auth Handler', function() {
       const result = authHandler.checkRateLimit(testIp); // 3
       
       expect(result.allowed).to.be.true;
-      expect(result.remaining).to.equal(2); // 5 - 3
+      expect(result.remaining).to.equal(LIMIT - 3);
     });
     
     it('should block after exceeding limit', function() {
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < LIMIT; i++) {
         authHandler.checkRateLimit(testIp);
       }
       
@@ -196,7 +197,7 @@ describe('Auth Handler', function() {
     
     it('should reset rate limit on demand', function() {
       // Use up attempts
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < LIMIT; i++) {
         authHandler.checkRateLimit(testIp);
       }
       
@@ -210,7 +211,7 @@ describe('Auth Handler', function() {
       // Should be allowed again
       result = authHandler.checkRateLimit(testIp);
       expect(result.allowed).to.be.true;
-      expect(result.remaining).to.equal(4);
+      expect(result.remaining).to.equal(LIMIT - 1);
     });
     
     it('should track different IPs independently', function() {
@@ -218,7 +219,7 @@ describe('Auth Handler', function() {
       const ip2 = '10.0.0.2';
       
       // Use up attempts on ip1
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < LIMIT; i++) {
         authHandler.checkRateLimit(ip1);
       }
       
@@ -393,6 +394,17 @@ describe('Auth Handler', function() {
       // forwarded header must not be used; result is 'unknown'.
       const ip = authHandler.getClientIp(req);
       expect(ip).to.equal('unknown');
+    });
+
+    it('uses the right-most x-forwarded-for entry when trustProxy is enabled', function() {
+      // The left-most entries are client-supplied; only the one our proxy
+      // appended (right-most) can be trusted.
+      const req = {
+        headers: { 'x-forwarded-for': '1.2.3.4, 5.6.7.8,  198.51.100.7 ' },
+        socket: { remoteAddress: '127.0.0.1' }
+      };
+
+      expect(authHandler.getClientIp(req, true)).to.equal('198.51.100.7');
     });
   });
 

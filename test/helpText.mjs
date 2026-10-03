@@ -4,11 +4,10 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 /**
- * Help Text Template Tests (SLAC-9)
+ * Help Text Template Tests
  *
  * Verifies that:
- *  1. The featurerequest command description reads exactly:
- *     "Wish for what new feature this bot should have!!!"
+ *  1. The removed featurerequest command is no longer advertised.
  *  2. No other command descriptions were altered as a side effect.
  *  3. All expected command sections and entries are present.
  *  4. Handlebars-style placeholders used by both Slack and Discord are intact.
@@ -28,53 +27,18 @@ try {
   helpText = null;
 }
 
-// ─── SLAC-9: featurerequest description ──────────────────────────────────────
+// ─── Basic readability ───────────────────────────────────────────────────────
 
-describe('helpText.txt — SLAC-9: featurerequest description', function () {
+describe('helpText.txt — readable', function () {
 
   it('should be readable without errors', function () {
     expect(helpText).to.be.a('string');
     expect(helpText.length).to.be.greaterThan(0);
   });
 
-  it('should contain the exact new featurerequest description text', function () {
-    expect(helpText).to.include('Wish for what new feature this bot should have!!!');
-  });
-
-  it('should NOT contain the old featurerequest description text', function () {
-    expect(helpText).to.not.include('Create a GitHub issue for a feature request.');
-  });
-
-  it('should list featurerequest command with its "fr" alias', function () {
-    expect(helpText).to.match(/`featurerequest`\s*\(or\s*`fr`\)/);
-  });
-
-  it('should include the feature description argument placeholder', function () {
-    expect(helpText).to.include('<feature description>');
-  });
-
-  it('should have the featurerequest entry in the Feedback section', function () {
-    const feedbackSectionStart = helpText.indexOf('*📝 Feedback:*');
-    expect(feedbackSectionStart).to.be.greaterThan(-1, 'Feedback section header not found');
-
-    const featureRequestIndex = helpText.indexOf('featurerequest', feedbackSectionStart);
-    expect(featureRequestIndex).to.be.greaterThan(
-      feedbackSectionStart,
-      'featurerequest entry should appear after the Feedback section header'
-    );
-  });
-
-  it('should have the new description on the same line as the featurerequest command entry', function () {
-    const lines = helpText.split('\n');
-    const featureRequestLine = lines.find(line => line.includes('featurerequest') && line.includes('fr'));
-    expect(featureRequestLine).to.be.a('string', 'Could not find the featurerequest command line');
-    expect(featureRequestLine).to.include('Wish for what new feature this bot should have!!!');
-  });
-
-  it('should have exactly one featurerequest entry', function () {
-    const matches = helpText.match(/`featurerequest`/g);
-    expect(matches).to.not.be.null;
-    expect(matches.length).to.equal(1);
+  it('should no longer mention the removed featurerequest command', function () {
+    expect(helpText).to.not.include('featurerequest');
+    expect(helpText).to.not.include('*📝 Feedback:*');
   });
 });
 
@@ -92,10 +56,6 @@ describe('helpText.txt — Section headers are intact', function () {
 
   it('should contain the Voting Commands section header', function () {
     expect(helpText).to.include('*🗳️ Voting Commands:*');
-  });
-
-  it('should contain the Feedback section header', function () {
-    expect(helpText).to.include('*📝 Feedback:*');
   });
 });
 
@@ -285,22 +245,5 @@ describe('helpText.txt — Section ordering is correct', function () {
     expect(infoIdx).to.be.greaterThan(-1);
     expect(votingIdx).to.be.greaterThan(-1);
     expect(infoIdx).to.be.lessThan(votingIdx);
-  });
-
-  it('should have Voting Commands before Feedback section', function () {
-    const votingIdx = helpText.indexOf('*🗳️ Voting Commands:*');
-    const feedbackIdx = helpText.indexOf('*📝 Feedback:*');
-    expect(votingIdx).to.be.greaterThan(-1);
-    expect(feedbackIdx).to.be.greaterThan(-1);
-    expect(votingIdx).to.be.lessThan(feedbackIdx);
-  });
-
-  it('should have the featurerequest entry after the Feedback section header and before the footer tip', function () {
-    const feedbackIdx = helpText.indexOf('*📝 Feedback:*');
-    const featureRequestIdx = helpText.indexOf('featurerequest');
-    const tipIdx = helpText.indexOf('_Tip:');
-    expect(feedbackIdx).to.be.greaterThan(-1);
-    expect(featureRequestIdx).to.be.greaterThan(feedbackIdx);
-    expect(featureRequestIdx).to.be.lessThan(tipIdx);
   });
 });

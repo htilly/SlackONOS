@@ -746,9 +746,95 @@ describe('Command Router', function() {
   });
 });
 
+// Security-review finding O-009: per-user rate limits for non-admins.
+describe('Command Router per-user rate limits (O-009)', function() {
+  function makeLimitedRouter(limits, aiEnabled = false) {
+    const handler = sinon.stub();
+    const messages = [];
+    const AIHandler = {
+      isAIEnabled: sinon.stub().returns(aiEnabled),
+      getUserContext: sinon.stub().returns(null),
+      parseNaturalLanguage: sinon.stub().resolves({
+        command: 'chat', args: [], confidence: 0.95, response: 'hi', summary: '', followUp: null, suggestedAction: null,
+      }),
+      setUserContext: sinon.stub(),
+      clearUserContext: sinon.stub(),
+    };
+    const router = createCommandRouter({
+      logger: { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub(), debug: sinon.stub() },
+      commandRegistry: new Map([['echo', { fn: handler, admin: false }]]),
+      AIHandler,
+      musicHelper: { searchAndQueue: sinon.stub().resolves({ added: 0 }) },
+      sonos: {},
+      config: { get: (key) => limits[key] },
+      sendMessage: async (msg, channel) => { messages.push({ msg, channel }); },
+      appendAIUnparsed: sinon.stub().resolves(),
+      parseArgs: (text) => (text || '').trim().split(/\s+/).filter(Boolean),
+      normalizeUser: (user) => user.replace(/[<@>]/g, ''),
+      isBlacklisted: () => false,
+      setContext: () => {},
+      messageTimestamps: new Map(),
+      getAdminChannel: () => 'ADMIN',
+    });
+    return { router, handler, messages, AIHandler };
+  }
+
+  it('drops commands from a non-admin over the limit and warns once', async function() {
+    const { router, handler, messages } = makeLimitedRouter({ userCommandRateLimit: 2 });
+
+    for (let i = 0; i < 5; i++) {
+      await router.routeCommand('echo hi', 'C123', '<@U1>', 'slack');
+    }
+
+    expect(handler.callCount).to.equal(2);
+    expect(messages.filter(m => m.msg.includes('too fast'))).to.have.length(1);
+  });
+
+  it('limits each user separately', async function() {
+    const { router, handler } = makeLimitedRouter({ userCommandRateLimit: 1 });
+
+    await router.routeCommand('echo hi', 'C123', '<@U1>', 'slack');
+    await router.routeCommand('echo hi', 'C123', '<@U1>', 'slack');
+    await router.routeCommand('echo hi', 'C123', '<@U2>', 'slack');
+
+    expect(handler.callCount).to.equal(2);
+  });
+
+  it('never limits admins', async function() {
+    const { router, handler } = makeLimitedRouter({ userCommandRateLimit: 1 });
+
+    for (let i = 0; i < 3; i++) {
+      await router.routeCommand('echo hi', 'ADMIN', '<@U1>', 'slack');
+      await router.routeCommand('echo hi', 'general', 'boss', 'discord', true);
+    }
+
+    expect(handler.callCount).to.equal(6);
+  });
+
+  it('caps AI parse calls per non-admin user', async function() {
+    const { router, AIHandler } = makeLimitedRouter({ userCommandRateLimit: 0, aiRateLimitPerUser: 2 }, true);
+
+    for (let i = 0; i < 4; i++) {
+      await router.routeCommand('<@BOT> what is up', 'C123', '<@U1>', 'slack', false, true);
+    }
+
+    expect(AIHandler.parseNaturalLanguage.callCount).to.equal(2);
+  });
+
+  it('applies default limits when config has none', async function() {
+    const { router, handler } = makeLimitedRouter({});
+
+    for (let i = 0; i < 40; i++) {
+      await router.routeCommand('echo hi', 'C123', '<@U1>', 'slack');
+    }
+
+    expect(handler.callCount).to.equal(30);
+  });
+});
+
 // Security-review finding O-010: wires the REAL command-registry.js into the
 // REAL command-router.js (not a hand-rolled test Map) so this exercises the
-// actual production dispatch path end-to-end, proving featurerequest/fr are
+// actual production dispatch path end-to-end, proving admin commands are
 // genuinely gated by the same admin check as every other admin command -
 // not just that the registry entry's flag is set correctly in isolation
 // (see test/command-registry.test.mjs for that unit-level check).
@@ -772,7 +858,7 @@ describe('Command Router + Command Registry integration (O-010)', function() {
       help: sinon.stub(), bestof: sinon.stub(), debug: sinon.stub(), telemetryStatus: sinon.stub(),
       setCrossfade: sinon.stub(), setconfig: sinon.stub(), blacklist: sinon.stub(), trackblacklist: sinon.stub(),
       tts: sinon.stub(), moveTrackAdmin: sinon.stub(), stats: sinon.stub(), configdump: sinon.stub(),
-      aiUnparsed: sinon.stub(), listOpenAIModels: sinon.stub(), featurerequest: sinon.stub(),
+      aiUnparsed: sinon.stub(), listOpenAIModels: sinon.stub(),
       addToSpotifyPlaylist: sinon.stub(), diagnostics: sinon.stub(),
     };
   }
@@ -807,44 +893,44 @@ describe('Command Router + Command Registry integration (O-010)', function() {
     return { router, deps, messages };
   }
 
-  it('rejects featurerequest from a non-admin Slack channel', async function() {
+  it('rejects configdump from a non-admin Slack channel', async function() {
     const { router, deps, messages } = makeIntegrationRouter();
 
-    await router.routeCommand('featurerequest add support for YouTube playlists', 'C123', '<@U123>', 'slack');
+    await router.routeCommand('configdump', 'C123', '<@U123>', 'slack');
 
-    expect(deps.featurerequest.called).to.be.false;
+    expect(deps.configdump.called).to.be.false;
     expect(messages.some(m => m.msg.toLowerCase().includes('admin'))).to.be.true;
   });
 
-  it('rejects the "fr" alias from a non-admin Slack channel', async function() {
+  it('rejects the "cfgdump" alias from a non-admin Slack channel', async function() {
     const { router, deps } = makeIntegrationRouter();
 
-    await router.routeCommand('fr add support for YouTube playlists', 'C123', '<@U123>', 'slack');
+    await router.routeCommand('cfgdump', 'C123', '<@U123>', 'slack');
 
-    expect(deps.featurerequest.called).to.be.false;
+    expect(deps.configdump.called).to.be.false;
   });
 
-  it('rejects featurerequest from a non-admin Discord user', async function() {
+  it('rejects configdump from a non-admin Discord user', async function() {
     const { router, deps } = makeIntegrationRouter();
 
-    await router.routeCommand('featurerequest add support for YouTube playlists', 'general', 'randomuser', 'discord', false);
+    await router.routeCommand('configdump', 'general', 'randomuser', 'discord', false);
 
-    expect(deps.featurerequest.called).to.be.false;
+    expect(deps.configdump.called).to.be.false;
   });
 
-  it('allows featurerequest from the admin Slack channel', async function() {
+  it('allows configdump from the admin Slack channel', async function() {
     const { router, deps } = makeIntegrationRouter();
 
-    await router.routeCommand('featurerequest add support for YouTube playlists', 'ADMIN', '<@U123>', 'slack');
+    await router.routeCommand('configdump', 'ADMIN', '<@U123>', 'slack');
 
-    expect(deps.featurerequest.calledOnce).to.be.true;
+    expect(deps.configdump.calledOnce).to.be.true;
   });
 
-  it('allows featurerequest for a Discord admin', async function() {
+  it('allows configdump for a Discord admin', async function() {
     const { router, deps } = makeIntegrationRouter();
 
-    await router.routeCommand('featurerequest add support for YouTube playlists', 'general', 'adminuser', 'discord', true);
+    await router.routeCommand('configdump', 'general', 'adminuser', 'discord', true);
 
-    expect(deps.featurerequest.calledOnce).to.be.true;
+    expect(deps.configdump.calledOnce).to.be.true;
   });
 });

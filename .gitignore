@@ -59,3 +59,7 @@ test/e2e-run.json
 # Security review scan output (repo-security-review skill / /security-review)
 # ===================================================================
 .security-review/
+
+# Security review output
+.security-review-*/
+security-reports/
