@@ -700,7 +700,16 @@ adminApi = createAdminApi({
   maxLogBufferSize: MAX_LOG_BUFFER_SIZE,
   setRuntimeConfigValue,
   syncVotingConfig,
-  e2eHistoryFile: defaultE2eHistoryPath(__dirname)
+  e2eHistoryFile: defaultE2eHistoryPath(__dirname),
+  // Live e2e history. The write path (CI) only needs the public project key;
+  // reading needs a personal API key, which therefore lives server-side in
+  // config and is never exposed to the admin page.
+  e2ePosthog: {
+    projectId: config.get('e2eTelemetryProjectId'),
+    personalApiKey: config.get('e2eTelemetryPersonalApiKey'),
+    host: config.get('e2eTelemetryHost') || 'https://us.i.posthog.com',
+    eventName: config.get('e2eTelemetryEventName') || 'e2e_run'
+  }
 });
 
 function delay(ms) {

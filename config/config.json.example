@@ -59,6 +59,11 @@
     "webauthnOrigin": "",
     "webauthnRequireUserVerification": false,
     "_comment_webauthn": "WebAuthn/FIDO2: Enable passwordless login with security keys/biometrics. Recommended: configure via the Web Admin Panel under Security. (JSON has no comments, so this is stored as a dummy field.)",
+    "_comment_e2e_history": "E2E history graphed on the admin page. CI needs only e2eTelemetryWriteKey (a PUBLIC phc_ project key, set as the E2E_POSTHOG_WRITE_KEY repo secret). Reading needs a PERSONAL api key (phx_) plus the numeric project id - server-side only, never sent to the browser. Leave the read keys unset and the page falls back to the runs bundled with the build.",
+    "e2eTelemetryProjectId": "",
+    "e2eTelemetryPersonalApiKey": "",
+    "e2eTelemetryHost": "https://us.i.posthog.com",
+    "e2eTelemetryEventName": "e2e_run",
     "githubToken": "ghp_...",
     "slackWebhookUrl": "https://hooks.slack.com/services/...",
     "_comment_aicode": "AI Code Agent (optional): githubToken requires 'repo' scope for triggering GitHub Actions. slackWebhookUrl is used for notifications back to Slack when PR is created/fails."
