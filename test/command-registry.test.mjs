@@ -65,7 +65,6 @@ describe('Command Registry', function() {
       configdump: sinon.stub(),
       aiUnparsed: sinon.stub(),
       listOpenAIModels: sinon.stub(),
-      featurerequest: sinon.stub(),
       addToSpotifyPlaylist: sinon.stub(),
       diagnostics: sinon.stub(),
     };
@@ -96,15 +95,13 @@ describe('Command Registry', function() {
     expect(registry.get('add').admin).to.equal(false);
   });
 
-  // Security-review finding O-010: featurerequest/fr posts user-supplied text
-  // as a GitHub issue that triggers an autonomous LLM CI agent with
-  // repository write access. It must require admin, like every other
-  // command that reaches an external system on the operator's behalf.
-  it('marks featurerequest and its "fr" alias as admin-only (O-010)', function() {
+  // The featurerequest command fed an LLM CI agent with repository write
+  // access (security review 2026-10-03, O-002) and was removed outright.
+  it('no longer registers featurerequest or its "fr" alias', function() {
     const { registry } = makeRegistry();
 
-    expect(registry.get('featurerequest').admin).to.equal(true);
-    expect(registry.get('fr').admin).to.equal(true);
+    expect(registry.has('featurerequest')).to.equal(false);
+    expect(registry.has('fr')).to.equal(false);
   });
 
   it('registers resetvotes with its expected aliases', function() {

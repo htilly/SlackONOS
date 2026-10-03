@@ -9,7 +9,8 @@ import {
   getAIDebugInfo,
   setUserContext,
   getUserContext,
-  clearUserContext
+  clearUserContext,
+  isOffTopicChatResponse
 } from '../lib/ai-handler.js';
 
 const require = createRequire(import.meta.url);
@@ -315,6 +316,52 @@ describe('AI Handler', function() {
 
       expect(result).to.equal(null);
       expect(createStub.called).to.equal(false);
+    });
+
+    it('replaces a code-bearing chat reply with an on-topic deflection', async function() {
+      createStub.resolves(planResponse({
+        command: 'chat', args: [], targetType: 'unknown', summary: '',
+        response: 'Sure! ```python\ndef fix(x):\n    return x\n```',
+        suggestedAction: { command: 'add', args: ['coding beats', '5'], description: 'coding beats' }
+      }));
+
+      const result = await parseNaturalLanguage('fix my python code', 'alice');
+
+      expect(result.command).to.equal('chat');
+      expect(result.response).to.not.include('def ');
+      expect(result.response).to.include('only run the music');
+      expect(result.suggestedAction).to.equal(null);
+    });
+
+    it('truncates long chat replies', async function() {
+      createStub.resolves(planResponse({
+        command: 'chat', args: [], targetType: 'unknown', summary: '',
+        response: 'Booth trivia time! '.repeat(30)
+      }));
+
+      const result = await parseNaturalLanguage('tell me everything about history', 'alice');
+
+      expect(result.response.length).to.be.at.most(240);
+    });
+
+    it('tells code apart from ordinary DJ chat', function() {
+      expect(isOffTopicChatResponse('const f = (a) => a * 2')).to.equal(true);
+      expect(isOffTopicChatResponse('import os from \'os\'')).to.equal(true);
+      expect(isOffTopicChatResponse('1. one\n2. two\n3. three\n4. four')).to.equal(true);
+      expect(isOffTopicChatResponse('<SCRIPT>alert(1)</SCRIPT>')).to.equal(true);
+      expect(isOffTopicChatResponse('<script src=x></script>')).to.equal(true);
+      expect(isOffTopicChatResponse('I can import some 80s classics!')).to.equal(false);
+      expect(isOffTopicChatResponse('World class bangers are loading.')).to.equal(false);
+    });
+
+    it('instructs the model to stay on topic', async function() {
+      createStub.resolves(planResponse());
+
+      await parseNaturalLanguage('add queen', 'alice');
+
+      const prompt = JSON.stringify(createStub.firstCall.args[0].messages);
+      expect(prompt).to.include('STAY IN THE BOOTH');
+      expect(prompt).to.include('NEVER write code');
     });
 
     it('parses a valid command plan from OpenAI', async function() {

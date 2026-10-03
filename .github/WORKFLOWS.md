@@ -1,6 +1,6 @@
 # GitHub Actions for SlackONOS
 
-This repo has GitHub Actions workflows that automatically run tests, coverage, release publishing, and feature-request automation.
+This repo has GitHub Actions workflows that automatically run tests, coverage, and release publishing.
 
 ## 🔍 Workflows
 

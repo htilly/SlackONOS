@@ -7,26 +7,31 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends git && \
     rm -rf /var/lib/apt/lists/*
 
-# Clear npm cache to reduce image size and avoid potential issues
-RUN npm cache clean --force
-
-# Set the working directory for your application
+# Set the working directory for your application. It is owned by the
+# unprivileged "node" user, who installs the dependencies and owns the source,
+# so the app and dev tooling (tests, coverage output) run without root.
 WORKDIR /app
+RUN chown node:node /app
+USER node
 
 # Copy package.json and package-lock.json first to leverage Docker cache
-COPY package*.json ./
+COPY --chown=node:node package*.json ./
 
 # Install application dependencies reproducibly, including dev dependencies
-RUN npm ci --verbose
+RUN npm ci --verbose && npm cache clean --force
 
-# Copy the rest of your application files
-COPY . .
-
-# Ensure proper permissions (if needed, adjust as necessary)
-RUN chmod -R 755 /app
+# Copy the rest of your application files (see Dockerfile-local.dockerignore allowlist)
+COPY --chown=node:node . .
 
 # SlackONOS serves HTTP redirects/TTS on 8080 and HTTPS UI/API on 8443.
 EXPOSE 8080 8443
+
+# Same as the release image: start as root only long enough to take ownership
+# of the mounted config volume, then drop to "node" (or PUID/PGID).
+USER root
+COPY docker/entrypoint.sh /usr/local/bin/slackonos-entrypoint.sh
+RUN chmod 755 /usr/local/bin/slackonos-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/slackonos-entrypoint.sh"]
 
 # Command to run the application
 CMD ["node", "index.js"]

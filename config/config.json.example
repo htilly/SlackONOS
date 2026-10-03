@@ -64,7 +64,7 @@
     "e2eTelemetryPersonalApiKey": "",
     "e2eTelemetryHost": "https://us.i.posthog.com",
     "e2eTelemetryEventName": "e2e_run",
-    "githubToken": "ghp_...",
-    "slackWebhookUrl": "https://hooks.slack.com/services/...",
-    "_comment_aicode": "AI Code Agent (optional): githubToken requires 'repo' scope for triggering GitHub Actions. slackWebhookUrl is used for notifications back to Slack when PR is created/fails."
+    "_comment_rate_limits": "Per-user chat limits for non-admins, per minute. 0 disables. Defaults: 30 commands, 10 AI requests.",
+    "userCommandRateLimit": 30,
+    "aiRateLimitPerUser": 10
 }

@@ -5,6 +5,21 @@ All notable changes to SlackONOS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+- **Feature-request automation** - The `featurerequest`/`fr` command, the `feature-request-enhance.yml` workflow and its `.github/agent/` LLM tooling are gone. The pipeline fed issue titles through OpenAI/Claude and committed and pushed the resulting diff from a write-scoped CI job, so a prompt-injected title could land arbitrary code on a branch. The `githubToken`/`githubApp*` config keys and `lib/github-app.js` went with it. Ideas and bugs go to GitHub issues as usual.
+
+### Security
+- **Secrets in logs** - Config changes made through the web admin were logged as `key = value`, putting `openaiApiKey` and other secrets in stdout, `docker logs` and the admin log stream. Values of sensitive keys are now redacted. Also dropped a misleading `logLevel: "debug"` from the Slack Socket Mode client.
+- **Login rate limit behind a proxy** - With `trustProxy` on, the login limiter keyed on the left-most `X-Forwarded-For` entry, which the client controls, so it could be bypassed by rotating that value. It now uses the right-most entry (the one the proxy appended). The limit was raised from 5 to 50 attempts per 15 minutes so users behind a shared IP don't lock the admin out.
+- **Password reset without the current password** - Any logged-in session could call the setup wizard's `password-setup` endpoint and overwrite the admin password without knowing the old one, turning a hijacked session into a permanent takeover. The endpoint now refuses (409) once a password exists; changes go through Change Password, which checks the current password and revokes other sessions.
+- **Security audit logging** - Logins (password and WebAuthn), failed logins, lockouts, logouts, password setup/changes and admin config changes are now logged with the client IP under `[AUTH]`/`[AUDIT]`. WebAuthn errors no longer log a preview of the request body. Module loggers (`global.logger`) now reach the main log and the admin log stream instead of plain console output.
+- **Container no longer runs as root** - The image starts as root only to take ownership of the mounted `/app/config` volume (so installs whose files were created by the old root image keep working), then drops to the unprivileged `node` user. `PUID`/`PGID` choose another user. Note: a `webPort`/`httpsPort` below 1024 now needs a port mapping instead (e.g. `80:8080`).
+- **Local secrets kept out of images** - `.dockerignore` (and `docker/Dockerfile-local.dockerignore`) are now allowlists of what the image needs, so an image built from a developer checkout can no longer contain `config/*.json` backups, `config/ssl/key.pem`, `userActions.json`, the e2e bot's live config and logs under `test/`, or editor/agent settings. The dev image (`Dockerfile-local`) also runs as `node`, including the test suite.
+- **AI chat stays on topic** - The AI's free-text `chat` replies are limited to short, music-related DJ lines. The prompt forbids code, technical help, homework and long answers, and the server replaces replies that contain code or run over several lines and truncates anything over 240 characters, so the bot can't be used as a free general-purpose assistant on the operator's OpenAI key.
+- **Per-user chat rate limits** - Non-admins are limited to 30 commands and 10 AI requests per minute (`userCommandRateLimit`, `aiRateLimitPerUser`; `0` disables). The user is told once per window, further messages are dropped. Admins are not limited. Stops one user from flooding the queue or running up the OpenAI bill.
+
 ## [2.3.7] - 2026-08-30
 
 ### Security

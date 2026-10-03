@@ -95,6 +95,11 @@ function botEnv() {
     // NODE_ENV=test is meant for unit tests; run the bot as it runs in production
     const env = { ...process.env };
     if (env.NODE_ENV === 'test') delete env.NODE_ENV;
+    // The suite fires many commands from one user in quick succession, which
+    // the per-user chat rate limits would throttle. They are unit tested
+    // instead (test/rate-limiter.test.mjs, test/command-router.test.mjs).
+    env.userCommandRateLimit ??= '0';
+    env.aiRateLimitPerUser ??= '0';
     return env;
 }
 

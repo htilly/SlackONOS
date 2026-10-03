@@ -26,8 +26,11 @@ WORKDIR /app
 # Copy installed dependencies from the builder stage
 COPY --from=builder /app/node_modules ./node_modules
 
-# Copy the rest of your application files
+# Copy the rest of your application files (see .dockerignore allowlist)
 COPY . .
+# The app runs as an unprivileged user; files copied from a checkout with a
+# restrictive umask would otherwise be unreadable to it.
+RUN chmod -R a+rX /app
 
 # Set GITHUB_REF as environment variable if provided (for release version detection)
 # Accept GITHUB_REF as build arg and set as ENV
@@ -36,6 +39,12 @@ ENV GITHUB_REF=${GITHUB_REF}
 
 # SlackONOS serves HTTP redirects/TTS on 8080 and HTTPS UI/API on 8443.
 EXPOSE 8080 8443
+
+# Runs as root only long enough to fix ownership of the mounted config volume,
+# then drops to the unprivileged "node" user (or PUID/PGID). See the script.
+COPY docker/entrypoint.sh /usr/local/bin/slackonos-entrypoint.sh
+RUN chmod 755 /usr/local/bin/slackonos-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/slackonos-entrypoint.sh"]
 
 # Command to run the application
 CMD ["node", "index.js"]
