@@ -42,7 +42,7 @@
     "discord.js": "^14.27.0",
     "mp3-duration": "^1.1.0",
     "nconf": "^0.13.0",
-    "openai": "^7.39.0",
+    "openai": "^7.43.0",
     "posthog-node": "^5.56.4",
     "selfsigned": "^5.5.0",
     "sonos": "^1.14.3",
