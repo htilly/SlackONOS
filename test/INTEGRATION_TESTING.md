@@ -323,7 +323,7 @@ validators.and(
 ```javascript
 new TestCase(
     'Add Track - First Time',
-    'add Foo Fighters - Best Of You',
+    'add Oxyz - Feel It All Tonight',
     validators.and(
         validators.responseCount(1, 3),
         validators.or(
@@ -339,7 +339,7 @@ new TestCase(
 ```javascript
 new TestCase(
     'Add Track - Duplicate Detection',
-    'add Foo Fighters - Best Of You',  // Same track again
+    'add Oxyz - Feel It All Tonight',  // Same track again
     validators.and(
         validators.responseCount(1, 3),
         validators.containsText('already')  // Expects rejection

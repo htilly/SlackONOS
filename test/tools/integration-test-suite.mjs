@@ -1367,8 +1367,8 @@ const testSuiteArray = [
     ),
 
     new TestCase(
-        'Add Track #1 - Foo Fighters',
-        'add Foo Fighters - Best Of You',
+        'Add Track #1 - Oxyz',
+        'add Oxyz - Feel It All Tonight',
         validators.and(
             validators.responseCount(1, 3),
             validators.or(
@@ -1394,7 +1394,7 @@ const testSuiteArray = [
 
     new TestCase(
         'Add Track - Duplicate Detection',
-        'add Foo Fighters - Best Of You',
+        'add Oxyz - Feel It All Tonight',
         validators.and(
             validators.responseCount(1, 3),
             validators.containsText('already')
