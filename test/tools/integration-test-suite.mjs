@@ -1548,26 +1548,26 @@ const testSuiteArray = [
         { baselineKey: 'beforeAlbum', countKey: 'abbeyRoadTracks' }
     ),
 
-    // Search playlist first to get track count. Uses our own playlist so the
-    // track count is fixed - a public playlist's search ranking and size drift
-    // over time, and searchplaylist/addplaylist may then pick different ones.
+    // Search playlist first to get track count. Uses the "Retro Vibes" playlist
+    // (our previous own playlist was dropped from Spotify's search index). The
+    // track count is read from the search result and reused for the queue check.
     new TestCase(
-        'Search Playlist - SlackONOS Test Playlist (get track count)',
-        'searchplaylist slackonos test playlist',
+        'Search Playlist - Retro Vibes (get track count)',
+        'searchplaylist retro vibes',
         validators.and(
             validators.responseCount(1, 2),
-            validators.containsText('SlackONOS Test Playlist'),
+            validators.containsText('Retro Vibes'),
             validators.extractAndStoreTrackCount('testPlaylistTracks')
         ),
         5
     ),
 
     new TestCase(
-        'Add Playlist - SlackONOS Test Playlist',
-        'addplaylist slackonos test playlist',
+        'Add Playlist - Retro Vibes',
+        'addplaylist retro vibes',
         validators.and(
             validators.responseCount(1, 3),
-            validators.containsText('SlackONOS Test Playlist'),
+            validators.containsText('Retro Vibes'),
             validators.or(
                 validators.containsText('queue'),
                 validators.containsText('added'),
@@ -1578,7 +1578,7 @@ const testSuiteArray = [
     ),
 
     // Verify playlist tracks added (not doubled!). See PollingQueueSizeTestCase.
-    // Our own playlist has a known, fixed size, so expect the exact count.
+    // Expect the exact count reported by the search.
     new PollingQueueSizeTestCase(
         'Queue Size - After Playlist (verify no doubling)',
         validators.and(
