@@ -5,6 +5,23 @@ All notable changes to SlackONOS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.1] - 2026-11-14
+
+### Security
+- **Credential leak via redirects in `follow-redirects`** ([GHSA-q3jh-wrc6-jgq8](https://github.com/advisories/GHSA-q3jh-wrc6-jgq8), [GHSA-8r9p-f939-6h3c](https://github.com/advisories/GHSA-8r9p-f939-6h3c), [GHSA-mrwp-f3q8-3g9p](https://github.com/advisories/GHSA-mrwp-f3q8-3g9p), high) - Bumped the transitive `follow-redirects` (1.16.0 → 1.16.2, via `@sefinek/google-tts-api` → `axios`). Older versions could keep credential headers on a cross-origin redirect.
+- **`undici` fixes** ([GHSA-2m5v-pch6-74hx](https://github.com/advisories/GHSA-2m5v-pch6-74hx), [GHSA-4w7w-5xrc-9h26](https://github.com/advisories/GHSA-4w7w-5xrc-9h26) and others, high) - Bumped `undici` (7.30.0 → 7.30.1, used by `@slack/socket-mode` and `discord.js`). Fixes a TLS certificate validation bypass, cache poisoning via cross-origin redirects, and several denial-of-service bugs.
+- **Dev and test tooling** - Overrides pin `glob` (→ 14.0.3, [GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4)) and `minimatch` (→ 11.0.4, [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)), and `serialize-javascript` is bumped to 7.1.4 ([GHSA-m5mm-p8h7-m29v](https://github.com/advisories/GHSA-m5mm-p8h7-m29v)). These are only pulled in by the test tooling and are not in the production image.
+
+### Changed
+- **Dependency upgrades** - `@simplewebauthn/server` 13.3.3 → 14.1.0, `discord.js` 14.27.0 → 14.28.1, `@slack/socket-mode` 3.0.1 → 3.1.1, `@slack/web-api` 8.1.1 → 8.2.0, `openai` 7.23.0 → 7.55.0, `posthog-node` 5.53.0 → 5.66.0, `soundcraft-ui-connection` 7.0.3 → 7.1.0. Dev: `mocha` 11.8.0 → 12.0.3, `chai` 6.2.2 → 6.3.0.
+- **E2E tests** - The search/add playlist tests use the "Retro Vibes" playlist, and the first integration test track is now "Oxyz - Feel It All Tonight", since the previous picks were not reliably returned by Spotify search.
+
+### Known issues
+- `npm audit` still reports `ip` ([GHSA-2p57-rm9w-gvfp](https://github.com/advisories/GHSA-2p57-rm9w-gvfp)) through `sonos`. SlackONOS can't be affected: `sonos` only calls `ip.address()` to find the machine's own LAN address and never passes outside input to `ip`. `ip` has no patched release; removing it from `sonos` is proposed upstream in [bencevans/node-sonos#575](https://github.com/bencevans/node-sonos/pull/575).
+
+### Verification
+- npm test: 891 passing
+
 ## [2.4.0] - 2026-10-03
 
 ### Removed
