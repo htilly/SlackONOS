@@ -104,7 +104,7 @@ jobs:
 
     - name: Upload run results
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
         name: e2e-run
         path: test/e2e-run.json
@@ -126,7 +126,7 @@ jobs:
     - name: Download run results
       id: download
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
       with:
         name: e2e-run
         path: ${{ runner.temp }}/e2e-run
