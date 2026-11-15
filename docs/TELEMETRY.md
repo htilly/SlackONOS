@@ -18,6 +18,7 @@ When enabled, the following anonymous data is sent:
 - **Instance ID**: Random UUID generated on first boot and persisted in `config/config.json` (anonymous, stable identifier) - used as `distinctId`
 - **OS Platform**: e.g., `linux`, `darwin`, `win32`
 - **OS Release**: Kernel version
+- **CPU Architecture**: e.g., `x64`, `arm64`, `arm`
 - **Node Version**: e.g., `v22.21.1`
 
 ### Event: `startup`
