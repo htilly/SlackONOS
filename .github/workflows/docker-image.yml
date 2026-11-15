@@ -65,10 +65,10 @@ jobs:
       uses: actions/checkout@v6
       
     - name: Docker Setup QEMU
-      uses: docker/setup-qemu-action@v4.1.0
+      uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
             
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4.1.0
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
     - name: Log in to Docker Hub
       run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
@@ -118,7 +118,7 @@ jobs:
         fi
 
     - name: Build and push multi-platform Docker image
-      uses: docker/build-push-action@v7.2.0
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
       with:
         context: .
         file: ./docker/Dockerfile
