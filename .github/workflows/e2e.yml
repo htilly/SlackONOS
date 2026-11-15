@@ -55,7 +55,7 @@ jobs:
 
     steps:
     - name: Checkout code under test
-      uses: actions/checkout@v6
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         # Release: the tag. Push/manual: the exact commit that triggered the run
         ref: ${{ github.event.release.tag_name || github.sha }}
@@ -133,7 +133,7 @@ jobs:
 
     - name: Checkout tools
       if: steps.download.outcome == 'success'
-      uses: actions/checkout@v6
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
     - name: Setup Node.js
       if: steps.download.outcome == 'success'
