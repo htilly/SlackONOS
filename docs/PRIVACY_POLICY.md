@@ -26,7 +26,7 @@ SlackONOS stores configuration data locally on your server, including:
 If telemetry is enabled, SlackONOS may send anonymous usage data:
 - Startup and shutdown events
 - Uptime duration
-- Operating system and Node.js version
+- Operating system, CPU architecture and Node.js version
 - Release version/commit hash
 - Anonymous instance ID (random UUID)
 
