@@ -5,6 +5,15 @@ All notable changes to SlackONOS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.2] - 2026-11-15
+
+### Changed
+- **Telemetry reports CPU architecture** - Anonymous telemetry events now include `arch` (`process.arch`, e.g. `x64`, `arm64`, `arm`), documented in `docs/TELEMETRY.md` and the privacy policy. This shows how many installs still run the 32-bit ARM (`linux/arm/v7`) image, which newer Node base images no longer publish. Telemetry can still be turned off with `telemetryEnabled: false`.
+- **Dependency updates** - Switched automated dependency updates from Dependabot to Renovate.
+
+### Upgrade notes
+- None. Drop-in replacement for 2.4.1: pull the new image (or `git pull && npm ci`) and restart.
+
 ## [2.4.1] - 2026-11-14
 
 ### Security
