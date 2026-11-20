@@ -2,7 +2,7 @@
 # Keep Node 22 while release builds include linux/arm/v7; node:26-slim does not publish arm/v7.
 
 # ---- Builder stage: install production deps (native modules such as bcrypt need a toolchain)
-FROM node:22-slim AS builder
+FROM node:26-slim AS builder
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends python3 build-essential && \
@@ -18,7 +18,7 @@ RUN npm ci --omit=dev && \
     npm cache clean --force
 
 # ---- Runtime stage: clean image without build toolchain
-FROM node:22-slim AS base
+FROM node:26-slim AS base
 
 # Set the working directory for your application
 WORKDIR /app
