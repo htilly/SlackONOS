@@ -31,6 +31,7 @@ for (const file of legacyFiles) {
 }
 const os = require('os');
 const mp3Duration = require('mp3-duration');
+const realtimeTts = require('./lib/openai-realtime-tts');
 const path = require('path');
 const googleTTS = require('@sefinek/google-tts-api');
 const config = require('nconf');
@@ -875,8 +876,8 @@ function ensureConfigDefaults() {
     aiMoodMirrorEnabled: false,
     ttsProvider: 'google',
     ttsFallbackProvider: 'google',
-    openaiTtsModel: 'gpt-4o-mini-tts',
-    openaiTtsVoice: 'alloy',
+    openaiTtsModel: realtimeTts.DEFAULT_REALTIME_TTS_MODEL,
+    openaiTtsVoice: realtimeTts.DEFAULT_REALTIME_TTS_VOICE,
     openaiTtsSpeed: 1,
     openaiTtsInstructions: '',
     // Soundcraft mixer integration
@@ -2920,8 +2921,8 @@ async function _setconfig(input, channel, userName) {
 > \`aiMoodMirrorEnabled\`: ${config.get('aiMoodMirrorEnabled') === true}
 > \`ttsProvider\`: ${config.get('ttsProvider') || 'google'}
 > \`ttsFallbackProvider\`: ${config.get('ttsFallbackProvider') || 'google'}
-> \`openaiTtsModel\`: ${config.get('openaiTtsModel') || 'gpt-4o-mini-tts'}
-> \`openaiTtsVoice\`: ${config.get('openaiTtsVoice') || 'alloy'}
+> \`openaiTtsModel\`: ${config.get('openaiTtsModel') || realtimeTts.DEFAULT_REALTIME_TTS_MODEL}
+> \`openaiTtsVoice\`: ${config.get('openaiTtsVoice') || realtimeTts.DEFAULT_REALTIME_TTS_VOICE}
 > \`openaiTtsSpeed\`: ${Number(config.get('openaiTtsSpeed') || 1)}
 > \`defaultTheme\`: ${config.get('defaultTheme') || '(not set)'}
 > \`themePercentage\`: ${config.get('themePercentage') || 0}%
@@ -2940,7 +2941,7 @@ async function _setconfig(input, channel, userName) {
 *Example:* \`setconfig themePercentage 30\`
 *Example:* \`setconfig aiMoodMirrorEnabled true\`
 *Example:* \`setconfig ttsProvider openai\`
-*Example:* \`setconfig openaiTtsVoice nova\`
+*Example:* \`setconfig openaiTtsVoice marin\`
 *Example:* \`setconfig telemetryEnabled false\`
 *Example:* \`setconfig soundcraftEnabled true\`
 *Example:* \`setconfig soundcraftIp 192.168.1.100\`
@@ -2976,7 +2977,7 @@ async function _setconfig(input, channel, userName) {
     openaiTtsModel: { type: 'string', minLen: 1, maxLen: 100 },
     openaiTtsVoice: { type: 'string', minLen: 2, maxLen: 50 },
     openaiTtsInstructions: { type: 'string', minLen: 0, maxLen: 500 },
-    openaiTtsSpeed: { type: 'number', min: 0.25, max: 4 },
+    openaiTtsSpeed: { type: 'number', min: 0.25, max: 1.5 },
     defaultTheme: { type: 'string', minLen: 0, maxLen: 100 },
     telemetryEnabled: { type: 'boolean' },
     soundcraftEnabled: { type: 'boolean' },
@@ -3216,7 +3217,7 @@ function getOpenAITtsSpeed() {
   if (!Number.isFinite(speed)) {
     return 1;
   }
-  return Math.min(4, Math.max(0.25, speed));
+  return realtimeTts.clampRealtimeSpeed(speed);
 }
 
 async function generateGoogleTtsBuffer(fullTtsText) {
@@ -3232,25 +3233,34 @@ async function generateGoogleTtsBuffer(fullTtsText) {
   return Buffer.concat(audioBuffers);
 }
 
-async function generateOpenAITtsBuffer(fullTtsText) {
-  const model = String(config.get('openaiTtsModel') || 'gpt-4o-mini-tts').trim();
-  const voice = String(config.get('openaiTtsVoice') || 'alloy').trim();
-  const instructions = String(config.get('openaiTtsInstructions') || '').trim();
-  const request = {
-    model,
-    voice,
-    input: fullTtsText,
-    response_format: 'mp3',
-    speed: getOpenAITtsSpeed()
-  };
+let warnedRealtimeTtsSubstitution = '';
 
-  if (instructions && !/^tts-1(?:-hd)?$/i.test(model)) {
-    request.instructions = instructions;
+async function generateOpenAITtsBuffer(fullTtsText) {
+  const configuredModel = config.get('openaiTtsModel');
+  const configuredVoice = config.get('openaiTtsVoice');
+  const { model, replaced: replacedModel } = realtimeTts.resolveRealtimeTtsModel(configuredModel);
+  const { voice, replaced: replacedVoice } = realtimeTts.resolveRealtimeTtsVoice(configuredVoice);
+
+  const warningKey = `${replacedModel || ''}|${replacedVoice || ''}`;
+  if ((replacedModel || replacedVoice) && warnedRealtimeTtsSubstitution !== warningKey) {
+    warnedRealtimeTtsSubstitution = warningKey;
+    if (replacedModel) {
+      logger.warn(`openaiTtsModel "${replacedModel}" uses OpenAI's retired speech API (shutdown 2027-01-06); using "${model}" via the Realtime API instead. Update openaiTtsModel to silence this warning.`);
+    }
+    if (replacedVoice) {
+      logger.warn(`openaiTtsVoice "${replacedVoice}" is not available in the Realtime API; using "${voice}" instead.`);
+    }
   }
 
-  const speech = await getOpenAIClient().audio.speech.create(request);
-  const arrayBuffer = await speech.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+  const pcm = await realtimeTts.synthesizeRealtimeSpeech({
+    client: getOpenAIClient(),
+    text: fullTtsText,
+    model,
+    voice,
+    speed: getOpenAITtsSpeed(),
+    instructions: String(config.get('openaiTtsInstructions') || '').trim()
+  });
+  return realtimeTts.pcmToWav(pcm);
 }
 
 async function generateTtsBuffer(fullTtsText) {
@@ -3258,14 +3268,16 @@ async function generateTtsBuffer(fullTtsText) {
   if (provider === 'google') {
     return {
       buffer: await generateGoogleTtsBuffer(fullTtsText),
-      provider: 'google'
+      provider: 'google',
+      format: 'mp3'
     };
   }
 
   try {
     return {
       buffer: await generateOpenAITtsBuffer(fullTtsText),
-      provider: 'openai'
+      provider: 'openai',
+      format: 'wav'
     };
   } catch (err) {
     const fallbackProvider = getTtsFallbackProvider();
@@ -3277,6 +3289,7 @@ async function generateTtsBuffer(fullTtsText) {
     return {
       buffer: await generateGoogleTtsBuffer(fullTtsText),
       provider: 'google',
+      format: 'mp3',
       fallbackFrom: 'openai',
       fallbackError: err.message || String(err)
     };
@@ -3294,7 +3307,7 @@ function isLikelyChatModelId(id) {
 
 function isLikelyTtsModelId(id) {
   const modelId = String(id || '').toLowerCase();
-  return /(^tts-|tts|audio)/.test(modelId) && !/(transcribe|whisper|realtime)/.test(modelId);
+  return /(^tts-|tts|audio|realtime)/.test(modelId) && !/(transcribe|whisper|translat)/.test(modelId);
 }
 
 function filterOpenAIModelIds(modelIds, filter) {
@@ -3343,7 +3356,7 @@ async function _listOpenAIModels(input, channel, userName) {
     const message =
       `${formatModelListForSlack(modelIds, normalizedFilter)}\n\n` +
       `Current \`aiModel\`: \`${config.get('aiModel') || 'gpt-4o-mini'}\`\n` +
-      `Current \`openaiTtsModel\`: \`${config.get('openaiTtsModel') || 'gpt-4o-mini-tts'}\`\n` +
+      `Current \`openaiTtsModel\`: \`${config.get('openaiTtsModel') || realtimeTts.DEFAULT_REALTIME_TTS_MODEL}\`\n` +
       `_Try: \`aimodels tts\`, \`aimodels all\`, or \`setconfig aiModel <model-id>\`._`;
     _slackMessage(message, channel);
   } catch (err) {
@@ -3373,8 +3386,6 @@ async function _tts(input, channel) {
     return;
   }
 
-  const ttsFilePath = path.join(os.tmpdir(), 'sonos-tts.mp3');
-
   // Pick a random intro message to use in both Slack and TTS
   const introMessage = ttsMessage[Math.floor(Math.random() * ttsMessage.length)];
   // Build full TTS text with intro, longer pause (...), and the actual message
@@ -3383,7 +3394,9 @@ async function _tts(input, channel) {
   try {
     const ttsResult = await generateTtsBuffer(fullTtsText);
 
-    // Write the generated audio to file (async)
+    // Write the generated audio to file (async). OpenAI Realtime yields WAV, Google yields MP3.
+    const ttsFormat = ttsResult.format === 'wav' ? 'wav' : 'mp3';
+    const ttsFilePath = path.join(os.tmpdir(), `sonos-tts.${ttsFormat}`);
     await fs.promises.writeFile(ttsFilePath, ttsResult.buffer);
     logger.info(`TTS audio saved to: ${ttsFilePath} (provider=${ttsResult.provider})`);
     if (ttsResult.fallbackFrom) {
@@ -3391,12 +3404,14 @@ async function _tts(input, channel) {
     }
 
     // Get TTS file duration
-    const fileDuration = await new Promise((resolve, reject) => {
-      mp3Duration(ttsFilePath, (err, duration) => {
-        if (err) return reject(err);
-        resolve(duration);
+    const fileDuration = ttsFormat === 'wav'
+      ? realtimeTts.wavDurationSeconds(ttsResult.buffer)
+      : await new Promise((resolve, reject) => {
+        mp3Duration(ttsFilePath, (err, duration) => {
+          if (err) return reject(err);
+          resolve(duration);
+        });
       });
-    });
     // Convert to milliseconds and add 2 sec buffer for Sonos to advance
     const waitTime = Math.ceil(fileDuration * 1000) + 2000;
     logger.info('TTS duration: ' + fileDuration.toFixed(2) + 's, will wait ' + waitTime + 'ms before cleanup');
@@ -3410,7 +3425,7 @@ async function _tts(input, channel) {
     // TTS is only used on local network, so HTTP is sufficient
     const protocol = 'http';
     const port = webPort;
-    const uri = `${protocol}://${ipAddress}:${port}/tts.mp3?t=${Date.now()}`;
+    const uri = `${protocol}://${ipAddress}:${port}/tts.${ttsFormat}?t=${Date.now()}`;
     logger.info('Queuing TTS file from: ' + uri + ' at position ' + ttsPosition);
 
     // Queue TTS right after current track
@@ -3428,7 +3443,7 @@ async function _tts(input, channel) {
         // Find the TTS track in the queue by URI (position may have shifted since queuing)
         const queue = await sonos.getQueue();
         const items = (queue && queue.items) || [];
-        const ttsIndex = items.findIndex(item => item.uri && item.uri.includes('/tts.mp3'));
+        const ttsIndex = items.findIndex(item => item.uri && /\/tts\.(mp3|wav)/.test(item.uri));
 
         if (ttsIndex >= 0) {
           // Sonos uses 1-based indexing for removeTracksFromQueue

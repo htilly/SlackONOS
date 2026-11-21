@@ -5,6 +5,19 @@ All notable changes to SlackONOS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **OpenAI TTS now uses the Realtime API** - OpenAI shuts down `gpt-4o-mini-tts`, `tts-1` and `tts-1-hd` on 2027-01-06 ([deprecations](https://developers.openai.com/api/docs/deprecations)), and their replacement `gpt-realtime-2.1-mini` only works through the Realtime API. With `ttsProvider: openai`, speech is now generated over a short Realtime WebSocket session using the same `openaiApiKey`, and played on Sonos as WAV (`/tts.wav`). Google TTS is unchanged (`/tts.mp3`). Closes #413.
+- **Defaults** - `openaiTtsModel` defaults to `gpt-realtime-2.1-mini` and `openaiTtsVoice` to `marin`. `openaiTtsSpeed` is limited to 0.25–1.5 (the Realtime range).
+
+### Security
+- **`ip` removed** ([GHSA-2p57-rm9w-gvfp](https://github.com/advisories/GHSA-2p57-rm9w-gvfp)) - Bumped `sonos` to 1.14.4, which drops its `ip` dependency ([bencevans/node-sonos#575](https://github.com/bencevans/node-sonos/pull/575)). `npm audit` reports 0 vulnerabilities.
+
+### Upgrade notes
+- Configs that still name a retired speech model (`gpt-4o-mini-tts`, `tts-1`, `tts-1-hd`) keep working: the model is replaced with `gpt-realtime-2.1-mini` and a warning is logged. Voices only offered by the old models (`fable`, `onyx`, `nova`) fall back to `marin`.
+- Restricted OpenAI API keys need Realtime access in addition to the existing permissions.
+
 ## [2.4.2] - 2026-11-15
 
 ### Changed
