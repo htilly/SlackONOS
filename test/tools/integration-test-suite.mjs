@@ -2389,6 +2389,23 @@ const testSuiteArray = [
         adminChannelId
     ),
 
+    // Stop explicitly so the speaker is silent when the suite ends, rather
+    // than relying on flush happening to stop playback.
+    new TestCase(
+        'Admin - Stop Playback (Cleanup)',
+        'stop',
+        validators.and(
+            validators.responseCount(1, 2),
+            validators.or(
+                validators.containsText('Silence falls'),
+                validators.containsText('Playback stopped'),
+                validators.containsText('stop')
+            )
+        ),
+        3,
+        adminChannelId
+    ),
+
     new TestCase(
         'Admin - Flush Queue (Cleanup)',
         'flush',
