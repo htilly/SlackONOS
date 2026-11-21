@@ -2907,6 +2907,10 @@ async function _setconfig(input, channel, userName) {
 
   // Usage: setconfig <key> <value>
   if (!input || input.length < 3) {
+    const ttsInstructions = String(config.get('openaiTtsInstructions') || '').trim();
+    const ttsInstructionsDisplay = ttsInstructions
+      ? `${ttsInstructions.slice(0, 80)}${ttsInstructions.length > 80 ? '…' : ''}`
+      : '(default: none, reads text verbatim)';
     const currentConfig = `
 *Current Configurable Settings:*
 > \`gongLimit\`: ${gongLimit}
@@ -2924,6 +2928,7 @@ async function _setconfig(input, channel, userName) {
 > \`openaiTtsModel\`: ${config.get('openaiTtsModel') || realtimeTts.DEFAULT_REALTIME_TTS_MODEL}
 > \`openaiTtsVoice\`: ${config.get('openaiTtsVoice') || realtimeTts.DEFAULT_REALTIME_TTS_VOICE}
 > \`openaiTtsSpeed\`: ${Number(config.get('openaiTtsSpeed') || 1)}
+> \`openaiTtsInstructions\`: ${ttsInstructionsDisplay}
 > \`defaultTheme\`: ${config.get('defaultTheme') || '(not set)'}
 > \`themePercentage\`: ${config.get('themePercentage') || 0}%
 > \`telemetryEnabled\`: ${config.get('telemetryEnabled')}
@@ -2942,6 +2947,7 @@ async function _setconfig(input, channel, userName) {
 *Example:* \`setconfig aiMoodMirrorEnabled true\`
 *Example:* \`setconfig ttsProvider openai\`
 *Example:* \`setconfig openaiTtsVoice marin\`
+*Example:* \`setconfig openaiTtsInstructions calm and friendly\`
 *Example:* \`setconfig telemetryEnabled false\`
 *Example:* \`setconfig soundcraftEnabled true\`
 *Example:* \`setconfig soundcraftIp 192.168.1.100\`

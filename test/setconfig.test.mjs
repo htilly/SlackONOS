@@ -19,7 +19,7 @@ describe('Setconfig Command', function() {
     themePercentage: { type: 'number', min: 0, max: 100 },
     crossfadeDurationSeconds: { type: 'number', min: 0, max: 30 },
     queueThreadThreshold: { type: 'number', min: 1, max: 1000 },
-    openaiTtsSpeed: { type: 'number', min: 0.25, max: 4 },
+    openaiTtsSpeed: { type: 'number', min: 0.25, max: 1.5 },
     aiModel: { type: 'string', minLen: 1, maxLen: 100 },
     aiPrompt: { type: 'string', minLen: 1, maxLen: 500 },
     aiMoodMirrorEnabled: { type: 'boolean' },
@@ -390,7 +390,7 @@ describe('Setconfig Command', function() {
     it('should have reasonable openaiTtsSpeed bounds', function() {
       const def = allowedConfigs.openaiTtsSpeed;
       expect(def.min).to.equal(0.25);
-      expect(def.max).to.equal(4);
+      expect(def.max).to.equal(1.5);
     });
   });
 
