@@ -1,4 +1,12 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>htilly/renovate-config"]
+  "extends": ["github>htilly/renovate-config"],
+  "packageRules": [
+    {
+      "description": "Stay on Node 22: the release image is built for linux/arm/v7, and node:24-slim / node:26-slim do not publish arm/v7. Revisit before Node 22 EOL (2027-04-30).",
+      "matchPackageNames": ["node"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    }
+  ]
 }
