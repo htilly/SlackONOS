@@ -268,7 +268,7 @@ async function loadConfig() {
       { key: 'openaiTtsModel', label: 'OpenAI TTS Model', type: 'text', description: 'OpenAI Realtime model for TTS, e.g. gpt-realtime-2.1-mini. Legacy speech models (gpt-4o-mini-tts, tts-1) are retired by OpenAI on 2027-01-06 and are automatically replaced.' },
       { key: 'openaiTtsVoice', label: 'OpenAI TTS Voice', type: 'select', options: ['marin', 'cedar', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'], description: 'Voice used when TTS Provider is openai' },
       { key: 'openaiTtsSpeed', label: 'OpenAI TTS Speed', type: 'number', min: 0.25, max: 1.5, step: 0.05, description: 'OpenAI TTS speed from 0.25 to 1.5' },
-      { key: 'openaiTtsInstructions', label: 'OpenAI TTS Instructions', type: 'text', description: 'Optional voice direction for OpenAI TTS, e.g. calm and friendly' },
+      { key: 'openaiTtsInstructions', label: 'OpenAI TTS Instructions', type: 'text', placeholder: 'Default: none, reads text verbatim', description: 'Optional voice direction for OpenAI TTS, e.g. calm and friendly. Leave empty to use the default (text is read verbatim with no extra direction).' },
       { key: 'defaultTheme', label: 'Default Theme', type: 'text', description: 'Default music theme (e.g., lounge, club, office)' },
       { key: 'themePercentage', label: 'Theme Percentage', type: 'number', min: 0, max: 100, description: 'Percentage of theme tracks to mix in (0-100)' },
       { key: 'queueThreadThreshold', label: 'Queue Thread Threshold', type: 'number', min: 1, max: 1000, description: 'Thread queue list replies when the queue has more than this many tracks' },
@@ -334,6 +334,8 @@ function createConfigItem(item, value) {
     const finalInputType = isSensitive ? 'password' : inputType;
     if (isSensitive && !finalDisplayValue) {
       attrs.push(`placeholder="Enter ${item.label.toLowerCase()}"`);
+    } else if (item.placeholder) {
+      attrs.push(`placeholder="${escapeAttribute(item.placeholder)}"`);
     }
     inputHTML = `<input type="${finalInputType}" id="config-${item.key}" value="${escapeAttribute(finalDisplayValue)}" ${attrs.join(' ')}>`;
   }
